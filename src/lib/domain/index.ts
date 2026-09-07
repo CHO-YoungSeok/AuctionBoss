@@ -9,8 +9,12 @@ export type {
   CourtRef,
   IsoDate,
   IsoDateTime,
+  ItemChange,
+  WatchedField,
   Won,
 } from "./types";
+
+export { WATCHED_FIELDS } from "./types";
 
 export {
   CollectorConfigError,

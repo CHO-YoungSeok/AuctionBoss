@@ -45,7 +45,7 @@ describe("upsertItems", () => {
   it("신규 물건을 저장하고 first_seen_at/last_seen_at을 기록한다", () => {
     const result = repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" });
 
-    expect(result).toEqual({ inserted: 1, updated: 0 });
+    expect(result).toEqual({ inserted: 1, updated: 0, changed: 0 });
 
     const { items, total } = repo.listItems();
     expect(total).toBe(1);
@@ -71,7 +71,7 @@ describe("upsertItems", () => {
       { now: "2026-01-02T00:00:00.000Z" },
     );
 
-    expect(result).toEqual({ inserted: 0, updated: 1 });
+    expect(result).toEqual({ inserted: 0, updated: 1, changed: 1 });
 
     const { items, total } = repo.listItems();
     expect(total).toBe(1); // 중복 행이 생기지 않는다
@@ -92,21 +92,21 @@ describe("upsertItems", () => {
       makeItem({ court: "수원지방법원" }),
     ]);
 
-    expect(result).toEqual({ inserted: 4, updated: 0 });
+    expect(result).toEqual({ inserted: 4, updated: 0, changed: 0 });
     expect(repo.listItems().total).toBe(4);
   });
 
   it("한 배치 안에 같은 키가 두 번 들어와도 행은 하나이고 카운트가 정확하다", () => {
     const result = repo.upsertItems([makeItem(), makeItem({ status: "변경" })]);
 
-    expect(result).toEqual({ inserted: 1, updated: 1 });
+    expect(result).toEqual({ inserted: 1, updated: 1, changed: 1 });
     const { items, total } = repo.listItems();
     expect(total).toBe(1);
     expect(items[0]?.status).toBe("변경"); // 나중 값이 남는다
   });
 
   it("빈 배열은 아무 것도 하지 않는다", () => {
-    expect(repo.upsertItems([])).toEqual({ inserted: 0, updated: 0 });
+    expect(repo.upsertItems([])).toEqual({ inserted: 0, updated: 0, changed: 0 });
   });
 
   it("배치 전체가 한 트랜잭션이라 중간에 실패하면 아무 것도 저장되지 않는다", () => {
@@ -114,6 +114,254 @@ describe("upsertItems", () => {
 
     expect(() => repo.upsertItems([makeItem(), broken])).toThrow();
     expect(repo.listItems().total).toBe(0);
+  });
+});
+
+describe("변경 이력 (item_changes)", () => {
+  it("최초 저장 시 감시 필드별 기준점 행(old_value=NULL)을 만든다", () => {
+    repo.upsertItems(
+      [makeItem({ minBidPrice: 400_000_000, failedBidCount: 1, auctionDate: "2026-10-01", status: "진행" })],
+      { now: "2026-01-01T00:00:00.000Z" },
+    );
+    const itemId = repo.listItems().items[0]!.id;
+    const changes = repo.listItemChanges(itemId);
+
+    expect(changes).toHaveLength(4);
+    expect(changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: "minBidPrice", oldValue: null, newValue: "400000000" }),
+        expect.objectContaining({ field: "failedBidCount", oldValue: null, newValue: "1" }),
+        expect.objectContaining({ field: "auctionDate", oldValue: null, newValue: "2026-10-01" }),
+        expect.objectContaining({ field: "status", oldValue: null, newValue: "진행" }),
+      ]),
+    );
+    for (const change of changes) {
+      expect(change.itemId).toBe(itemId);
+      expect(change.changedAt).toBe("2026-01-01T00:00:00.000Z");
+    }
+  });
+
+  it("값이 NULL인 감시 필드는 기준점 행을 만들지 않는다", () => {
+    repo.upsertItems([
+      makeItem({ minBidPrice: null, failedBidCount: null, auctionDate: null, status: null }),
+    ]);
+    const itemId = repo.listItems().items[0]!.id;
+    expect(repo.listItemChanges(itemId)).toEqual([]);
+  });
+
+  it("최저가 하락과 유찰횟수 증가를 이전 값·새 값과 변경 시각으로 기록한다", () => {
+    repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" });
+    const itemId = repo.listItems().items[0]!.id;
+
+    repo.upsertItems([makeItem({ minBidPrice: 320_000_000, failedBidCount: 2 })], {
+      now: "2026-01-02T00:00:00.000Z",
+    });
+
+    const realChanges = repo.listItemChanges(itemId).filter((change) => change.oldValue !== null);
+    expect(realChanges).toHaveLength(2);
+    expect(realChanges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "minBidPrice",
+          oldValue: "400000000",
+          newValue: "320000000",
+          changedAt: "2026-01-02T00:00:00.000Z",
+        }),
+        expect.objectContaining({
+          field: "failedBidCount",
+          oldValue: "1",
+          newValue: "2",
+          changedAt: "2026-01-02T00:00:00.000Z",
+        }),
+      ]),
+    );
+  });
+
+  it("null과 값 사이의 변화도 감지한다(비교 규칙: null↔값은 변경)", () => {
+    repo.upsertItems([makeItem({ auctionDate: null })], { now: "2026-01-01T00:00:00.000Z" });
+    const itemId = repo.listItems().items[0]!.id;
+    // auctionDate가 NULL이라 기준점 행이 없다.
+    expect(repo.listItemChanges(itemId).some((c) => c.field === "auctionDate")).toBe(false);
+
+    repo.upsertItems([makeItem({ auctionDate: "2026-11-01" })], { now: "2026-01-02T00:00:00.000Z" });
+
+    const auctionDateChanges = repo
+      .listItemChanges(itemId)
+      .filter((c) => c.field === "auctionDate");
+    expect(auctionDateChanges).toEqual([
+      expect.objectContaining({ oldValue: null, newValue: "2026-11-01" }),
+    ]);
+  });
+
+  it("null과 null은 같음으로 본다(이력이 남지 않는다)", () => {
+    repo.upsertItems([makeItem({ auctionDate: null })], { now: "2026-01-01T00:00:00.000Z" });
+    const itemId = repo.listItems().items[0]!.id;
+    const baselineCount = repo.listItemChanges(itemId).length;
+
+    repo.upsertItems([makeItem({ auctionDate: null })], { now: "2026-01-02T00:00:00.000Z" });
+
+    expect(repo.listItemChanges(itemId)).toHaveLength(baselineCount);
+  });
+
+  it("가격·유찰횟수는 숫자로, 매각기일·상태는 문자열로 비교한다(값이 같으면 이력 없음)", () => {
+    repo.upsertItems(
+      [
+        makeItem({
+          minBidPrice: 400_000_000,
+          failedBidCount: 1,
+          auctionDate: "2026-10-01",
+          status: "진행",
+        }),
+      ],
+      { now: "2026-01-01T00:00:00.000Z" },
+    );
+    const itemId = repo.listItems().items[0]!.id;
+    const baselineCount = repo.listItemChanges(itemId).length;
+
+    // 값 자체는 동일 — 도메인 타입이 이미 숫자/문자열이라 재수집해도 같은 값이면 변화가 아니다.
+    const result = repo.upsertItems(
+      [
+        makeItem({
+          minBidPrice: 400_000_000,
+          failedBidCount: 1,
+          auctionDate: "2026-10-01",
+          status: "진행",
+        }),
+      ],
+      { now: "2026-01-02T00:00:00.000Z" },
+    );
+
+    expect(result).toEqual({ inserted: 0, updated: 1, changed: 0 });
+    expect(repo.listItemChanges(itemId)).toHaveLength(baselineCount);
+  });
+
+  it("스펙 시나리오: 신규 2건 + 감시 필드 변경 1건 + 무변경 3건 → {inserted:2, updated:4, changed:1}", () => {
+    repo.upsertItems(
+      [
+        makeItem({ itemNo: "1" }),
+        makeItem({ itemNo: "2" }),
+        makeItem({ itemNo: "3" }),
+        makeItem({ itemNo: "4" }),
+      ],
+      { now: "2026-01-01T00:00:00.000Z" },
+    );
+
+    const result = repo.upsertItems(
+      [
+        makeItem({ itemNo: "1", minBidPrice: 300_000_000 }), // 감시 필드 변경
+        makeItem({ itemNo: "2" }), // 무변경
+        makeItem({ itemNo: "3" }), // 무변경
+        makeItem({ itemNo: "4" }), // 무변경
+        makeItem({ itemNo: "5" }), // 신규
+        makeItem({ itemNo: "6" }), // 신규
+      ],
+      { now: "2026-01-02T00:00:00.000Z" },
+    );
+
+    expect(result).toEqual({ inserted: 2, updated: 4, changed: 1 });
+  });
+
+  /**
+   * 핵심 테스트(design.md 리스크: 이력 테이블이 무한히 커짐 방지). 값이 변하지 않은 물건을
+   * 여러 회차 반복 수집해도 이력은 최초 기준점만 유지돼야 한다 — 10분 주기 수집이
+   * 쓰레기를 쌓지 않는다는 이 변경의 핵심 보장이다.
+   */
+  it("반복 수집에서 값이 변하지 않으면 이력이 최초 기준점만으로 유지된다", () => {
+    repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" });
+    const itemId = repo.listItems().items[0]!.id;
+    const baseline = repo.listItemChanges(itemId);
+    expect(baseline).toHaveLength(4); // 감시 필드 4개 전부 non-null
+
+    for (let i = 0; i < 5; i += 1) {
+      repo.upsertItems([makeItem()], { now: `2026-01-0${2 + i}T00:00:00.000Z` });
+    }
+
+    expect(repo.listItemChanges(itemId)).toEqual(baseline); // 5회 반복 후에도 정확히 그대로
+  });
+
+  it("감시 대상이 아닌 필드(소재지)만 바뀌면 물건은 갱신되지만 이력은 남지 않는다", () => {
+    repo.upsertItems([makeItem({ address: "서울특별시 관악구 신림동 1-1" })], {
+      now: "2026-01-01T00:00:00.000Z",
+    });
+    const itemId = repo.listItems().items[0]!.id;
+    const baselineCount = repo.listItemChanges(itemId).length;
+
+    const result = repo.upsertItems([makeItem({ address: "서울특별시 관악구 신림동 2-2" })], {
+      now: "2026-01-02T00:00:00.000Z",
+    });
+
+    expect(result).toEqual({ inserted: 0, updated: 1, changed: 0 });
+    expect(repo.listItemChanges(itemId)).toHaveLength(baselineCount);
+    expect(repo.getItemById(itemId)?.address).toBe("서울특별시 관악구 신림동 2-2");
+  });
+
+  /**
+   * 원자성(design.md D3): 이력 기록이 실패하면 물건 갱신도 함께 롤백돼야 한다.
+   * `item_changes` 테이블을 지워 이력 삽입 시점에 실제 오류가 나도록 강제한다 —
+   * 물건 갱신 SQL 자체는 여전히 유효하므로, 이 실패가 트랜잭션 전체를 롤백시키는지가
+   * 정확히 이 테스트가 확인하려는 것이다.
+   */
+  it("이력 기록이 실패하면 물건 갱신도 함께 롤백된다(원자성)", () => {
+    repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" });
+    const itemId = repo.listItems().items[0]!.id;
+    const before = repo.getItemById(itemId);
+
+    db.exec("DROP TABLE item_changes");
+
+    expect(() =>
+      repo.upsertItems([makeItem({ minBidPrice: 1 })], { now: "2026-01-02T00:00:00.000Z" }),
+    ).toThrow();
+
+    // item_changes가 없어 이력 쪽은 확인할 수 없지만, 물건 쪽 갱신이 롤백됐는지는
+    // 여전히 확인할 수 있다 — 실패 전 값 그대로여야 한다.
+    expect(repo.getItemById(itemId)).toEqual(before);
+  });
+});
+
+describe("listItemChanges", () => {
+  it("시간순으로 돌려주고, 이력이 없으면 빈 배열이다", () => {
+    repo.upsertItems([
+      makeItem({ minBidPrice: null, failedBidCount: null, auctionDate: null, status: null }),
+    ]);
+    const itemId = repo.listItems().items[0]!.id;
+    expect(repo.listItemChanges(itemId)).toEqual([]);
+
+    repo.upsertItems(
+      [makeItem({ minBidPrice: 400, failedBidCount: null, auctionDate: null, status: null })],
+      { now: "2026-01-01T00:00:00.000Z" },
+    );
+    repo.upsertItems([makeItem({ minBidPrice: 300 })], { now: "2026-01-05T00:00:00.000Z" });
+    repo.upsertItems([makeItem({ minBidPrice: 200 })], { now: "2026-01-10T00:00:00.000Z" });
+
+    const minBidPriceChanges = repo
+      .listItemChanges(itemId)
+      .filter((change) => change.field === "minBidPrice");
+    expect(minBidPriceChanges.map((c) => c.changedAt)).toEqual([
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-05T00:00:00.000Z",
+      "2026-01-10T00:00:00.000Z",
+    ]);
+    expect(minBidPriceChanges.map((c) => c.newValue)).toEqual(["400", "300", "200"]);
+  });
+
+  it("다른 물건의 이력과 섞이지 않는다", () => {
+    repo.upsertItems([makeItem({ itemNo: "1" }), makeItem({ itemNo: "2" })]);
+    const [item1, item2] = repo.listItems({ pageSize: 10 }).items;
+
+    repo.upsertItems([makeItem({ itemNo: "1", minBidPrice: 1 })], {
+      now: "2026-01-02T00:00:00.000Z",
+    });
+
+    const changes1 = repo.listItemChanges(item1!.id);
+    const changes2 = repo.listItemChanges(item2!.id);
+    expect(changes1.every((c) => c.itemId === item1!.id)).toBe(true);
+    expect(changes2.every((c) => c.itemId === item2!.id)).toBe(true);
+    expect(changes1.some((c) => c.oldValue !== null)).toBe(true); // item1만 실제 변경이 있다
+    expect(changes2.some((c) => c.oldValue !== null)).toBe(false);
+  });
+
+  it("존재하지 않는 물건 id도 오류 없이 빈 배열을 돌려준다", () => {
+    expect(repo.listItemChanges(999_999)).toEqual([]);
   });
 });
 
@@ -222,6 +470,58 @@ describe("listItems", () => {
     expect(explicitUndefined).toEqual(bare);
     // 기본 정렬은 sort를 명시한 것과 같은 결과여야 한다(정렬식 하나로 합쳐진 것 확인).
     expect(repo.listItems({ pageSize: 10, sort: "auctionDate", direction: "asc" })).toEqual(bare);
+  });
+});
+
+/**
+ * "최근 변경 시각" 스칼라 서브쿼리 컬럼 (design.md D6). WHERE/ORDER BY/total에는 관여하지
+ * 않고 표시용 컬럼만 하나 늘어나야 한다 — 그래서 별도 describe로 두고, 기존 필터·정렬
+ * 테스트(위 "listItems", 아래 "listItems 필터·정렬")는 이 항목을 몰라도 그대로 통과해야 한다.
+ */
+describe("listItems — lastChangedAt (design.md D6)", () => {
+  it("실제 변경 이력이 있으면 가장 최근 변경 시각을, 없으면 null을 준다", () => {
+    repo.upsertItems([makeItem({ itemNo: "1" }), makeItem({ itemNo: "2" })], {
+      now: "2026-01-01T00:00:00.000Z",
+    });
+    repo.upsertItems([makeItem({ itemNo: "1", minBidPrice: 1 })], {
+      now: "2026-01-05T00:00:00.000Z",
+    });
+
+    const { items } = repo.listItems({ pageSize: 10 });
+    const item1 = items.find((item) => item.itemNo === "1")!;
+    const item2 = items.find((item) => item.itemNo === "2")!;
+
+    expect(item1.lastChangedAt).toBe("2026-01-05T00:00:00.000Z");
+    expect(item2.lastChangedAt).toBeNull(); // 기준점뿐이라 실제 변경이 없다
+  });
+
+  it("여러 번 변경됐으면 가장 최근 시각을 준다", () => {
+    repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" });
+    repo.upsertItems([makeItem({ minBidPrice: 1 })], { now: "2026-01-05T00:00:00.000Z" });
+    repo.upsertItems([makeItem({ minBidPrice: 2 })], { now: "2026-01-10T00:00:00.000Z" });
+
+    const item = repo.listItems({ pageSize: 10 }).items[0]!;
+    expect(item.lastChangedAt).toBe("2026-01-10T00:00:00.000Z");
+  });
+
+  it("기준점 행(old_value IS NULL)은 최근 변경 시각 계산에서 제외된다", () => {
+    repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" });
+    const item = repo.listItems({ pageSize: 10 }).items[0]!;
+    expect(item.lastChangedAt).toBeNull(); // 방금 만든 기준점만 있고 실제 변경은 없다
+  });
+
+  it("이 컬럼이 있어도 필터·정렬·total은 그대로다(회귀 방어)", () => {
+    repo.upsertItems([
+      makeItem({ itemNo: "1", auctionDate: "2026-03-03" }),
+      makeItem({ itemNo: "2", auctionDate: "2026-01-01" }),
+    ]);
+    repo.upsertItems([makeItem({ itemNo: "1", minBidPrice: 1 })], {
+      now: "2026-02-01T00:00:00.000Z",
+    });
+
+    const result = repo.listItems({ sort: "auctionDate", direction: "asc", pageSize: 10 });
+    expect(result.total).toBe(2);
+    expect(result.items.map((item) => item.itemNo)).toEqual(["2", "1"]); // 정렬 순서는 그대로
   });
 });
 

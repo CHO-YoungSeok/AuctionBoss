@@ -1,23 +1,23 @@
 ## 1. 이력 스키마와 도메인 타입
 
-- [ ] 1.1 `src/lib/domain`에 감시 대상 필드 목록 상수(`WATCHED_FIELDS`: minBidPrice, failedBidCount, auctionDate, status)와 `ItemChange` 타입(itemId, field, oldValue, newValue, changedAt)을 정의 — `tsc --noEmit` 통과
-- [ ] 1.2 `item_changes` 테이블을 스키마에 추가(item_id FK CASCADE, field, old_value, new_value, changed_at, 인덱스 `(item_id, changed_at DESC)`)하고, **기존 DB 파일에 재적용되는 마이그레이션 경로**를 이전 change와 같은 방식으로 테스트
+- [x] 1.1 `src/lib/domain`에 감시 대상 필드 목록 상수(`WATCHED_FIELDS`: minBidPrice, failedBidCount, auctionDate, status)와 `ItemChange` 타입(itemId, field, oldValue, newValue, changedAt)을 정의 — `tsc --noEmit` 통과
+- [x] 1.2 `item_changes` 테이블을 스키마에 추가(item_id FK CASCADE, field, old_value, new_value, changed_at, 인덱스 `(item_id, changed_at DESC)`)하고, **기존 DB 파일에 재적용되는 마이그레이션 경로**를 이전 change와 같은 방식으로 테스트
 
 ## 2. 변경 감지
 
-- [ ] 2.1 `upsertItems`의 사전 SELECT를 감시 필드까지 읽도록 확장하고, 새 값과 다른 필드만 이력 행을 추가 — 전체가 기존 단일 트랜잭션 안에서 일어나는 것을 확인
-- [ ] 2.2 비교 규칙 구현: null↔null은 같음, null↔값은 변경, 숫자 필드는 숫자로·날짜/상태는 문자열로 비교 — 각 경우를 테스트로 고정
-- [ ] 2.3 최초 저장 시 감시 필드별 기준점 행(`old_value = NULL`) 생성. 값이 NULL인 필드는 기준점을 만들지 않음 — 테스트로 고정
-- [ ] 2.4 반환값을 `{inserted, updated, changed}`로 확장. `changed`는 감시 필드가 실제로 바뀐 **물건 수**(이력 행 수 아님)이고 기준점은 세지 않음 — 스펙 시나리오(신규 2, 갱신 4, 변경 1)를 그대로 테스트로 작성
-- [ ] 2.5 값이 변하지 않은 물건을 여러 회차 반복 upsert했을 때 이력이 기준점 1건으로 유지되는 것을 테스트 (10분마다 쓰레기가 쌓이지 않음을 보장하는 핵심 테스트)
-- [ ] 2.6 감시 대상이 아닌 필드(소재지 등)만 바뀐 경우 물건은 갱신되고 이력은 안 생기는 것을 테스트
-- [ ] 2.7 이력 기록 실패 시 물건 갱신도 함께 롤백되는 것을 테스트(원자성)
+- [x] 2.1 `upsertItems`의 사전 SELECT를 감시 필드까지 읽도록 확장하고, 새 값과 다른 필드만 이력 행을 추가 — 전체가 기존 단일 트랜잭션 안에서 일어나는 것을 확인
+- [x] 2.2 비교 규칙 구현: null↔null은 같음, null↔값은 변경, 숫자 필드는 숫자로·날짜/상태는 문자열로 비교 — 각 경우를 테스트로 고정
+- [x] 2.3 최초 저장 시 감시 필드별 기준점 행(`old_value = NULL`) 생성. 값이 NULL인 필드는 기준점을 만들지 않음 — 테스트로 고정
+- [x] 2.4 반환값을 `{inserted, updated, changed}`로 확장. `changed`는 감시 필드가 실제로 바뀐 **물건 수**(이력 행 수 아님)이고 기준점은 세지 않음 — 스펙 시나리오(신규 2, 갱신 4, 변경 1)를 그대로 테스트로 작성
+- [x] 2.5 값이 변하지 않은 물건을 여러 회차 반복 upsert했을 때 이력이 기준점 1건으로 유지되는 것을 테스트 (10분마다 쓰레기가 쌓이지 않음을 보장하는 핵심 테스트)
+- [x] 2.6 감시 대상이 아닌 필드(소재지 등)만 바뀐 경우 물건은 갱신되고 이력은 안 생기는 것을 테스트
+- [x] 2.7 이력 기록 실패 시 물건 갱신도 함께 롤백되는 것을 테스트(원자성)
 
 ## 3. 이력 조회
 
-- [ ] 3.1 `listItemChanges(itemId)`를 구현(시간순, 없으면 빈 배열)하고 테스트 작성
-- [ ] 3.2 `GET /api/items/[id]/changes`를 구현: 이력 배열 반환, 이력 없으면 빈 배열, 없는 물건은 404 — 실제 서버 curl로 세 경우 확인
-- [ ] 3.3 목록 쿼리에 "최근 변경 시각"을 스칼라 서브쿼리 컬럼으로 추가(`WHERE`/`ORDER BY`/`total`에 관여하지 않아야 함) — 기존 필터·정렬 테스트가 전부 그대로 통과하는 것을 확인
+- [x] 3.1 `listItemChanges(itemId)`를 구현(시간순, 없으면 빈 배열)하고 테스트 작성
+- [x] 3.2 `GET /api/items/[id]/changes`를 구현: 이력 배열 반환, 이력 없으면 빈 배열, 없는 물건은 404 — 실제 서버 curl로 세 경우 확인
+- [x] 3.3 목록 쿼리에 "최근 변경 시각"을 스칼라 서브쿼리 컬럼으로 추가(`WHERE`/`ORDER BY`/`total`에 관여하지 않아야 함) — 기존 필터·정렬 테스트가 전부 그대로 통과하는 것을 확인
 
 ## 4. 재분석 대상 선정
 

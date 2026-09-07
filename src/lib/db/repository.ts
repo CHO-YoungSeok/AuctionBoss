@@ -13,14 +13,17 @@ import {
   DEFAULT_SORT_DIRECTION,
   DEFAULT_SORT_KEY,
   MAX_PAGE_SIZE,
+  WATCHED_FIELDS,
   type Analysis,
   type AnalysisInput,
   type AuctionItem,
   type AuctionItemInput,
   type IsoDateTime,
+  type ItemChange,
   type ItemQuery,
   type SortDirection,
   type SortKey,
+  type WatchedField,
 } from "@/lib/domain";
 
 import { getDb, type Db } from "./client";
@@ -34,6 +37,11 @@ export { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE };
 export interface UpsertItemsResult {
   inserted: number;
   updated: number;
+  /**
+   * 감시 대상 필드가 실제로 바뀐 **물건 수**(변경 이력 행 수가 아니다). 기준점 행은
+   * 세지 않는다 — 신규는 이미 `inserted`가 센다 (design.md D3).
+   */
+  changed: number;
 }
 
 /**
@@ -74,7 +82,25 @@ interface AnalysisRow {
   analyzed_at: string;
 }
 
-function toAuctionItem(row: ItemRow): AuctionItem {
+interface ItemChangeRow {
+  id: number;
+  item_id: number;
+  field: string;
+  old_value: string | null;
+  new_value: string | null;
+  changed_at: string;
+}
+
+/** `listItems`의 서브쿼리 컬럼까지 포함한 행. 기본 `ItemRow`를 확장한다(design.md D6). */
+interface ItemListRow extends ItemRow {
+  last_changed_at: string | null;
+}
+
+/**
+ * `lastChangedAt`은 `listItems`의 스칼라 서브쿼리로만 채워진다(design.md D6). 다른 조회
+ * 경로(`getItemById` 등)는 이 값을 계산하지 않으므로 인자를 생략하면 null이 된다.
+ */
+function toAuctionItem(row: ItemRow, lastChangedAt: string | null = null): AuctionItem {
   return {
     id: row.id,
     court: row.court,
@@ -89,6 +115,7 @@ function toAuctionItem(row: ItemRow): AuctionItem {
     status: row.status,
     firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at,
+    lastChangedAt,
   };
 }
 
@@ -101,6 +128,94 @@ function toAnalysis(row: AnalysisRow): Analysis {
     promptVersion: row.prompt_version,
     analyzedAt: row.analyzed_at,
   };
+}
+
+function toItemChange(row: ItemChangeRow): ItemChange {
+  return {
+    id: row.id,
+    itemId: row.item_id,
+    field: row.field as WatchedField,
+    oldValue: row.old_value,
+    newValue: row.new_value,
+    changedAt: row.changed_at,
+  };
+}
+
+/** 감시 필드 하나의 비교 방식. 가격·유찰횟수는 숫자로, 매각기일·상태는 문자열로 (design.md D3). */
+type FieldComparisonKind = "numeric" | "string";
+
+interface WatchedFieldDef {
+  field: WatchedField;
+  kind: FieldComparisonKind;
+  /** 기존 행(snake_case)에서 이 필드의 저장 전 값을 읽는 컬럼 키. */
+  column: "min_bid_price" | "failed_bid_count" | "auction_date" | "status";
+}
+
+const WATCHED_FIELD_DEFS: readonly WatchedFieldDef[] = [
+  { field: "minBidPrice", kind: "numeric", column: "min_bid_price" },
+  { field: "failedBidCount", kind: "numeric", column: "failed_bid_count" },
+  { field: "auctionDate", kind: "string", column: "auction_date" },
+  { field: "status", kind: "string", column: "status" },
+];
+
+// WATCHED_FIELDS(도메인 상수)와 WATCHED_FIELD_DEFS(저장소 내부 비교 규칙)가 같은 필드
+// 집합을 가리키는지 모듈 로드 시점에 확인한다 — 둘 중 하나만 고치는 실수를 조용히
+// 넘어가지 않기 위함.
+if (
+  WATCHED_FIELD_DEFS.length !== WATCHED_FIELDS.length ||
+  WATCHED_FIELD_DEFS.some((def, index) => def.field !== WATCHED_FIELDS[index])
+) {
+  throw new Error("WATCHED_FIELD_DEFS가 WATCHED_FIELDS와 어긋났습니다");
+}
+
+type FieldValue = string | number | null;
+
+/** null↔null은 같음, null↔값은 변경. 숫자 필드는 숫자로, 그 외는 문자열로 비교한다. */
+function watchedValuesEqual(a: FieldValue, b: FieldValue, kind: FieldComparisonKind): boolean {
+  if (a === null && b === null) return true;
+  if (a === null || b === null) return false;
+  return kind === "numeric" ? Number(a) === Number(b) : String(a) === String(b);
+}
+
+/** 이력 테이블(TEXT 컬럼)에 저장할 형태로 바꾼다. null은 null 그대로. */
+function toHistoryValue(value: FieldValue): string | null {
+  return value === null ? null : String(value);
+}
+
+interface DetectedChange {
+  field: WatchedField;
+  oldValue: string | null;
+  newValue: string | null;
+}
+
+/** 기존 행과 새 값 사이에 실제로 다른 감시 필드만 골라낸다. */
+function detectWatchedChanges(
+  existing: Pick<ItemRow, "min_bid_price" | "failed_bid_count" | "auction_date" | "status">,
+  incoming: AuctionItemInput,
+): DetectedChange[] {
+  const changes: DetectedChange[] = [];
+  for (const def of WATCHED_FIELD_DEFS) {
+    const oldRaw: FieldValue = existing[def.column];
+    const newRaw: FieldValue = incoming[def.field];
+    if (!watchedValuesEqual(oldRaw, newRaw, def.kind)) {
+      changes.push({ field: def.field, oldValue: toHistoryValue(oldRaw), newValue: toHistoryValue(newRaw) });
+    }
+  }
+  return changes;
+}
+
+/**
+ * 최초 저장 시의 기준점 행(design.md D2). `old_value = NULL`로 고정되고, 값이 NULL인
+ * 필드는 기준점 자체를 만들지 않는다(양쪽 다 NULL인 무의미한 행을 막기 위함).
+ */
+function baselineWatchedChanges(incoming: AuctionItemInput): DetectedChange[] {
+  const changes: DetectedChange[] = [];
+  for (const def of WATCHED_FIELD_DEFS) {
+    const value: FieldValue = incoming[def.field];
+    if (value === null) continue;
+    changes.push({ field: def.field, oldValue: null, newValue: toHistoryValue(value) });
+  }
+  return changes;
 }
 
 const ANALYZED_EXISTS = "EXISTS (SELECT 1 FROM analyses WHERE analyses.item_id = items.id)";
@@ -237,13 +352,28 @@ export interface AuctionRepository {
   listUsageTypes(): string[];
   insertAnalysis(input: AnalysisInput, options?: { now?: IsoDateTime }): Analysis;
   getLatestAnalysis(itemId: number): Analysis | null;
+  /** 물건의 변경 이력을 시간순으로 돌려준다. 이력이 없으면 빈 배열이다(오류가 아니다). */
+  listItemChanges(itemId: number): ItemChange[];
+}
+
+interface ExistingItemRow {
+  id: number;
+  min_bid_price: number | null;
+  failed_bid_count: number | null;
+  auction_date: string | null;
+  status: string | null;
 }
 
 export function createRepository(db: Db): AuctionRepository {
+  // 감시 필드까지 함께 읽어 변경 감지에 쓴다(design.md D3) — 별도 SELECT를 추가하지 않고
+  // 기존에 있던 사전 조회 하나를 확장한다.
   const selectItemIdByKey = db.prepare<
     { court: string; caseNo: string; itemNo: string },
-    { id: number }
-  >(`SELECT id FROM items WHERE court = @court AND case_no = @caseNo AND item_no = @itemNo`);
+    ExistingItemRow
+  >(`
+    SELECT id, min_bid_price, failed_bid_count, auction_date, status
+    FROM items WHERE court = @court AND case_no = @caseNo AND item_no = @itemNo
+  `);
 
   // 자연 키 충돌 시 갱신 대상은 "소스에서 다시 온 값"과 last_seen_at 뿐이다.
   // first_seen_at은 SET 목록에 없으므로 어떤 경우에도 덮어써지지 않는다.
@@ -272,6 +402,15 @@ export function createRepository(db: Db): AuctionRepository {
     `SELECT * FROM items WHERE id = @id`,
   );
 
+  const insertItemChange = db.prepare(`
+    INSERT INTO item_changes (item_id, field, old_value, new_value, changed_at)
+    VALUES (@itemId, @field, @oldValue, @newValue, @changedAt)
+  `);
+
+  const selectItemChanges = db.prepare<{ itemId: number }, ItemChangeRow>(`
+    SELECT * FROM item_changes WHERE item_id = @itemId ORDER BY changed_at ASC, id ASC
+  `);
+
   const insertAnalysisStmt = db.prepare(`
     INSERT INTO analyses (item_id, body, model, prompt_version, analyzed_at)
     VALUES (@itemId, @body, @model, @promptVersion, @analyzedAt)
@@ -298,15 +437,18 @@ export function createRepository(db: Db): AuctionRepository {
     (items: AuctionItemInput[], now: string): UpsertItemsResult => {
       let inserted = 0;
       let updated = 0;
+      let changed = 0;
       for (const item of items) {
-        // 먼저 존재 여부를 본다. ON CONFLICT는 신규/갱신 모두 changes=1이라
-        // 그것만으로는 구분할 수 없고, 같은 배치 안의 중복 키도 정확히 세야 한다.
+        // 먼저 존재 여부와 감시 필드의 저장 전 값을 본다. ON CONFLICT는 신규/갱신 모두
+        // changes=1이라 그것만으로는 구분할 수 없고, 같은 배치 안의 중복 키도 정확히
+        // 세야 한다. 감시 필드 비교는 upsertItem이 덮어쓰기 **전**에만 가능하다
+        // (design.md D3) — 그래서 별도 쿼리로 빼지 않고 이 사전 SELECT를 확장했다.
         const existing = selectItemIdByKey.get({
           court: item.court,
           caseNo: item.caseNo,
           itemNo: item.itemNo,
         });
-        upsertItem.run({
+        const info = upsertItem.run({
           court: item.court,
           caseNo: item.caseNo,
           itemNo: item.itemNo,
@@ -319,16 +461,41 @@ export function createRepository(db: Db): AuctionRepository {
           status: item.status,
           now,
         });
-        if (existing) updated += 1;
-        else inserted += 1;
+
+        if (existing) {
+          updated += 1;
+          const diffs = detectWatchedChanges(existing, item);
+          if (diffs.length > 0) changed += 1;
+          for (const diff of diffs) {
+            insertItemChange.run({
+              itemId: existing.id,
+              field: diff.field,
+              oldValue: diff.oldValue,
+              newValue: diff.newValue,
+              changedAt: now,
+            });
+          }
+        } else {
+          inserted += 1;
+          const itemId = Number(info.lastInsertRowid);
+          for (const baseline of baselineWatchedChanges(item)) {
+            insertItemChange.run({
+              itemId,
+              field: baseline.field,
+              oldValue: baseline.oldValue,
+              newValue: baseline.newValue,
+              changedAt: now,
+            });
+          }
+        }
       }
-      return { inserted, updated };
+      return { inserted, updated, changed };
     },
   );
 
   return {
     upsertItems(items, options) {
-      if (items.length === 0) return { inserted: 0, updated: 0 };
+      if (items.length === 0) return { inserted: 0, updated: 0, changed: 0 };
       return upsertBatch(items, options?.now ?? new Date().toISOString());
     },
 
@@ -348,9 +515,17 @@ export function createRepository(db: Db): AuctionRepository {
         db
           .prepare<BindParams, { total: number }>(`SELECT COUNT(*) AS total FROM items ${filter.where}`)
           .get(filter.params)?.total ?? 0;
+      // "최근 변경 시각"은 스칼라 서브쿼리 컬럼으로만 추가한다(design.md D6) — WHERE/ORDER
+      // BY/total(위)에는 관여하지 않아 기존 필터·정렬 로직을 건드리지 않는다. 기준점 행
+      // (old_value IS NULL)은 실제 변경이 아니므로 여기서 제외한다.
       const rows = db
-        .prepare<BindParams, ItemRow>(
-          `SELECT * FROM items ${filter.where} ${orderBy} LIMIT @limit OFFSET @offset`,
+        .prepare<BindParams, ItemListRow>(
+          `SELECT items.*, (
+             SELECT MAX(item_changes.changed_at)
+             FROM item_changes
+             WHERE item_changes.item_id = items.id AND item_changes.old_value IS NOT NULL
+           ) AS last_changed_at
+           FROM items ${filter.where} ${orderBy} LIMIT @limit OFFSET @offset`,
         )
         .all({
           ...filter.params,
@@ -358,7 +533,12 @@ export function createRepository(db: Db): AuctionRepository {
           offset: (page - 1) * pageSize,
         });
 
-      return { items: rows.map(toAuctionItem), total, page, pageSize };
+      return {
+        items: rows.map((row) => toAuctionItem(row, row.last_changed_at)),
+        total,
+        page,
+        pageSize,
+      };
     },
 
     getItemById(id) {
@@ -368,6 +548,10 @@ export function createRepository(db: Db): AuctionRepository {
 
     listUsageTypes() {
       return selectUsageTypes.all().map((row) => row.usage_type);
+    },
+
+    listItemChanges(itemId) {
+      return selectItemChanges.all({ itemId }).map(toItemChange);
     },
 
     insertAnalysis(input, options) {
@@ -437,4 +621,8 @@ export function insertAnalysis(
 
 export function getLatestAnalysis(itemId: number): Analysis | null {
   return getRepository().getLatestAnalysis(itemId);
+}
+
+export function listItemChanges(itemId: number): ItemChange[] {
+  return getRepository().listItemChanges(itemId);
 }

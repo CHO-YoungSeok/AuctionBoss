@@ -54,6 +54,43 @@ export interface AuctionItem extends AuctionItemInput {
   firstSeenAt: IsoDateTime;
   /** 최종 수집 시각. 같은 물건을 다시 수집할 때마다 갱신된다. */
   lastSeenAt: IsoDateTime;
+  /**
+   * 감시 대상 필드의 가장 최근 **실제** 변경 시각(기준점 제외). null이면 변경 이력이 없다는
+   * 뜻이다(기존 DB의 물건일 수도, 아직 한 번도 안 바뀐 물건일 수도 있다 — design.md D6은
+   * 이 둘을 같게 다루라고 한다).
+   *
+   * `listItems`가 스칼라 서브쿼리로 채우는 값이다(design.md D6) — 목록 쿼리의
+   * 필터·정렬·total에는 관여하지 않는다. optional인 이유: 이 값을 계산하지 않는 다른
+   * 생성 경로(`getItemById`, 이 필드를 모르는 기존 워커·테스트 코드의 객체 리터럴)가
+   * 매번 명시적으로 null을 채워 넣게 강제하지 않기 위함이다 — `getItemById`는 그래도
+   * 항상 null을 채운다.
+   */
+  lastChangedAt?: IsoDateTime | null;
+}
+
+/**
+ * 값이 바뀌면 변경 이력을 남기는 감시 대상 필드 (design.md D1).
+ * `field`에는 이 이름을 그대로 쓴다 — DB 컬럼명(snake_case)이 아니다.
+ */
+export const WATCHED_FIELDS = ["minBidPrice", "failedBidCount", "auctionDate", "status"] as const;
+export type WatchedField = (typeof WATCHED_FIELDS)[number];
+
+/**
+ * 물건의 감시 대상 필드 변경 이력 한 건 (design.md D1).
+ *
+ * `oldValue`/`newValue`는 항상 문자열이다 — 가격(숫자)·매각기일·상태(문자열)가 섞여 있어
+ * DB에도 TEXT로 저장되고(D1), 표시 계층이 `field`를 보고 해석한다.
+ *
+ * `oldValue === null`이면 최초 저장 시의 기준점 행이지 실제 변경이 아니다(design.md D2) —
+ * 표시 계층은 이 값으로 기준점과 실제 변경을 구별해야 한다.
+ */
+export interface ItemChange {
+  id: number;
+  itemId: number;
+  field: WatchedField;
+  oldValue: string | null;
+  newValue: string | null;
+  changedAt: IsoDateTime;
 }
 
 /** 분석 결과 저장 요청. */

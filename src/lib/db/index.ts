@@ -10,6 +10,7 @@ export {
   getLatestAnalysis,
   getRepository,
   insertAnalysis,
+  listItemChanges,
   listItems,
   listUsageTypes,
   upsertItems,

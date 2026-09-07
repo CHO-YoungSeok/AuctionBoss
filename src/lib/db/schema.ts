@@ -44,4 +44,18 @@ CREATE TABLE IF NOT EXISTS analyses (
 
 -- 미분석 필터(EXISTS 서브쿼리)와 최신 분석 조회에 모두 쓰인다.
 CREATE INDEX IF NOT EXISTS idx_analyses_item_id ON analyses (item_id, analyzed_at DESC);
+
+-- 감시 대상 필드(field는 도메인 필드명, DB 컬럼명이 아니다) 변경 이력 (design.md D1).
+-- old_value가 NULL이면 최초 저장 시의 기준점 행이지 실제 변경이 아니다 (design.md D2).
+CREATE TABLE IF NOT EXISTS item_changes (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id    INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+  field      TEXT    NOT NULL,
+  old_value  TEXT,
+  new_value  TEXT,
+  changed_at TEXT    NOT NULL
+);
+
+-- 물건별 이력 조회(시간순)와 목록의 "최근 변경 시각" 서브쿼리(design.md D6)에 쓰인다.
+CREATE INDEX IF NOT EXISTS idx_item_changes_item_id ON item_changes (item_id, changed_at DESC);
 `;
