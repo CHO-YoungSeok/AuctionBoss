@@ -12,7 +12,13 @@
 import Link from "next/link";
 
 import { getRepository } from "@/lib/db";
-import { hasActiveFilters, parseItemQueryLenient } from "@/lib/domain";
+import {
+  DEFAULT_SORT_DIRECTION,
+  DEFAULT_SORT_KEY,
+  chooseEmptyState,
+  hasActiveFilters,
+  parseItemQueryLenient,
+} from "@/lib/domain";
 
 import { ItemFilterForm } from "./_components/item-filter-form";
 import {
@@ -49,10 +55,13 @@ export default async function ItemListPage({
   const filtersActive = hasActiveFilters(query);
   // "DB 자체가 비었다"와 "필터에 걸리는 물건이 없다"는 사용자에게 전혀 다른 상황이라
   // 안내 문구도, 다음에 할 행동(수집을 기다린다 / 조건을 고친다)도 달라야 한다.
-  const databaseEmpty = total === 0 && !filtersActive;
+  // 판단 자체는 순수 함수(`chooseEmptyState`)에 있다 — JSX 조건문에 흩어 두면
+  // 필터 하나가 판단 기준에서 빠져도(예: `analyzed`가 그랬다) 테스트가 잡아내지 못한다.
+  const emptyState = chooseEmptyState(total, query);
+  const databaseEmpty = emptyState.kind === "emptyDatabase";
 
-  const sortLabel = SORT_LABELS[query.sort ?? "auctionDate"];
-  const directionLabel = DIRECTION_LABELS[query.direction ?? "asc"];
+  const sortLabel = SORT_LABELS[query.sort ?? DEFAULT_SORT_KEY];
+  const directionLabel = DIRECTION_LABELS[query.direction ?? DEFAULT_SORT_DIRECTION];
 
   return (
     <main className="page">

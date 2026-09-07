@@ -10,6 +10,8 @@
  */
 import {
   DEFAULT_PAGE_SIZE,
+  DEFAULT_SORT_DIRECTION,
+  DEFAULT_SORT_KEY,
   MAX_PAGE_SIZE,
   type Analysis,
   type AnalysisInput,
@@ -118,12 +120,11 @@ const SORT_EXPRESSIONS: Record<SortKey, string> = {
   failedBidCount: "items.failed_bid_count",
 };
 
-/** 생략 시 기존 동작(매각기일 오름차순)과 같은 SQL이 나오도록 기본값을 둔다. */
-const DEFAULT_SORT: SortKey = "auctionDate";
-const DEFAULT_DIRECTION: SortDirection = "asc";
-
 function orderByClause(sort: SortKey | undefined, direction: SortDirection | undefined): string {
-  const key = sort ?? DEFAULT_SORT;
+  // 생략 시 기존 동작(매각기일 오름차순)과 같은 SQL이 나오도록 기본값을 쓴다.
+  // 기본값 자체는 도메인(`DEFAULT_SORT_KEY`/`DEFAULT_SORT_DIRECTION`)에 있다 — 여기·페이지·
+  // 폼이 각자 하드코딩하면 하나만 바꿔도 나머지와 어긋난다.
+  const key = sort ?? DEFAULT_SORT_KEY;
   // `hasOwnProperty`로 확인하는 이유: 타입 밖(JS 호출자)에서 `"constructor"` 같은 값이 오면
   // 단순 인덱싱은 프로토타입의 함수를 돌려주고 그게 SQL 문자열에 끼어들 수 있다.
   const expr = Object.prototype.hasOwnProperty.call(SORT_EXPRESSIONS, key)
@@ -131,7 +132,7 @@ function orderByClause(sort: SortKey | undefined, direction: SortDirection | und
     : undefined;
   if (typeof expr !== "string") throw new Error(`지원하지 않는 sort 값: ${String(sort)}`);
 
-  const dir = direction ?? DEFAULT_DIRECTION;
+  const dir = direction ?? DEFAULT_SORT_DIRECTION;
   if (dir !== "asc" && dir !== "desc") {
     throw new Error(`지원하지 않는 direction 값: ${String(direction)}`);
   }
@@ -228,18 +229,6 @@ function normalizePageSize(pageSize: number | undefined): number {
   return Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(pageSize)));
 }
 
-/** SQL 문장 캐시 상한. 필터 조합 수는 유한하지만 용도 개수만큼 SQL이 달라지므로 둔다. */
-const MAX_CACHED_STATEMENTS = 64;
-
-function cachedStatement<S>(cache: Map<string, S>, sql: string, prepare: (sql: string) => S): S {
-  const existing = cache.get(sql);
-  if (existing !== undefined) return existing;
-  if (cache.size >= MAX_CACHED_STATEMENTS) cache.clear();
-  const prepared = prepare(sql);
-  cache.set(sql, prepared);
-  return prepared;
-}
-
 export interface AuctionRepository {
   upsertItems(items: AuctionItemInput[], options?: { now?: IsoDateTime }): UpsertItemsResult;
   listItems(query?: ItemQuery): ListItemsResult;
@@ -305,13 +294,6 @@ export function createRepository(db: Db): AuctionRepository {
     ORDER BY usage_type
   `);
 
-  // 필터 조합마다 SQL이 달라져 전부 미리 준비할 수는 없다. 값이 전부 바인딩이므로 같은
-  // 조합이면 SQL 문자열이 완전히 같고, 그때는 준비된 문장을 재사용한다.
-  const prepareCount = (sql: string) => db.prepare<BindParams, { total: number }>(sql);
-  const prepareSelect = (sql: string) => db.prepare<BindParams, ItemRow>(sql);
-  const countCache = new Map<string, ReturnType<typeof prepareCount>>();
-  const selectCache = new Map<string, ReturnType<typeof prepareSelect>>();
-
   const upsertBatch = db.transaction(
     (items: AuctionItemInput[], now: string): UpsertItemsResult => {
       let inserted = 0;
@@ -356,24 +338,25 @@ export function createRepository(db: Db): AuctionRepository {
       const filter = buildFilter(query);
       const orderBy = orderByClause(query.sort, query.direction);
 
+      // 필터 조합마다 SQL이 달라져 문장을 미리 준비해 둘 수 없다 — 그때그때 `db.prepare`한다.
+      // 현재 규모(수백 건, 페이지당 요청)에서 `db.prepare` 자체의 비용은 무시할 만큼 작다
+      // (design.md 비목표: 이 규모에서 캐시가 아끼는 시간보다 캐시 자체의 코드·상태가
+      // 더 비싸다). 필터·정렬 조합이 늘어 이게 실제로 측정 가능한 병목이 되면 그때
+      // 다시 캐시를 검토한다.
       // 전체 건수는 목록과 **같은 WHERE**로 센다 — 필터 적용 후 건수여야 페이지네이션이 맞는다.
-      const count = cachedStatement(
-        countCache,
-        `SELECT COUNT(*) AS total FROM items ${filter.where}`,
-        prepareCount,
-      );
-      const select = cachedStatement(
-        selectCache,
-        `SELECT * FROM items ${filter.where} ${orderBy} LIMIT @limit OFFSET @offset`,
-        prepareSelect,
-      );
-
-      const total = count.get(filter.params)?.total ?? 0;
-      const rows = select.all({
-        ...filter.params,
-        limit: pageSize,
-        offset: (page - 1) * pageSize,
-      });
+      const total =
+        db
+          .prepare<BindParams, { total: number }>(`SELECT COUNT(*) AS total FROM items ${filter.where}`)
+          .get(filter.params)?.total ?? 0;
+      const rows = db
+        .prepare<BindParams, ItemRow>(
+          `SELECT * FROM items ${filter.where} ${orderBy} LIMIT @limit OFFSET @offset`,
+        )
+        .all({
+          ...filter.params,
+          limit: pageSize,
+          offset: (page - 1) * pageSize,
+        });
 
       return { items: rows.map(toAuctionItem), total, page, pageSize };
     },

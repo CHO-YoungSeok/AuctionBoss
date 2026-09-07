@@ -16,6 +16,8 @@ import Link from "next/link";
 
 import {
   DEFAULT_PAGE_SIZE,
+  DEFAULT_SORT_DIRECTION,
+  DEFAULT_SORT_KEY,
   SORT_DIRECTIONS,
   SORT_KEYS,
   hasActiveFilters,
@@ -24,10 +26,6 @@ import {
 
 import { DIRECTION_LABELS, SORT_LABELS } from "../_lib/format";
 import { ITEM_LIST_PATH } from "../_lib/item-query-url";
-
-/** 저장소·파서의 기본값과 같은 값. 폼이 아무 정렬도 고르지 않은 상태를 만들지 않는다. */
-const DEFAULT_SORT = SORT_KEYS[0];
-const DEFAULT_DIRECTION = SORT_DIRECTIONS[0];
 
 export function ItemFilterForm({
   query,
@@ -121,7 +119,7 @@ export function ItemFilterForm({
         </label>
         <label className="filter-field">
           <span>정렬 기준</span>
-          <select name="sort" defaultValue={query.sort ?? DEFAULT_SORT}>
+          <select name="sort" defaultValue={query.sort ?? DEFAULT_SORT_KEY}>
             {SORT_KEYS.map((key) => (
               <option key={key} value={key}>
                 {SORT_LABELS[key]}
@@ -131,7 +129,7 @@ export function ItemFilterForm({
         </label>
         <label className="filter-field">
           <span>정렬 방향</span>
-          <select name="dir" defaultValue={query.direction ?? DEFAULT_DIRECTION}>
+          <select name="dir" defaultValue={query.direction ?? DEFAULT_SORT_DIRECTION}>
             {SORT_DIRECTIONS.map((direction) => (
               <option key={direction} value={direction}>
                 {DIRECTION_LABELS[direction]}
