@@ -36,10 +36,19 @@ const analysisConfigSchema = z.object({
   intervalMs: z.number().int().positive(),
 });
 
+// add-collection-observability design.md D6/1.3: 다른 설정 필드와 동일하게, 없거나
+// 잘못된 값이면 기본값으로 조용히 넘어가지 않고 즉시 throw한다. "기본 1000/3"은 배포되는
+// config/collector.json 파일 자체의 값이지, 로더가 채우는 기본값이 아니다.
+const observabilityConfigSchema = z.object({
+  maxRunsPerWorker: z.number().int().positive(),
+  staleAfterIntervals: z.number().int().positive(),
+});
+
 export const collectorConfigSchema = z.object({
   scope: collectScopeSchema,
   intervalMs: z.number().int().positive(),
   analysis: analysisConfigSchema,
+  observability: observabilityConfigSchema,
 });
 
 // zod 스키마와 수기로 쓴 도메인 타입이 어긋나면 컴파일 시점에 잡는다(양방향 확인).

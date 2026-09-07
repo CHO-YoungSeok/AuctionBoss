@@ -13,5 +13,9 @@
     "maxReanalysisPerRun": 2,
     "reanalysisCooldownHours": 24,
     "intervalMs": 600000
+  },
+  "observability": {
+    "maxRunsPerWorker": 1000,
+    "staleAfterIntervals": 3
   }
 }

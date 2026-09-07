@@ -33,6 +33,8 @@ describe("loadCollectorConfig", () => {
     expect(config.analysis.maxItemsPerRun).toBeGreaterThan(0);
     expect(config.analysis.maxReanalysisPerRun).toBeGreaterThan(0);
     expect(config.analysis.reanalysisCooldownHours).toBeGreaterThanOrEqual(0);
+    expect(config.observability.maxRunsPerWorker).toBeGreaterThan(0);
+    expect(config.observability.staleAfterIntervals).toBeGreaterThan(0);
   });
 
   it("reanalysisCooldownHours가 없거나 잘못된 값이면 기본값으로 조용히 넘어가지 않고 throw한다(코드 리뷰 finding 3)", () => {
@@ -91,11 +93,60 @@ describe("loadCollectorConfig", () => {
           reanalysisCooldownHours: 0,
           intervalMs: 600000,
         },
+        observability: { maxRunsPerWorker: 1000, staleAfterIntervals: 3 },
       }),
     );
     expect(
       loadCollectorConfig({ configPath: zero, reload: true }).analysis.reanalysisCooldownHours,
     ).toBe(0);
+  });
+
+  it("observability.maxRunsPerWorker/staleAfterIntervals이 없거나 잘못된 값이면 throw한다(add-collection-observability design.md D6)", () => {
+    const baseConfig = {
+      scope: { courts: [{ name: "서울중앙지방법원", courtCode: "" }] },
+      intervalMs: 600000,
+      analysis: {
+        maxItemsPerRun: 5,
+        maxReanalysisPerRun: 2,
+        reanalysisCooldownHours: 24,
+        intervalMs: 600000,
+      },
+    };
+
+    const missing = writeConfig(JSON.stringify(baseConfig));
+    expect(() => loadCollectorConfig({ configPath: missing, reload: true })).toThrow(
+      /observability/,
+    );
+
+    const zero = writeConfig(
+      JSON.stringify({
+        ...baseConfig,
+        observability: { maxRunsPerWorker: 0, staleAfterIntervals: 3 },
+      }),
+    );
+    expect(() => loadCollectorConfig({ configPath: zero, reload: true })).toThrow(
+      /maxRunsPerWorker/,
+    );
+
+    const negative = writeConfig(
+      JSON.stringify({
+        ...baseConfig,
+        observability: { maxRunsPerWorker: 1000, staleAfterIntervals: -1 },
+      }),
+    );
+    expect(() => loadCollectorConfig({ configPath: negative, reload: true })).toThrow(
+      /staleAfterIntervals/,
+    );
+
+    const notInt = writeConfig(
+      JSON.stringify({
+        ...baseConfig,
+        observability: { maxRunsPerWorker: "천 개", staleAfterIntervals: 3 },
+      }),
+    );
+    expect(() => loadCollectorConfig({ configPath: notInt, reload: true })).toThrow(
+      /maxRunsPerWorker/,
+    );
   });
 
   it("maxReanalysisPerRun이 없거나 잘못된 값이면 기본값으로 조용히 넘어가지 않고 throw한다(design.md D5)", () => {

@@ -52,6 +52,23 @@ describe("openDatabase", () => {
     }
   });
 
+  it("worker_runs·인덱스를 만든다(add-collection-observability)", () => {
+    const db = openDatabase(path.join(workDir, "auctionboss.db"));
+    try {
+      const names = db
+        .prepare<[], { name: string }>(
+          "SELECT name FROM sqlite_master WHERE type IN ('table','index') ORDER BY name",
+        )
+        .all()
+        .map((row) => row.name);
+
+      expect(names).toContain("worker_runs");
+      expect(names).toContain("idx_worker_runs_worker_started_at");
+    } finally {
+      db.close();
+    }
+  });
+
   it("두 번 열어도 스키마 생성이 실패하지 않는다(IF NOT EXISTS)", () => {
     const dbPath = path.join(workDir, "auctionboss.db");
     const first = openDatabase(dbPath);
@@ -356,6 +373,108 @@ describe("openDatabase", () => {
         newValue: null,
         kind: "change",
       });
+    } finally {
+      upgraded.close();
+    }
+  });
+
+  /**
+   * 마이그레이션 경로 확인(4, add-collection-observability): `worker_runs` 테이블이
+   * 추가되기 **직전** 스키마(이 change 이전의 최신 스키마 — items/analyses/item_changes와
+   * `item_changes.kind` 컬럼까지는 있지만 worker_runs는 없다)로 만든 기존 DB 파일을 새
+   * 코드로 열었을 때, 오류 없이 새 테이블·인덱스만 추가되고 기존 물건 데이터가 보존되는지
+   * 확인한다. `CREATE TABLE IF NOT EXISTS`만으로 충분한 경우라 client.ts에 별도
+   * `migrate*` 함수는 필요 없다(item_changes 테이블이 처음 추가됐을 때와 같은 경로).
+   */
+  it("worker_runs 테이블 추가 전 스키마로 만든 기존 DB 파일에 새 테이블이 그대로 적용된다", () => {
+    const PRE_WORKER_RUNS_SCHEMA_SQL = `
+      CREATE TABLE IF NOT EXISTS items (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        court             TEXT    NOT NULL,
+        case_no           TEXT    NOT NULL,
+        item_no           TEXT    NOT NULL,
+        address           TEXT,
+        usage_type        TEXT,
+        appraisal_price   INTEGER,
+        min_bid_price     INTEGER,
+        auction_date      TEXT,
+        failed_bid_count  INTEGER,
+        status            TEXT,
+        first_seen_at     TEXT    NOT NULL,
+        last_seen_at      TEXT    NOT NULL,
+        UNIQUE (court, case_no, item_no)
+      );
+      CREATE INDEX IF NOT EXISTS idx_items_auction_date ON items (auction_date);
+      CREATE INDEX IF NOT EXISTS idx_items_usage_type ON items (usage_type);
+      CREATE INDEX IF NOT EXISTS idx_items_min_bid_price ON items (min_bid_price);
+      CREATE TABLE IF NOT EXISTS analyses (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id        INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+        body           TEXT    NOT NULL,
+        model          TEXT,
+        prompt_version TEXT    NOT NULL,
+        analyzed_at    TEXT    NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_analyses_item_id ON analyses (item_id, analyzed_at DESC);
+      CREATE TABLE IF NOT EXISTS item_changes (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id    INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+        field      TEXT    NOT NULL,
+        old_value  TEXT,
+        new_value  TEXT,
+        changed_at TEXT    NOT NULL,
+        kind       TEXT    NOT NULL DEFAULT 'change'
+      );
+      CREATE INDEX IF NOT EXISTS idx_item_changes_item_id ON item_changes (item_id, changed_at DESC);
+    `;
+
+    const dbPath = path.join(workDir, "pre-worker-runs.db");
+    const legacy = new Database(dbPath);
+    legacy.exec(PRE_WORKER_RUNS_SCHEMA_SQL);
+    legacy
+      .prepare(
+        `INSERT INTO items (court, case_no, item_no, usage_type, min_bid_price,
+                            first_seen_at, last_seen_at)
+         VALUES ('서울중앙지방법원', '2025타경1', '1', '아파트', 400000000,
+                 '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+      )
+      .run();
+    const legacyTables = legacy
+      .prepare<[], { name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all()
+      .map((row) => row.name);
+    legacy.close();
+
+    // 사전 조건: 옛 DB에는 worker_runs가 없다.
+    expect(legacyTables).not.toContain("worker_runs");
+
+    // 새 코드로 다시 열기 = 마이그레이션. 던지지 않아야 한다.
+    const upgraded = openDatabase(dbPath);
+    try {
+      const names = upgraded
+        .prepare<[], { name: string }>(
+          "SELECT name FROM sqlite_master WHERE type IN ('table', 'index')",
+        )
+        .all()
+        .map((row) => row.name);
+      expect(names).toContain("worker_runs");
+      expect(names).toContain("idx_worker_runs_worker_started_at");
+
+      // 기존 물건 데이터가 그대로 남아 있다.
+      const repo = createRepository(upgraded);
+      const result = repo.listItems({ pageSize: 10 });
+      expect(result.total).toBe(1);
+      expect(result.items[0]?.caseNo).toBe("2025타경1");
+
+      // 새로 추가된 테이블에 정상적으로 쓰고 읽을 수 있다.
+      upgraded
+        .prepare(
+          `INSERT INTO worker_runs (worker, started_at, outcome, created_at)
+           VALUES ('collector', '2026-01-01T00:00:00.000Z', 'running', '2026-01-01T00:00:00.000Z')`,
+        )
+        .run();
+      const runs = upgraded.prepare("SELECT * FROM worker_runs").all();
+      expect(runs).toHaveLength(1);
     } finally {
       upgraded.close();
     }

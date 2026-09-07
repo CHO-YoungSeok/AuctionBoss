@@ -65,4 +65,31 @@ CREATE TABLE IF NOT EXISTS item_changes (
 
 -- 물건별 이력 조회(시간순)와 목록의 "최근 변경 시각" 서브쿼리(design.md D6)에 쓰인다.
 CREATE INDEX IF NOT EXISTS idx_item_changes_item_id ON item_changes (item_id, changed_at DESC);
+
+-- 수집·분석 워커의 실행 회차 기록 (add-collection-observability design.md D1).
+--
+-- worker: 'collector' | 'analyzer'. 테이블을 둘로 나누지 않는다 — 상태 화면·조회·집계·
+-- 보관 정리 로직이 완전히 동일하고, 나누면 같은 코드를 두 번 쓰게 된다.
+-- outcome: 'running' | 'success' | 'failed' | 'blocked' | 'skipped'. 시작 시 'running'
+-- 행을 만들고(startRun) 종료 시 같은 행을 갱신한다(finishRun) — 워커가 회차 도중 죽어도
+-- 회차의 존재 자체는 남아야 "죽었다"는 사실을 감추지 않는다.
+-- error_kind: 오류 클래스 이름(예: RobotDetectedError) 또는 skipped의 사유(overlap/backoff).
+-- detail: 워커별로 다른 수치를 담는 JSON 텍스트(표시용). items_changed는 그중 "실제 변경된
+-- 물건 수"만 집계용으로 따로 둔 컬럼이다 — JSON 안에 있으면 SQL로 합산할 수 없기 때문이다.
+-- 이 둘의 값은 항상 같아야 하고, 그 동기화는 finishRun 한 곳에서만 이뤄진다(design.md 위험).
+CREATE TABLE IF NOT EXISTS worker_runs (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  worker        TEXT    NOT NULL,
+  started_at    TEXT    NOT NULL,
+  finished_at   TEXT,
+  outcome       TEXT    NOT NULL,
+  error_kind    TEXT,
+  error_message TEXT,
+  detail        TEXT,
+  items_changed INTEGER,
+  created_at    TEXT    NOT NULL
+);
+
+-- 워커별 최신순 조회(상태 화면·목록 API·보관 정리)에 쓰인다(design.md D1/D6).
+CREATE INDEX IF NOT EXISTS idx_worker_runs_worker_started_at ON worker_runs (worker, started_at DESC);
 `;

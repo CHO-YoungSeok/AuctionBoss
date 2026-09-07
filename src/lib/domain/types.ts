@@ -162,10 +162,111 @@ export interface AnalysisConfig {
   intervalMs: number;
 }
 
+/** `config/collector.json`의 observability 절 (add-collection-observability design.md D6). */
+export interface ObservabilityConfig {
+  /**
+   * 워커별 최대 회차 기록 보존 건수. 이 건수를 넘으면 오래된 기록부터 정리된다
+   * (design.md D6). 기간이 아니라 건수로 두는 이유: 주기를 바꿔도 상한이 곧 최대 행
+   * 수라는 의미가 흔들리지 않는다.
+   */
+  maxRunsPerWorker: number;
+  /**
+   * 상태 판정(design.md D5)에서 "오래 방치됨"으로 볼 배수. 마지막 성공(또는 마지막
+   * 기록)이 워커의 기대 주기(`intervalMs`) × 이 값보다 오래되면 `stale`로 판정한다.
+   */
+  staleAfterIntervals: number;
+}
+
 /** `config/collector.json` 전체. */
 export interface CollectorConfig {
   scope: CollectScope;
   /** 수집 주기(ms) */
   intervalMs: number;
   analysis: AnalysisConfig;
+  observability: ObservabilityConfig;
+}
+
+// ---------------------------------------------------------------------------
+// 실행 회차 관측 (add-collection-observability, design.md D1/D5)
+// ---------------------------------------------------------------------------
+
+/** 회차를 기록하는 워커 종류. */
+export const WORKER_KINDS = ["collector", "analyzer"] as const;
+export type WorkerKind = (typeof WORKER_KINDS)[number];
+
+/**
+ * 회차 결과 구분(design.md D1). `blocked`를 `failed`의 하위가 아니라 별도 값으로 둔다 —
+ * 스펙이 구별을 MUST로 요구하고, 화면·집계에서 따로 취급해야 한다.
+ */
+export const RUN_OUTCOMES = ["running", "success", "failed", "blocked", "skipped"] as const;
+export type RunOutcome = (typeof RUN_OUTCOMES)[number];
+
+/**
+ * `skipped` 회차의 사유. `error_kind` 컬럼에 그대로 들어간다(design.md D1) — 별 컬럼을
+ * 만들 만한 정보량이 아니라는 판단.
+ */
+export const SKIP_REASONS = ["overlap", "backoff"] as const;
+export type SkipReason = (typeof SKIP_REASONS)[number];
+
+/** collector 회차의 표시용 수치(design.md D1) — `detail` JSON에 그대로 저장된다. */
+export interface CollectorRunDetail {
+  /** 이번 회차가 대상으로 삼은 법원 이름들. */
+  targetCourts: string[];
+  /** 요청한 페이지 수. */
+  pagesRequested: number;
+  /** 소스에서 가져온 물건 수. */
+  itemsFetched: number;
+  inserted: number;
+  updated: number;
+  /**
+   * 감시 대상 필드가 실제로 바뀐 물건 수. `worker_runs.items_changed` 컬럼(집계용)과
+   * 항상 같은 값이어야 한다 — 두 값의 동기화는 `finishRun` 한 곳에서만 이뤄진다
+   * (design.md D1 risk, 코드 리뷰 대상).
+   */
+  changed: number;
+}
+
+/** analyzer 회차의 표시용 수치(design.md D1) — `detail` JSON에 그대로 저장된다. */
+export interface AnalyzerRunDetail {
+  /** 신규 분석 건수. */
+  newCount: number;
+  /** 재분석 건수. */
+  reanalysisCount: number;
+  succeeded: number;
+  failed: number;
+}
+
+/** 워커별로 다른 `detail` JSON의 형태. `worker` 컬럼 값으로 어느 쪽인지 구별한다. */
+export type WorkerRunDetail = CollectorRunDetail | AnalyzerRunDetail;
+
+/** `worker_runs` 테이블의 회차 한 건(design.md D1). */
+export interface WorkerRun {
+  id: number;
+  worker: WorkerKind;
+  startedAt: IsoDateTime;
+  /** 아직 끝나지 않은(`outcome: "running"`) 회차는 null이다. */
+  finishedAt: IsoDateTime | null;
+  outcome: RunOutcome;
+  /** 오류 클래스 이름(예: `RobotDetectedError`) 또는 `skipped`의 사유(`overlap`/`backoff`). */
+  errorKind: string | null;
+  errorMessage: string | null;
+  detail: WorkerRunDetail | null;
+  /**
+   * 집계용 컬럼(design.md D1). `detail`이 collector 형태면 `detail.changed`와 항상 같은
+   * 값이고, analyzer 회차나 detail이 없는 회차는 null이다.
+   */
+  itemsChanged: number | null;
+}
+
+/** `getWorkerStatus`가 판정하는 상태(design.md D5). */
+export const WORKER_STATUS_STATES = ["ok", "blocked", "failed", "stale"] as const;
+export type WorkerStatusState = (typeof WORKER_STATUS_STATES)[number];
+
+/** 워커의 현재 상태 판정 결과(design.md D5). 기록에서 매번 도출되고 저장되지 않는다. */
+export interface WorkerStatus {
+  state: WorkerStatusState;
+  /** 가장 최근 성공 회차의 종료 시각. 성공 회차가 없으면 null. */
+  lastSuccessAt: IsoDateTime | null;
+  /** 가장 최근 회차(결과와 무관, `running`/`skipped` 포함). 기록이 전혀 없으면 null. */
+  lastRun: WorkerRun | null;
 }

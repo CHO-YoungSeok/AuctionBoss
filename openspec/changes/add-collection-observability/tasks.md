@@ -1,22 +1,22 @@
 ## 1. 스키마와 도메인 타입
 
-- [ ] 1.1 `src/lib/domain`에 `WorkerKind`(collector/analyzer), `RunOutcome`(running/success/failed/blocked/skipped), `WorkerRun` 타입과 워커별 `detail` 형태를 정의 — `tsc --noEmit` 통과
-- [ ] 1.2 `worker_runs` 테이블을 스키마에 추가(worker, started_at, finished_at, outcome, error_kind, error_message, detail JSON, 집계용 items_changed, 인덱스 `(worker, started_at DESC)`)하고 **기존 DB 파일에 재적용되는 마이그레이션 경로**를 기존 방식대로 테스트
-- [ ] 1.3 `config/collector.json`에 보관 상한(`observability.maxRunsPerWorker`, 기본 1000)과 상태 판정 배수(`observability.staleAfterIntervals`, 기본 3)를 추가하고 zod 스키마·로더에 반영, 잘못된 값은 조용히 기본값으로 넘어가지 않고 실패하는 것을 확인
+- [x] 1.1 `src/lib/domain`에 `WorkerKind`(collector/analyzer), `RunOutcome`(running/success/failed/blocked/skipped), `WorkerRun` 타입과 워커별 `detail` 형태를 정의 — `tsc --noEmit` 통과
+- [x] 1.2 `worker_runs` 테이블을 스키마에 추가(worker, started_at, finished_at, outcome, error_kind, error_message, detail JSON, 집계용 items_changed, 인덱스 `(worker, started_at DESC)`)하고 **기존 DB 파일에 재적용되는 마이그레이션 경로**를 기존 방식대로 테스트
+- [x] 1.3 `config/collector.json`에 보관 상한(`observability.maxRunsPerWorker`, 기본 1000)과 상태 판정 배수(`observability.staleAfterIntervals`, 기본 3)를 추가하고 zod 스키마·로더에 반영, 잘못된 값은 조용히 기본값으로 넘어가지 않고 실패하는 것을 확인
 
 ## 2. 기록 저장소
 
-- [ ] 2.1 `startRun(worker)`와 `finishRun(runId, {outcome, errorKind, errorMessage, detail})`를 구현. 시작 시 `running` 행을 만들고 종료 시 갱신 — 워커가 회차 도중 죽어도 회차의 존재가 남는 것을 테스트로 확인
-- [ ] 2.2 `recordSkippedRun(worker, reason)`을 구현(시작·종료가 같은 순간이라 한 번에 기록)하고 테스트
-- [ ] 2.3 `detail` JSON과 집계용 `items_changed` 컬럼을 **한 함수에서만** 쓰게 하고, 두 값이 어긋나지 않는 것을 테스트로 고정(design 위험 항목)
-- [ ] 2.4 보관 상한 정리를 기록 시점에 수행하도록 구현하고, 상한을 넘겨 기록했을 때 오래된 것만 삭제되고 최근 것이 보존되는 것을 테스트
-- [ ] 2.5 `listWorkerRuns({worker, outcome, page, pageSize})`(최신순, 필터, 페이지네이션)와 `summarizeRuns({worker, since})`(성공률·차단 횟수·누적 변경 건수)를 구현하고 테스트
+- [x] 2.1 `startRun(worker)`와 `finishRun(runId, {outcome, errorKind, errorMessage, detail})`를 구현. 시작 시 `running` 행을 만들고 종료 시 갱신 — 워커가 회차 도중 죽어도 회차의 존재가 남는 것을 테스트로 확인
+- [x] 2.2 `recordSkippedRun(worker, reason)`을 구현(시작·종료가 같은 순간이라 한 번에 기록)하고 테스트
+- [x] 2.3 `detail` JSON과 집계용 `items_changed` 컬럼을 **한 함수에서만** 쓰게 하고, 두 값이 어긋나지 않는 것을 테스트로 고정(design 위험 항목)
+- [x] 2.4 보관 상한 정리를 기록 시점에 수행하도록 구현하고, 상한을 넘겨 기록했을 때 오래된 것만 삭제되고 최근 것이 보존되는 것을 테스트
+- [x] 2.5 `listWorkerRuns({worker, outcome, page, pageSize})`(최신순, 필터, 페이지네이션)와 `summarizeRuns({worker, since})`(성공률·차단 횟수·누적 변경 건수)를 구현하고 테스트
 
 ## 3. 상태 판정
 
-- [ ] 3.1 `getWorkerStatus(worker)`를 design D5의 판정 순서대로 구현하고, 기대 주기는 설정에서 읽도록 함 — 하드코딩하지 않을 것
-- [ ] 3.2 판정 순서를 테스트로 고정: 기록 없음→stale / 오래된 성공→stale / **오래된 running→stale**(finishRun 실패로 고아가 된 회차가 정상으로 보이면 안 됨) / 최근 blocked→blocked / 최근 failed→failed / 그 외 ok
-- [ ] 3.3 `skipped` 회차가 상태 판정에서 최근 회차로 취급되지 않는 것을 테스트(중첩 건너뜀은 정상 동작이므로 ok를 blocked로 바꿔서는 안 됨)
+- [x] 3.1 `getWorkerStatus(worker)`를 design D5의 판정 순서대로 구현하고, 기대 주기는 설정에서 읽도록 함 — 하드코딩하지 않을 것
+- [x] 3.2 판정 순서를 테스트로 고정: 기록 없음→stale / 오래된 성공→stale / **오래된 running→stale**(finishRun 실패로 고아가 된 회차가 정상으로 보이면 안 됨) / 최근 blocked→blocked / 최근 failed→failed / 그 외 ok
+- [x] 3.3 `skipped` 회차가 상태 판정에서 최근 회차로 취급되지 않는 것을 테스트(중첩 건너뜀은 정상 동작이므로 ok를 blocked로 바꿔서는 안 됨)
 
 ## 4. 워커 연동
 

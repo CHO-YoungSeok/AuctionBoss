@@ -2,8 +2,10 @@ export type {
   Analysis,
   AnalysisConfig,
   AnalysisInput,
+  AnalyzerRunDetail,
   AuctionItem,
   AuctionItemInput,
+  CollectorRunDetail,
   CollectScope,
   CollectorConfig,
   CourtRef,
@@ -11,11 +13,25 @@ export type {
   IsoDateTime,
   ItemChange,
   ItemChangeKind,
+  ObservabilityConfig,
+  RunOutcome,
+  SkipReason,
   WatchedField,
+  WorkerKind,
+  WorkerRun,
+  WorkerRunDetail,
+  WorkerStatus,
+  WorkerStatusState,
   Won,
 } from "./types";
 
-export { WATCHED_FIELDS } from "./types";
+export {
+  RUN_OUTCOMES,
+  SKIP_REASONS,
+  WATCHED_FIELDS,
+  WORKER_KINDS,
+  WORKER_STATUS_STATES,
+} from "./types";
 
 export {
   CollectorConfigError,
