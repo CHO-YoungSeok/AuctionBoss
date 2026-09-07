@@ -603,3 +603,86 @@ page 1(40행) 분포: `R` 24행 / `A` 16행. §3의 주소 선택 규칙을 그�
   차단으로 오판하면 1시간 백오프에 잘못 들어가기 때문이다.
 - 요청 바디에 `srchInfo: {}`를 포함한다. 프론트는 안 보내지만 §2.1의 "실제로 성공한
   요청"에 들어 있었고, 필수 여부가 분리 검증되지 않았으므로 성공 사례를 재현한다.
+
+---
+
+## 10. 물건 상세 화면 조사 (2026-09-07, 요청 2회)
+
+목록 응답만 쓰는 현재 구현을 넘어 상세 데이터를 가져올 수 있는지 판단하기 위한 조사.
+정적 화면 정의 XML만 GET 했고 검색 API는 호출하지 않았다. 차단 징후 없었다.
+
+### 10.1 상세 엔드포인트 — **CONFIRMED** (XML 실물)
+
+§6.2 row 8의 추정이 **정확히 일치했다.**
+
+```
+POST /pgj/pgj15B/selectAuctnCsSrchRslt.on
+요청 (dma_srchGdsDtlSrch): { csNo, cortOfcCd, dspslGdsSeq, pgmId, srchInfo }
+응답 바인딩: data.dma_result
+```
+
+`dma_result`의 키 구성 (**CONFIRMED**, `PGJ15BM01.xml` L56-71):
+`csBaseInfo`(사건기본정보), `dstrtDemnInfo`(배당요구종기일), `dspslGdsDxdyInfo`(매각물건정보),
+`picDvsIndvdCnt`/`csPicLst`(사진), `gdsDspslDxdyLst`(매각기일), `gdsDspslObjctLst`(매각목적물),
+`rgltLandLstAll`(대지권토지), `bldSdtrDtlLstAll`(건물표제부), `gdsNotSugtBldLsstAll`(제시외건물),
+`gdsRletStLtnoLstAll`(부동산소재지번), `aeeWevlMnpntLst`(감정평가요항표).
+
+### 10.2 사진은 상세 응답에 base64로 이미 들어 있다 — **DERIVED** (신뢰도 높음)
+
+`csPicLst[i].picFile`이 이미지 URL이 아니라 **base64 PNG 원본**이다.
+`PGJ15BM01.xml` L577: `setSrc("data:image/png;base64," + csPicLst[i].picFile)`.
+
+→ **사진을 받기 위한 추가 요청이 필요 없다.** 확대 팝업(`PGJ15BP06.xml`)도 이미 받은
+데이터를 다시 보여주는 UI일 뿐 재조회하지 않는다(L1408-1424).
+실제 응답을 받아본 것은 아니므로 엄밀히 DERIVED이나, 코드가 명확한 문자열 조합이다.
+
+### 10.3 권리관계·임차인·등기 데이터는 **없다** — **CONFIRMED (부재)**
+
+`PGJ15BM01.xml` 전체에 임대차/전입/확정일자/가압류/근저당/선순위/말소기준을 담는
+`dlt_*`/`dma_*`가 **하나도 없다.** 관련된 것은 `dstrtDemnInfo`(배당요구종기일) 단일 날짜값뿐.
+"등기기록 열람" 버튼은 인터넷등기소 연계 **유료 외부 서비스** 팝업이며 JSON API가 아니다
+(L2629 라벨에 명시).
+
+**함의**: 경매 판단의 핵심인 권리분석 데이터를 이 소스로는 구조화된 형태로 얻을 수 없다.
+AI 분석 품질에 이 소스만으로는 넘을 수 없는 상한이 있다. 필요하면 완전히 다른 데이터
+소스(등기소 유료 API 등)를 찾아야 한다.
+
+### 10.4 첨부 문서 — 각각 별도 호출이고 위험이 더 크다
+
+- **감정평가서**: `POST /pgj/pgj15B/selectAeeWevlInfo.on`
+  요청 `{cortOfcCd, cortSptNm, csNo, auctnInfOriginDvsCd, dspslDxdyYmd, pgmId, ordTsCnt}`,
+  응답 `dma_ordTsIndvdAeeWevlInf` 안에 `pdfUrl`(실제 PDF 주소)이 있다 (**CONFIRMED**, `PGJ15BP03.xml`).
+- **현황조사서**: `/pgj/ui/pgj100/PGJ15BP01.xml` (요청 안 해봄, **UNVERIFIED**)
+- **매각물건명세서**: PDF를 직접 주지 않고 `POST /pgj/pgj15B/insertDspslGdsSpecArtcWdrwInf.on`
+  응답의 `encParam`/`url`로 **외부 "소송문서뷰어"를 새 창으로 연다** (L1650-1666, **CONFIRMED** 소스상).
+  암호화 파라미터(`encParam`, `pspTkn`, `pspSid`) 처리가 필요해 이 사이트 API 스펙만으로는
+  구현 불가능할 가능성이 높다.
+
+**★ 경고 (CONFIRMED — 코드 주석 원문)**: `PGJ15BP03.xml` 헤더에
+```
+2026.04.02.   강은숙   [26A-PGJ-0014] 현황조사서, 감정평가서 로봇차단솔루션 적용되게 개선
+```
+→ 이 두 문서 엔드포인트는 검색 API보다 **더 최근에, 별도로** 안티봇이 강화됐다.
+검색 API 기준으로 잡은 레이트리밋이 여기에도 안전하다는 보장이 없다.
+실제 임계값은 **UNVERIFIED**(이번 조사에서 POST 호출은 하지 않았다).
+
+### 10.5 요청 수 재계산 (§6.1의 실측 차단 임계: 5분에 15회 미만)
+
+| 시나리오 | 물건당 | 회차당(물건 389건) |
+|---|---|---|
+| 목록만 (현재 구현) | 0 | 13 |
+| 상세 + 사진 | **+1** | **402** (임계의 약 27배) |
+| + 감정평가서(JSON+PDF) | +2 | 800+ |
+| + 현황조사서 | +1 이상 | — |
+| + 매각물건명세서 | 미확정 + 외부 시스템 | — |
+| 권리관계 | **불가능** | — |
+
+### 10.6 판단
+
+- **상세 + 사진은 현실적이다** — 물건당 1요청이므로, **수집 주기와 완전히 분리된 저속 큐**
+  (물건당 수십 초 간격, 이미 가져온 물건은 재요청 안 함)로는 운용 가능하다.
+  10분 주기 회차 안에 넣으면 즉시 차단된다.
+- **감정평가서·현황조사서·매각물건명세서·권리관계는 권장하지 않는다.** 앞의 둘은 전용
+  로봇차단이 더 강하고, 매각물건명세서는 외부 시스템이며, 권리관계는 애초에 존재하지 않는다.
+- 감정평가서를 반드시 넣어야 한다면 **하루 이상 간격을 두고 `selectAeeWevlInfo.on`을 딱 1회만
+  호출해 그 엔드포인트만의 차단 임계를 실측**하는 저강도 조사가 선행돼야 한다.
