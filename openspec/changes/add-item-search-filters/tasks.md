@@ -1,16 +1,16 @@
 ## 1. 쿼리 타입과 파서
 
-- [ ] 1.1 `src/lib/domain`에 `SortKey`/`SortDirection` 리터럴 유니언과 `ItemQuery` 타입을 정의하고, URL 파라미터를 `ItemQuery`로 변환하는 zod 스키마 + 파서를 한 곳에 작성 — API와 페이지가 같은 파서를 쓸 수 있게 export하고 `tsc --noEmit` 통과 확인
-- [ ] 1.2 파서 단위 테스트: `usage` 쉼표 다중값, 가격 한쪽만 지정, 빈 문자열 파라미터 무시, 허용되지 않은 `sort` 값 거부, 파라미터 전부 없을 때 기존 기본값(page 1, pageSize 20, 필터 없음) 산출 — `npm test` 통과
+- [x] 1.1 `src/lib/domain`에 `SortKey`/`SortDirection` 리터럴 유니언과 `ItemQuery` 타입을 정의하고, URL 파라미터를 `ItemQuery`로 변환하는 zod 스키마 + 파서를 한 곳에 작성 — API와 페이지가 같은 파서를 쓸 수 있게 export하고 `tsc --noEmit` 통과 확인
+- [x] 1.2 파서 단위 테스트: `usage` 쉼표 다중값, 가격 한쪽만 지정, 빈 문자열 파라미터 무시, 허용되지 않은 `sort` 값 거부, 파라미터 전부 없을 때 기존 기본값(page 1, pageSize 20, 필터 없음) 산출 — `npm test` 통과
 
 ## 2. 저장소 필터·정렬
 
-- [ ] 2.1 `listItems`를 `ItemQuery`를 받도록 확장: 조건이 있는 필터만 `AND`로 조립하고 값은 전부 바인딩 파라미터로 전달, `total`도 같은 `WHERE`로 계산 — 새 파라미터 없이 호출하면 기존과 동일한 결과가 나오는 회귀 테스트로 확인
-- [ ] 2.2 `addressKeyword`를 `LIKE ... ESCAPE`로 구현해 사용자 입력의 `%`/`_`가 와일드카드로 동작하지 않게 하고, 이를 검증하는 테스트 작성
-- [ ] 2.3 정렬을 `SortKey` → SQL 표현식 화이트리스트 맵으로 구현: `bidRatio`는 `NULLIF(appraisal_price, 0)`로 0 나눗셈 방지, 모든 정렬에 `<expr> IS NULL`을 선행 키로 붙여 NULL을 항상 뒤로, 마지막에 `id`로 안정 정렬 — 4개 정렬 키 × 양방향과 NULL 배치를 테스트로 고정
-- [ ] 2.4 `listUsageTypes()`를 구현(중복 제거, 정렬, 물건 없으면 빈 배열)하고 테스트 작성
-- [ ] 2.5 `usage_type`, `min_bid_price` 인덱스를 스키마에 추가하고 기존 DB에서도 `CREATE INDEX IF NOT EXISTS`로 문제없이 적용되는 것을 확인
-- [ ] 2.6 필터 조합 테스트: 용도+가격범위+유찰횟수+키워드를 동시에 적용했을 때 교집합만 반환되고 `total`이 그 기준으로 계산되는 것을 검증
+- [x] 2.1 `listItems`를 `ItemQuery`를 받도록 확장: 조건이 있는 필터만 `AND`로 조립하고 값은 전부 바인딩 파라미터로 전달, `total`도 같은 `WHERE`로 계산 — 새 파라미터 없이 호출하면 기존과 동일한 결과가 나오는 회귀 테스트로 확인
+- [x] 2.2 `addressKeyword`를 `LIKE ... ESCAPE`로 구현해 사용자 입력의 `%`/`_`가 와일드카드로 동작하지 않게 하고, 이를 검증하는 테스트 작성
+- [x] 2.3 정렬을 `SortKey` → SQL 표현식 화이트리스트 맵으로 구현: `bidRatio`는 `NULLIF(appraisal_price, 0)`로 0 나눗셈 방지, 모든 정렬에 `<expr> IS NULL`을 선행 키로 붙여 NULL을 항상 뒤로, 마지막에 `id`로 안정 정렬 — 4개 정렬 키 × 양방향과 NULL 배치를 테스트로 고정
+- [x] 2.4 `listUsageTypes()`를 구현(중복 제거, 정렬, 물건 없으면 빈 배열)하고 테스트 작성
+- [x] 2.5 `usage_type`, `min_bid_price` 인덱스를 스키마에 추가하고 기존 DB에서도 `CREATE INDEX IF NOT EXISTS`로 문제없이 적용되는 것을 확인
+- [x] 2.6 필터 조합 테스트: 용도+가격범위+유찰횟수+키워드를 동시에 적용했을 때 교집합만 반환되고 `total`이 그 기준으로 계산되는 것을 검증
 
 ## 3. API
 

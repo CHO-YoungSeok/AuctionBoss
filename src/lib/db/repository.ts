@@ -8,30 +8,37 @@
  * 기본 싱글턴 연결(`getDb()`)을 쓴다. 테스트는 전자를 써서 env·실제 data/ 디렉터리에
  * 의존하지 않는다.
  */
-import type {
-  Analysis,
-  AnalysisInput,
-  AuctionItem,
-  AuctionItemInput,
-  IsoDateTime,
+import {
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+  type Analysis,
+  type AnalysisInput,
+  type AuctionItem,
+  type AuctionItemInput,
+  type IsoDateTime,
+  type ItemQuery,
+  type SortDirection,
+  type SortKey,
 } from "@/lib/domain";
 
 import { getDb, type Db } from "./client";
 import { ItemNotFoundError } from "./errors";
+
+// 페이지 크기 상수의 정의는 도메인(`item-query.ts`)에 있다 — 파서와 저장소가 같은 값을
+// 써야 하고, 도메인이 db를 import하는 역방향 의존을 만들지 않기 위함.
+// 기존 `@/lib/db`에서 import하던 곳(API 라우트 등)이 그대로 동작하도록 여기서 다시 내보낸다.
+export { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE };
 
 export interface UpsertItemsResult {
   inserted: number;
   updated: number;
 }
 
-export interface ListItemsOptions {
-  /** 1부터 시작. 기본 1. */
-  page?: number;
-  /** 기본 20, 최대 200. */
-  pageSize?: number;
-  /** `false`=분석 결과가 없는 물건만, `true`=있는 물건만, 생략=전체 */
-  analyzed?: boolean;
-}
+/**
+ * `listItems`의 인자. 도메인의 `ItemQuery`와 같은 타입이다.
+ * 이 이름으로 import하던 기존 코드를 위해 별칭을 남겨 둔다.
+ */
+export type ListItemsOptions = ItemQuery;
 
 export interface ListItemsResult {
   items: AuctionItem[];
@@ -39,9 +46,6 @@ export interface ListItemsResult {
   page: number;
   pageSize: number;
 }
-
-export const DEFAULT_PAGE_SIZE = 20;
-export const MAX_PAGE_SIZE = 200;
 
 interface ItemRow {
   id: number;
@@ -97,14 +101,121 @@ function toAnalysis(row: AnalysisRow): Analysis {
   };
 }
 
-/** 매각기일 오름차순, 값이 없는 물건은 뒤로. 동률은 id로 안정 정렬. */
-const ORDER_BY = "ORDER BY items.auction_date IS NULL, items.auction_date ASC, items.id ASC";
-
 const ANALYZED_EXISTS = "EXISTS (SELECT 1 FROM analyses WHERE analyses.item_id = items.id)";
 
-function whereForAnalyzed(analyzed: boolean | undefined): string {
-  if (analyzed === undefined) return "";
-  return analyzed ? `WHERE ${ANALYZED_EXISTS}` : `WHERE NOT ${ANALYZED_EXISTS}`;
+/**
+ * 정렬 기준 → SQL 표현식 화이트리스트 (design.md D2).
+ *
+ * 사용자 입력이 SQL에 직접 들어가는 경로를 만들지 않는다. `SortKey`에 없는 값은
+ * `orderByClause`가 던진다 — 조용히 기본값으로 바꾸면 잘못된 정렬을 눈치채지 못한다.
+ */
+const SORT_EXPRESSIONS: Record<SortKey, string> = {
+  auctionDate: "items.auction_date",
+  minBidPrice: "items.min_bid_price",
+  // 감정가 대비 최저가 비율. 감정가가 0이면 0 나눗셈이 되므로 NULLIF로 NULL을 만들고
+  // 아래 NULL 규칙(항상 뒤로)에 맡긴다.
+  bidRatio: "CAST(items.min_bid_price AS REAL) / NULLIF(items.appraisal_price, 0)",
+  failedBidCount: "items.failed_bid_count",
+};
+
+/** 생략 시 기존 동작(매각기일 오름차순)과 같은 SQL이 나오도록 기본값을 둔다. */
+const DEFAULT_SORT: SortKey = "auctionDate";
+const DEFAULT_DIRECTION: SortDirection = "asc";
+
+function orderByClause(sort: SortKey | undefined, direction: SortDirection | undefined): string {
+  const key = sort ?? DEFAULT_SORT;
+  // `hasOwnProperty`로 확인하는 이유: 타입 밖(JS 호출자)에서 `"constructor"` 같은 값이 오면
+  // 단순 인덱싱은 프로토타입의 함수를 돌려주고 그게 SQL 문자열에 끼어들 수 있다.
+  const expr = Object.prototype.hasOwnProperty.call(SORT_EXPRESSIONS, key)
+    ? SORT_EXPRESSIONS[key]
+    : undefined;
+  if (typeof expr !== "string") throw new Error(`지원하지 않는 sort 값: ${String(sort)}`);
+
+  const dir = direction ?? DEFAULT_DIRECTION;
+  if (dir !== "asc" && dir !== "desc") {
+    throw new Error(`지원하지 않는 direction 값: ${String(direction)}`);
+  }
+
+  // `<expr> IS NULL`을 항상 오름차순 선행 키로 둬서 NULL을 방향과 무관하게 뒤로 보낸다.
+  // 마지막 `items.id`는 동률 행이 페이지 경계에서 중복·누락되지 않게 하는 안정 정렬 키다.
+  return `ORDER BY (${expr}) IS NULL, (${expr}) ${dir === "desc" ? "DESC" : "ASC"}, items.id ASC`;
+}
+
+/** LIKE 이스케이프 문자. 사용자 입력 안의 이 문자 자신도 이스케이프해야 한다. */
+const LIKE_ESCAPE_CHAR = "\\";
+
+/**
+ * LIKE 패턴에 넣을 사용자 입력을 이스케이프한다.
+ * `%`/`_`를 그대로 두면 `%`만 입력해도 전체가 매칭된다 (design.md D1).
+ */
+export function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `${LIKE_ESCAPE_CHAR}${char}`);
+}
+
+/** `listItems`가 쓰는 바인딩 파라미터. 값은 전부 여기 담기고 SQL에는 이름만 들어간다. */
+type BindParams = Record<string, string | number>;
+
+interface Filter {
+  /** `""` 또는 `"WHERE ..."`. */
+  where: string;
+  params: BindParams;
+}
+
+/**
+ * 조건이 있는 필터만 모아 `AND`로 연결한다. 값은 예외 없이 바인딩 파라미터다 —
+ * 문자열 보간은 하지 않는다 (design.md D1).
+ *
+ * 주의: `min_bid_price`/`failed_bid_count`가 NULL인 행은 비교식이 참이 되지 않으므로
+ * 가격·유찰횟수 필터를 걸면 제외된다. "값을 모르는 물건"을 조건에 맞다고 보는 것보다
+ * 제외하는 편이 사용자 기대에 가깝다.
+ */
+function buildFilter(query: ItemQuery): Filter {
+  const conditions: string[] = [];
+  const params: BindParams = {};
+
+  if (query.analyzed === true) {
+    conditions.push(ANALYZED_EXISTS);
+  } else if (query.analyzed === false) {
+    conditions.push(`NOT ${ANALYZED_EXISTS}`);
+  } else if (query.analyzed !== undefined) {
+    throw new Error(`지원하지 않는 analyzed 값: ${String(query.analyzed)}`);
+  }
+
+  const usageTypes = query.usageTypes?.filter((usageType) => usageType !== "");
+  if (usageTypes !== undefined && usageTypes.length > 0) {
+    const placeholders = usageTypes.map((usageType, index) => {
+      params[`usage${index}`] = usageType;
+      return `@usage${index}`;
+    });
+    conditions.push(`items.usage_type IN (${placeholders.join(", ")})`);
+  }
+
+  if (query.minPrice !== undefined) {
+    conditions.push("items.min_bid_price >= @minPrice");
+    params.minPrice = query.minPrice;
+  }
+
+  if (query.maxPrice !== undefined) {
+    conditions.push("items.min_bid_price <= @maxPrice");
+    params.maxPrice = query.maxPrice;
+  }
+
+  if (query.minFailedBidCount !== undefined) {
+    conditions.push("items.failed_bid_count >= @minFailedBidCount");
+    params.minFailedBidCount = query.minFailedBidCount;
+  }
+
+  const keyword = query.addressKeyword?.trim();
+  if (keyword !== undefined && keyword !== "") {
+    conditions.push("items.address LIKE @addressKeyword ESCAPE @likeEscape");
+    params.addressKeyword = `%${escapeLikePattern(keyword)}%`;
+    params.likeEscape = LIKE_ESCAPE_CHAR;
+  }
+
+  return {
+    where: conditions.length === 0 ? "" : `WHERE ${conditions.join(" AND ")}`,
+    params,
+  };
 }
 
 function normalizePage(page: number | undefined): number {
@@ -117,10 +228,24 @@ function normalizePageSize(pageSize: number | undefined): number {
   return Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(pageSize)));
 }
 
+/** SQL 문장 캐시 상한. 필터 조합 수는 유한하지만 용도 개수만큼 SQL이 달라지므로 둔다. */
+const MAX_CACHED_STATEMENTS = 64;
+
+function cachedStatement<S>(cache: Map<string, S>, sql: string, prepare: (sql: string) => S): S {
+  const existing = cache.get(sql);
+  if (existing !== undefined) return existing;
+  if (cache.size >= MAX_CACHED_STATEMENTS) cache.clear();
+  const prepared = prepare(sql);
+  cache.set(sql, prepared);
+  return prepared;
+}
+
 export interface AuctionRepository {
   upsertItems(items: AuctionItemInput[], options?: { now?: IsoDateTime }): UpsertItemsResult;
-  listItems(options?: ListItemsOptions): ListItemsResult;
+  listItems(query?: ItemQuery): ListItemsResult;
   getItemById(id: number): AuctionItem | null;
+  /** 저장된 물건에 실제로 존재하는 용도 목록. 중복 없이 정렬해서 돌려준다. */
+  listUsageTypes(): string[];
   insertAnalysis(input: AnalysisInput, options?: { now?: IsoDateTime }): Analysis;
   getLatestAnalysis(itemId: number): Analysis | null;
 }
@@ -174,23 +299,18 @@ export function createRepository(db: Db): AuctionRepository {
     LIMIT 1
   `);
 
-  // analyzed 필터 세 갈래(전체 / 분석됨 / 미분석)를 미리 준비해 둔다.
-  const listStatements = new Map(
-    ([undefined, true, false] as const).map((analyzed) => {
-      const where = whereForAnalyzed(analyzed);
-      return [
-        String(analyzed),
-        {
-          count: db.prepare<[], { total: number }>(
-            `SELECT COUNT(*) AS total FROM items ${where}`,
-          ),
-          select: db.prepare<{ limit: number; offset: number }, ItemRow>(
-            `SELECT * FROM items ${where} ${ORDER_BY} LIMIT @limit OFFSET @offset`,
-          ),
-        },
-      ] as const;
-    }),
-  );
+  const selectUsageTypes = db.prepare<[], { usage_type: string }>(`
+    SELECT DISTINCT usage_type FROM items
+    WHERE usage_type IS NOT NULL
+    ORDER BY usage_type
+  `);
+
+  // 필터 조합마다 SQL이 달라져 전부 미리 준비할 수는 없다. 값이 전부 바인딩이므로 같은
+  // 조합이면 SQL 문자열이 완전히 같고, 그때는 준비된 문장을 재사용한다.
+  const prepareCount = (sql: string) => db.prepare<BindParams, { total: number }>(sql);
+  const prepareSelect = (sql: string) => db.prepare<BindParams, ItemRow>(sql);
+  const countCache = new Map<string, ReturnType<typeof prepareCount>>();
+  const selectCache = new Map<string, ReturnType<typeof prepareSelect>>();
 
   const upsertBatch = db.transaction(
     (items: AuctionItemInput[], now: string): UpsertItemsResult => {
@@ -230,14 +350,27 @@ export function createRepository(db: Db): AuctionRepository {
       return upsertBatch(items, options?.now ?? new Date().toISOString());
     },
 
-    listItems(options = {}) {
-      const page = normalizePage(options.page);
-      const pageSize = normalizePageSize(options.pageSize);
-      const statements = listStatements.get(String(options.analyzed));
-      if (!statements) throw new Error(`지원하지 않는 analyzed 값: ${String(options.analyzed)}`);
+    listItems(query = {}) {
+      const page = normalizePage(query.page);
+      const pageSize = normalizePageSize(query.pageSize);
+      const filter = buildFilter(query);
+      const orderBy = orderByClause(query.sort, query.direction);
 
-      const total = statements.count.get()?.total ?? 0;
-      const rows = statements.select.all({
+      // 전체 건수는 목록과 **같은 WHERE**로 센다 — 필터 적용 후 건수여야 페이지네이션이 맞는다.
+      const count = cachedStatement(
+        countCache,
+        `SELECT COUNT(*) AS total FROM items ${filter.where}`,
+        prepareCount,
+      );
+      const select = cachedStatement(
+        selectCache,
+        `SELECT * FROM items ${filter.where} ${orderBy} LIMIT @limit OFFSET @offset`,
+        prepareSelect,
+      );
+
+      const total = count.get(filter.params)?.total ?? 0;
+      const rows = select.all({
+        ...filter.params,
         limit: pageSize,
         offset: (page - 1) * pageSize,
       });
@@ -248,6 +381,10 @@ export function createRepository(db: Db): AuctionRepository {
     getItemById(id) {
       const row = selectItemById.get({ id });
       return row ? toAuctionItem(row) : null;
+    },
+
+    listUsageTypes() {
+      return selectUsageTypes.all().map((row) => row.usage_type);
     },
 
     insertAnalysis(input, options) {
@@ -296,12 +433,16 @@ export function upsertItems(
   return getRepository().upsertItems(items, options);
 }
 
-export function listItems(options?: ListItemsOptions): ListItemsResult {
-  return getRepository().listItems(options);
+export function listItems(query?: ItemQuery): ListItemsResult {
+  return getRepository().listItems(query);
 }
 
 export function getItemById(id: number): AuctionItem | null {
   return getRepository().getItemById(id);
+}
+
+export function listUsageTypes(): string[] {
+  return getRepository().listUsageTypes();
 }
 
 export function insertAnalysis(

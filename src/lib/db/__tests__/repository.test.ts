@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AuctionItemInput } from "@/lib/domain";
 import { openDatabase, type Db } from "../client";
 import { ItemNotFoundError } from "../errors";
-import { createRepository, type AuctionRepository } from "../repository";
+import {
+  createRepository,
+  type AuctionRepository,
+  type ListItemsOptions,
+} from "../repository";
 
 /**
  * 모든 테스트는 인메모리 DB를 쓴다 — env(`AUCTIONBOSS_DB`)나 실제 `data/` 디렉터리를
@@ -182,6 +186,352 @@ describe("listItems", () => {
   it("저장된 물건이 없으면 빈 결과를 돌려준다(오류가 아니다)", () => {
     const empty = createRepository(openDatabase(":memory:"));
     expect(empty.listItems()).toEqual({ items: [], total: 0, page: 1, pageSize: 20 });
+  });
+
+  /**
+   * 회귀 방어: 분석 워커가 `?analyzed=false&pageSize=N`으로 분석 대상을 받아 간다.
+   * 필터·정렬 파라미터를 하나도 주지 않은 호출은 이 변경 이전과 같은 결과·정렬·응답 형태여야 한다.
+   */
+  it("[회귀] 새 파라미터 없이 호출하면 기존과 동일하게 동작한다 (analyzer 계약)", () => {
+    const analyzed = repo.listItems({ pageSize: 10 }).items[0]!;
+    repo.insertAnalysis({ itemId: analyzed.id, body: "x", model: null, promptVersion: "v1" });
+
+    const forAnalyzer = repo.listItems({ analyzed: false, pageSize: 5 });
+
+    // 응답 형태(키 구성)가 그대로다.
+    expect(Object.keys(forAnalyzer).sort()).toEqual(["items", "page", "pageSize", "total"]);
+    expect(forAnalyzer).toMatchObject({ total: 4, page: 1, pageSize: 5 });
+    // 정렬도 그대로: 매각기일 오름차순, 기일 없는 물건은 뒤.
+    expect(forAnalyzer.items.map((item) => item.itemNo)).toEqual(["4", "1", "5", "3"]);
+    expect(forAnalyzer.items.map((item) => item.id)).not.toContain(analyzed.id);
+  });
+
+  it("[회귀] 새 필터 필드를 undefined로 넘긴 것과 아예 넘기지 않은 것이 같다", () => {
+    const bare = repo.listItems({ pageSize: 10 });
+    const explicitUndefined = repo.listItems({
+      pageSize: 10,
+      usageTypes: undefined,
+      minPrice: undefined,
+      maxPrice: undefined,
+      minFailedBidCount: undefined,
+      addressKeyword: undefined,
+      sort: undefined,
+      direction: undefined,
+    });
+
+    expect(explicitUndefined).toEqual(bare);
+    // 기본 정렬은 sort를 명시한 것과 같은 결과여야 한다(정렬식 하나로 합쳐진 것 확인).
+    expect(repo.listItems({ pageSize: 10, sort: "auctionDate", direction: "asc" })).toEqual(bare);
+  });
+});
+
+/**
+ * 필터·정렬용 데이터셋.
+ *
+ * | itemNo | 용도                     | 최저가 | 감정가 | 매각기일   | 유찰 | 소재지                    |
+ * |--------|--------------------------|--------|--------|------------|------|---------------------------|
+ * | 1      | 아파트                   | 100    | 200    | 2026-03-03 | 0    | 서울특별시 강남구 역삼동 1 |
+ * | 2      | 다세대                   | 300    | 300    | 2026-01-01 | 3    | 서울특별시 관악구 신림동 2 |
+ * | 3      | 상가,오피스텔,근린시설   | 500    | 1000   | (없음)     | 5    | 서울특별시 강남구 논현동 3 |
+ * | 4      | 아파트                   | (없음) | (없음) | 2026-02-02 | (없음)| 100% 확실 상가            |
+ * | 5      | (없음)                   | 700    | 0      | 2026-04-04 | 2    | 대전광역시 서구 둔산동 5   |
+ *
+ * 감정가 대비 최저가 비율: 1→0.5, 3→0.5(동률 → id 안정 정렬 확인), 2→1.0,
+ * 4→NULL(최저가 없음), 5→NULL(감정가 0 → NULLIF).
+ * 3번 용도 문자열의 쉼표는 실측값이다(`sources/courtauction/NOTES.md` §8).
+ */
+describe("listItems 필터·정렬", () => {
+  beforeEach(() => {
+    repo.upsertItems([
+      makeItem({
+        itemNo: "1",
+        usageType: "아파트",
+        minBidPrice: 100,
+        appraisalPrice: 200,
+        auctionDate: "2026-03-03",
+        failedBidCount: 0,
+        address: "서울특별시 강남구 역삼동 1",
+      }),
+      makeItem({
+        itemNo: "2",
+        usageType: "다세대",
+        minBidPrice: 300,
+        appraisalPrice: 300,
+        auctionDate: "2026-01-01",
+        failedBidCount: 3,
+        address: "서울특별시 관악구 신림동 2",
+      }),
+      makeItem({
+        itemNo: "3",
+        usageType: "상가,오피스텔,근린시설",
+        minBidPrice: 500,
+        appraisalPrice: 1000,
+        auctionDate: null,
+        failedBidCount: 5,
+        address: "서울특별시 강남구 논현동 3",
+      }),
+      makeItem({
+        itemNo: "4",
+        usageType: "아파트",
+        minBidPrice: null,
+        appraisalPrice: null,
+        auctionDate: "2026-02-02",
+        failedBidCount: null,
+        address: "100% 확실 상가",
+      }),
+      makeItem({
+        itemNo: "5",
+        usageType: null,
+        minBidPrice: 700,
+        appraisalPrice: 0,
+        auctionDate: "2026-04-04",
+        failedBidCount: 2,
+        address: "대전광역시 서구 둔산동 5",
+      }),
+    ]);
+  });
+
+  /** 조건에 맞는 itemNo를 정렬 결과 순서대로. */
+  function found(query: Parameters<AuctionRepository["listItems"]>[0]): string[] {
+    return repo.listItems({ pageSize: 10, ...query }).items.map((item) => item.itemNo);
+  }
+
+  describe("용도 필터", () => {
+    it("선택한 용도만 남기고 전체 건수도 필터 기준으로 센다", () => {
+      const result = repo.listItems({ usageTypes: ["아파트"], pageSize: 10 });
+      expect(result.items.map((item) => item.itemNo).sort()).toEqual(["1", "4"]);
+      expect(result.total).toBe(2);
+    });
+
+    it("여러 용도를 주면 그중 하나라도 맞는 물건이 나온다", () => {
+      expect(found({ usageTypes: ["아파트", "다세대"] }).sort()).toEqual(["1", "2", "4"]);
+    });
+
+    it("쉼표가 들어간 용도 값도 그대로 매칭된다", () => {
+      expect(found({ usageTypes: ["상가,오피스텔,근린시설"] })).toEqual(["3"]);
+      // 쉼표로 쪼갠 조각은 어디에도 없다.
+      expect(found({ usageTypes: ["상가", "오피스텔", "근린시설"] })).toEqual([]);
+    });
+
+    it("빈 배열이면 필터를 걸지 않는다", () => {
+      expect(repo.listItems({ usageTypes: [], pageSize: 10 }).total).toBe(5);
+    });
+
+    it("용도가 없는(NULL) 물건은 용도 필터에 걸리지 않는다", () => {
+      expect(found({ usageTypes: ["아파트", "다세대", "상가,오피스텔,근린시설"] })).not.toContain(
+        "5",
+      );
+    });
+  });
+
+  describe("가격 범위 필터", () => {
+    it("한쪽만 지정하면 그 방향으로만 제한한다", () => {
+      expect(found({ minPrice: 300 }).sort()).toEqual(["2", "3", "5"]);
+      expect(found({ maxPrice: 300 }).sort()).toEqual(["1", "2"]);
+    });
+
+    it("양쪽을 지정하면 그 구간만 남기고 경계값을 포함한다", () => {
+      expect(found({ minPrice: 300, maxPrice: 500 }).sort()).toEqual(["2", "3"]);
+      expect(found({ minPrice: 300, maxPrice: 300 })).toEqual(["2"]);
+    });
+
+    it("최저가가 없는(NULL) 물건은 가격 필터에서 제외된다", () => {
+      expect(found({ minPrice: 0 })).not.toContain("4");
+      expect(found({ maxPrice: 1_000_000 })).not.toContain("4");
+    });
+  });
+
+  describe("유찰횟수 필터", () => {
+    it("최소값 이상만 남긴다(경계 포함)", () => {
+      expect(found({ minFailedBidCount: 3 }).sort()).toEqual(["2", "3"]);
+      expect(found({ minFailedBidCount: 0 }).sort()).toEqual(["1", "2", "3", "5"]);
+    });
+
+    it("유찰횟수가 없는(NULL) 물건은 제외된다", () => {
+      expect(found({ minFailedBidCount: 0 })).not.toContain("4");
+    });
+  });
+
+  describe("소재지 키워드 검색", () => {
+    it("키워드를 포함하는 물건만 남긴다", () => {
+      expect(found({ addressKeyword: "강남구" }).sort()).toEqual(["1", "3"]);
+      expect(found({ addressKeyword: "대전" })).toEqual(["5"]);
+      expect(found({ addressKeyword: "부산" })).toEqual([]);
+    });
+
+    it("`%`는 와일드카드가 아니라 글자로 취급한다", () => {
+      // 이스케이프하지 않으면 `%` 하나로 5건 전부가 매칭된다.
+      expect(found({ addressKeyword: "%" })).toEqual(["4"]);
+      expect(found({ addressKeyword: "100%" })).toEqual(["4"]);
+      expect(found({ addressKeyword: "%확실%" })).toEqual([]);
+    });
+
+    it("`_`도 와일드카드가 아니라 글자로 취급한다", () => {
+      expect(found({ addressKeyword: "강남_구" })).toEqual([]);
+      expect(found({ addressKeyword: "_" })).toEqual([]);
+    });
+
+    it("이스케이프 문자(백슬래시) 자체도 글자로 찾는다", () => {
+      repo.upsertItems([makeItem({ itemNo: "6", address: "C:\\경매\\자료" })]);
+      expect(found({ addressKeyword: "\\" })).toEqual(["6"]);
+      expect(found({ addressKeyword: "C:\\경매" })).toEqual(["6"]);
+    });
+
+    it("공백만 있는 키워드는 필터로 보지 않는다", () => {
+      expect(repo.listItems({ addressKeyword: "   ", pageSize: 10 }).total).toBe(5);
+    });
+  });
+
+  describe("정렬", () => {
+    it("매각기일 — 오름/내림차순 모두 NULL은 뒤로", () => {
+      expect(found({ sort: "auctionDate", direction: "asc" })).toEqual(["2", "4", "1", "5", "3"]);
+      expect(found({ sort: "auctionDate", direction: "desc" })).toEqual(["5", "1", "4", "2", "3"]);
+    });
+
+    it("최저매각가격 — 오름/내림차순 모두 NULL은 뒤로", () => {
+      expect(found({ sort: "minBidPrice", direction: "asc" })).toEqual(["1", "2", "3", "5", "4"]);
+      expect(found({ sort: "minBidPrice", direction: "desc" })).toEqual(["5", "3", "2", "1", "4"]);
+    });
+
+    it("유찰횟수 — 오름/내림차순 모두 NULL은 뒤로", () => {
+      expect(found({ sort: "failedBidCount", direction: "asc" })).toEqual([
+        "1",
+        "5",
+        "2",
+        "3",
+        "4",
+      ]);
+      expect(found({ sort: "failedBidCount", direction: "desc" })).toEqual([
+        "3",
+        "2",
+        "5",
+        "1",
+        "4",
+      ]);
+    });
+
+    it("감정가 대비 최저가 비율 — 0 나눗셈 없이 NULL로 밀리고 동률은 id로 안정 정렬", () => {
+      // 4번(최저가 NULL)과 5번(감정가 0 → NULLIF로 NULL)이 방향과 무관하게 뒤.
+      expect(found({ sort: "bidRatio", direction: "asc" })).toEqual(["1", "3", "2", "4", "5"]);
+      expect(found({ sort: "bidRatio", direction: "desc" })).toEqual(["2", "1", "3", "4", "5"]);
+    });
+
+    it("방향을 생략하면 오름차순이다", () => {
+      expect(found({ sort: "minBidPrice" })).toEqual(found({ sort: "minBidPrice", direction: "asc" }));
+    });
+
+    it("정렬 기준을 생략하면 기존 기본 정렬(매각기일 오름차순)이다", () => {
+      expect(found({})).toEqual(found({ sort: "auctionDate", direction: "asc" }));
+    });
+
+    it("정렬은 화이트리스트에만 있는 값을 받는다", () => {
+      // 타입 밖에서(JS 호출자) 들어온 값은 조용히 무시하지 않고 던진다 — SQL로 새지 않는다.
+      const bogus = { sort: "min_bid_price; DROP TABLE items" } as unknown as ListItemsOptions;
+      expect(() => repo.listItems(bogus)).toThrow(/지원하지 않는 sort/);
+      expect(repo.listItems({ pageSize: 10 }).total).toBe(5); // 테이블은 그대로다
+
+      const bogusDir = { direction: "asc; DROP TABLE items" } as unknown as ListItemsOptions;
+      expect(() => repo.listItems(bogusDir)).toThrow(/지원하지 않는 direction/);
+
+      // 프로토타입 키도 통과하지 않는다(단순 인덱싱이면 함수가 SQL에 끼어든다).
+      const protoKey = { sort: "constructor" } as unknown as ListItemsOptions;
+      expect(() => repo.listItems(protoKey)).toThrow(/지원하지 않는 sort/);
+    });
+
+    it("정렬한 상태에서도 페이지 경계에서 물건이 중복·누락되지 않는다", () => {
+      const pages = [1, 2, 3].flatMap(
+        (page) =>
+          repo.listItems({ sort: "bidRatio", direction: "asc", page, pageSize: 2 }).items,
+      );
+      expect(pages.map((item) => item.itemNo)).toEqual(["1", "3", "2", "4", "5"]);
+    });
+  });
+
+  describe("필터 조합", () => {
+    it("용도+가격범위+유찰횟수+키워드를 동시에 적용하면 교집합만 남고 total도 그 기준이다", () => {
+      const result = repo.listItems({
+        usageTypes: ["아파트", "다세대"],
+        minPrice: 50,
+        maxPrice: 400,
+        minFailedBidCount: 0,
+        addressKeyword: "서울",
+        pageSize: 10,
+      });
+
+      // 3번(용도 불일치), 4번(최저가·유찰횟수 NULL, 소재지에 '서울' 없음), 5번(용도 NULL) 탈락.
+      expect(result.items.map((item) => item.itemNo)).toEqual(["2", "1"]); // 매각기일 오름차순
+      expect(result.total).toBe(2);
+    });
+
+    it("조건을 하나 더 좁히면 결과와 total이 함께 줄어든다", () => {
+      const result = repo.listItems({
+        usageTypes: ["아파트", "다세대"],
+        minPrice: 50,
+        maxPrice: 400,
+        minFailedBidCount: 1,
+        addressKeyword: "서울",
+        pageSize: 10,
+      });
+      expect(result.items.map((item) => item.itemNo)).toEqual(["2"]);
+      expect(result.total).toBe(1);
+    });
+
+    it("total은 페이지 조각이 아니라 필터 적용 전체 건수다", () => {
+      const query = {
+        usageTypes: ["아파트", "다세대"],
+        minPrice: 50,
+        maxPrice: 400,
+        addressKeyword: "서울",
+      };
+      const page1 = repo.listItems({ ...query, page: 1, pageSize: 1 });
+      const page2 = repo.listItems({ ...query, page: 2, pageSize: 1 });
+
+      expect(page1.items.map((item) => item.itemNo)).toEqual(["2"]);
+      expect(page2.items.map((item) => item.itemNo)).toEqual(["1"]);
+      expect(page1.total).toBe(2);
+      expect(page2.total).toBe(2);
+    });
+
+    it("analyzed 필터와 다른 필터를 함께 걸 수 있다", () => {
+      const apartment = repo.listItems({ usageTypes: ["아파트"], pageSize: 10 }).items[0]!;
+      repo.insertAnalysis({ itemId: apartment.id, body: "x", model: null, promptVersion: "v1" });
+
+      const result = repo.listItems({ usageTypes: ["아파트"], analyzed: false, pageSize: 10 });
+      expect(result.total).toBe(1);
+      expect(result.items[0]?.id).not.toBe(apartment.id);
+    });
+
+    it("조건에 맞는 물건이 없으면 오류가 아니라 빈 결과다", () => {
+      expect(repo.listItems({ usageTypes: ["없는용도"], pageSize: 10 })).toEqual({
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: 10,
+      });
+    });
+  });
+});
+
+describe("listUsageTypes", () => {
+  it("중복 없이 정렬해서 돌려주고 NULL은 제외한다", () => {
+    repo.upsertItems([
+      makeItem({ itemNo: "1", usageType: "아파트" }),
+      makeItem({ itemNo: "2", usageType: "다세대" }),
+      makeItem({ itemNo: "3", usageType: "오피스텔" }),
+      makeItem({ itemNo: "4", usageType: "아파트" }), // 중복
+      makeItem({ itemNo: "5", usageType: null }), // 제외
+    ]);
+
+    expect(repo.listUsageTypes()).toEqual(["다세대", "아파트", "오피스텔"]);
+  });
+
+  it("저장된 물건이 없으면 빈 배열이다(오류가 아니다)", () => {
+    expect(repo.listUsageTypes()).toEqual([]);
+  });
+
+  it("용도가 전부 NULL이어도 빈 배열이다", () => {
+    repo.upsertItems([makeItem({ usageType: null })]);
+    expect(repo.listUsageTypes()).toEqual([]);
   });
 });
 

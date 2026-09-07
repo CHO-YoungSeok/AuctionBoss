@@ -25,6 +25,14 @@ CREATE TABLE IF NOT EXISTS items (
 -- 목록 기본 정렬(매각기일 오름차순)용. NULL을 뒤로 보내는 정렬식과 같은 선두 컬럼.
 CREATE INDEX IF NOT EXISTS idx_items_auction_date ON items (auction_date);
 
+-- 용도 필터(usage_type IN (...))와 용도 목록 조회(DISTINCT)용 (design.md D5).
+CREATE INDEX IF NOT EXISTS idx_items_usage_type ON items (usage_type);
+
+-- 최저매각가격 범위 필터와 최저가 정렬용 (design.md D5).
+-- 감정가 대비 비율(bidRatio)은 계산식이라 인덱스를 만들 수 없다 — 데이터가 수만 건이 되면
+-- 생성 열(generated column) + 인덱스를 검토한다.
+CREATE INDEX IF NOT EXISTS idx_items_min_bid_price ON items (min_bid_price);
+
 CREATE TABLE IF NOT EXISTS analyses (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   item_id        INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
