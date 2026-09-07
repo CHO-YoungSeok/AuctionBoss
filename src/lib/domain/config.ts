@@ -25,6 +25,10 @@ const collectScopeSchema = z.object({
 
 const analysisConfigSchema = z.object({
   maxItemsPerRun: z.number().int().positive(),
+  // maxItemsPerRun과 마찬가지로 기본값으로 조용히 채우지 않는다 — 설정 파일에 없거나
+  // 잘못된 타입/범위면 즉시 throw한다(design.md D5). "기본 2"는 배포되는
+  // config/collector.json 파일 자체의 값이지, 로더가 채우는 값이 아니다.
+  maxReanalysisPerRun: z.number().int().positive(),
   intervalMs: z.number().int().positive(),
 });
 

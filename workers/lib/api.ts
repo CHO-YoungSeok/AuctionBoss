@@ -76,15 +76,8 @@ async function readBodyForError(response: Response): Promise<string> {
   }
 }
 
-/** 분석 결과가 없는 물건을 회차 최대 건수만큼 가져온다. */
-export async function fetchUnanalyzedItems(options: {
-  baseUrl: string;
-  pageSize: number;
-  fetchFn: FetchFn;
-}): Promise<ItemsResponse> {
-  const { baseUrl, pageSize, fetchFn } = options;
-  const url = `${normalizeBaseUrl(baseUrl)}/api/items?analyzed=false&pageSize=${pageSize}`;
-
+/** 공통 요청 로직. 두 조회 함수(`fetchUnanalyzedItems`/`fetchReanalysisCandidates`)가 공유한다. */
+async function fetchItemsResponse(url: string, fetchFn: FetchFn): Promise<ItemsResponse> {
   let response: Response;
   try {
     response = await fetchFn(url, { headers: { accept: "application/json" } });
@@ -115,6 +108,35 @@ export async function fetchUnanalyzedItems(options: {
   }
 
   return parsed.data;
+}
+
+/** 분석 결과가 없는 물건을 회차 최대 건수만큼 가져온다. */
+export async function fetchUnanalyzedItems(options: {
+  baseUrl: string;
+  pageSize: number;
+  fetchFn: FetchFn;
+}): Promise<ItemsResponse> {
+  const { baseUrl, pageSize, fetchFn } = options;
+  const url = `${normalizeBaseUrl(baseUrl)}/api/items?analyzed=false&pageSize=${pageSize}`;
+  return fetchItemsResponse(url, fetchFn);
+}
+
+/**
+ * 재분석이 필요한 물건을 회차 최대 건수만큼 가져온다(design.md D4).
+ * `promptVersion`은 워커의 현재 `PROMPT_VERSION`이다 — 서버는 저장된 최신 분석의
+ * 버전과 다르면(같음/다름만 비교) 재분석 대상으로 본다.
+ */
+export async function fetchReanalysisCandidates(options: {
+  baseUrl: string;
+  pageSize: number;
+  promptVersion: string;
+  fetchFn: FetchFn;
+}): Promise<ItemsResponse> {
+  const { baseUrl, pageSize, promptVersion, fetchFn } = options;
+  const url =
+    `${normalizeBaseUrl(baseUrl)}/api/items?needsAnalysis=true` +
+    `&promptVersion=${encodeURIComponent(promptVersion)}&pageSize=${pageSize}`;
+  return fetchItemsResponse(url, fetchFn);
 }
 
 export interface AnalysisPayload {

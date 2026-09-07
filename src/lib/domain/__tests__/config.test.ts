@@ -31,6 +31,53 @@ describe("loadCollectorConfig", () => {
     expect(config.scope.courts.length).toBeGreaterThan(0);
     expect(config.intervalMs).toBeGreaterThan(0);
     expect(config.analysis.maxItemsPerRun).toBeGreaterThan(0);
+    expect(config.analysis.maxReanalysisPerRun).toBeGreaterThan(0);
+  });
+
+  it("maxReanalysisPerRun이 없거나 잘못된 값이면 기본값으로 조용히 넘어가지 않고 throw한다(design.md D5)", () => {
+    const missing = writeConfig(
+      JSON.stringify({
+        scope: { courts: [{ name: "서울중앙지방법원", courtCode: "" }] },
+        intervalMs: 600000,
+        analysis: { maxItemsPerRun: 5, intervalMs: 600000 },
+      }),
+    );
+    expect(() => loadCollectorConfig({ configPath: missing, reload: true })).toThrow(
+      /maxReanalysisPerRun/,
+    );
+
+    const zero = writeConfig(
+      JSON.stringify({
+        scope: { courts: [{ name: "서울중앙지방법원", courtCode: "" }] },
+        intervalMs: 600000,
+        analysis: { maxItemsPerRun: 5, maxReanalysisPerRun: 0, intervalMs: 600000 },
+      }),
+    );
+    expect(() => loadCollectorConfig({ configPath: zero, reload: true })).toThrow(
+      /maxReanalysisPerRun/,
+    );
+
+    const negative = writeConfig(
+      JSON.stringify({
+        scope: { courts: [{ name: "서울중앙지방법원", courtCode: "" }] },
+        intervalMs: 600000,
+        analysis: { maxItemsPerRun: 5, maxReanalysisPerRun: -1, intervalMs: 600000 },
+      }),
+    );
+    expect(() => loadCollectorConfig({ configPath: negative, reload: true })).toThrow(
+      /maxReanalysisPerRun/,
+    );
+
+    const notInt = writeConfig(
+      JSON.stringify({
+        scope: { courts: [{ name: "서울중앙지방법원", courtCode: "" }] },
+        intervalMs: 600000,
+        analysis: { maxItemsPerRun: 5, maxReanalysisPerRun: "두 건", intervalMs: 600000 },
+      }),
+    );
+    expect(() => loadCollectorConfig({ configPath: notInt, reload: true })).toThrow(
+      /maxReanalysisPerRun/,
+    );
   });
 
   it("파일이 없으면 기본값으로 넘어가지 않고 throw한다", () => {

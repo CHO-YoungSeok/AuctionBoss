@@ -145,6 +145,49 @@ describe("parseItemQuery (strict)", () => {
     expect(fields(fail(parseItemQuery({ analyzed: "1" })))).toEqual(["analyzed"]);
   });
 
+  describe("needsAnalysis / promptVersion (design.md D4)", () => {
+    it("[회귀] needsAnalysis 파라미터가 새로 생겨도 analyzed=false 단독 호출은 그대로 통과한다", () => {
+      // 분석 워커의 기존 계약(analyzed=false&pageSize=N)이 이 변경으로 깨지면 안 된다.
+      expect(ok(parseItemQuery({ analyzed: "false", pageSize: "5" }))).toEqual({
+        page: 1,
+        pageSize: 5,
+        analyzed: false,
+      });
+    });
+
+    it("needsAnalysis=true와 promptVersion을 함께 주면 통과한다", () => {
+      const query = ok(parseItemQuery({ needsAnalysis: "true", promptVersion: "v1" }));
+      expect(query.needsAnalysis).toBe(true);
+      expect(query.promptVersion).toBe("v1");
+    });
+
+    it("needsAnalysis=true인데 promptVersion이 없으면 거부한다(비교 대상이 없다)", () => {
+      const issues = fail(parseItemQuery({ needsAnalysis: "true" }));
+      expect(fields(issues)).toEqual(["needsAnalysis"]);
+    });
+
+    it("needsAnalysis=false·다른 값은 지원하지 않는다 — true만 지원한다(design.md D4)", () => {
+      expect(fields(fail(parseItemQuery({ needsAnalysis: "false" })))).toEqual(["needsAnalysis"]);
+      expect(fields(fail(parseItemQuery({ needsAnalysis: "1" })))).toEqual(["needsAnalysis"]);
+    });
+
+    it("promptVersion만 단독으로 와도(needsAnalysis 없이) 오류가 아니다 — 아무 것도 필터하지 않을 뿐이다", () => {
+      const query = ok(parseItemQuery({ promptVersion: "v1" }));
+      expect(query.promptVersion).toBe("v1");
+      expect(query.needsAnalysis).toBeUndefined();
+    });
+
+    it("promptVersion 빈 값은 인식된 파라미터의 빈 값이라 거부한다(finding 2와 같은 규칙)", () => {
+      expect(fields(fail(parseItemQuery({ promptVersion: "" })))).toEqual(["promptVersion"]);
+    });
+
+    it("lenient는 needsAnalysis=true만 있고 promptVersion이 없으면 needsAnalysis만 버리고 나머지는 살린다", () => {
+      expect(
+        parseItemQueryLenient({ needsAnalysis: "true", q: "강남" }),
+      ).toEqual({ ...DEFAULTS, addressKeyword: "강남" });
+    });
+  });
+
   it("허용되지 않은 sort 값을 거부하고 어떤 파라미터가 문제인지 알려준다", () => {
     const issues = fail(parseItemQuery({ sort: "appraisalPrice" }));
     expect(fields(issues)).toEqual(["sort"]);
@@ -311,6 +354,11 @@ describe("hasActiveFilters", () => {
     // "필터에 걸린 것"인데도 "DB가 비었다"로 잘못 보고했다.
     expect(hasActiveFilters({ analyzed: true })).toBe(true);
     expect(hasActiveFilters({ analyzed: false })).toBe(true);
+  });
+
+  it("needsAnalysis도 결과를 좁히는 필터다(analyzed와 같은 이유). promptVersion 단독은 아니다", () => {
+    expect(hasActiveFilters({ needsAnalysis: true })).toBe(true);
+    expect(hasActiveFilters({ promptVersion: "v1" })).toBe(false);
   });
 });
 

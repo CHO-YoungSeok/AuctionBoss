@@ -1,8 +1,15 @@
 /**
  * 분석 워커 (auction-analysis).
  *
- * 한 회차: `GET /api/items?analyzed=false&pageSize=N` → 물건마다 프롬프트 렌더 →
- * `claude -p --output-format json` 실행 → 결과 파싱 → `POST /api/analyses`.
+ * 한 회차는 두 단계로 대상을 고른다(design.md D4/D5):
+ *   1. `GET /api/items?analyzed=false&pageSize=<신규 한도>` — 신규 분석
+ *   2. `GET /api/items?needsAnalysis=true&promptVersion=<현재 버전>&pageSize=<재분석 한도>`
+ *      — 재분석. 1단계에서 이미 고른 물건은 제외한다.
+ * 이후 물건마다 프롬프트 렌더 → `claude -p --output-format json` 실행 → 결과 파싱 →
+ * `POST /api/analyses`.
+ *
+ * 신규가 항상 먼저 배정된다 — 재분석 대기열이 아직 한 번도 분석되지 않은 물건을
+ * 무한히 미루면 안 된다는 스펙 요구를 두 번 조회하는 구조 자체로 명백하게 만든다.
  *
  * 원칙:
  * - DB를 직접 열지 않는다. 서버와는 HTTP로만 통신한다 (design.md D5).
@@ -20,6 +27,7 @@ import type { AuctionItem } from "@/lib/domain";
 
 import {
   DEFAULT_API_BASE,
+  fetchReanalysisCandidates,
   fetchUnanalyzedItems,
   postAnalysis,
   type FetchFn,
@@ -48,6 +56,13 @@ export interface AnalysisRunSummary {
 
 export interface AnalysisRunOptions {
   maxItemsPerRun: number;
+  /**
+   * 회차당 최대 재분석 건수(design.md D5). 기본값 0 — 재분석 조회 자체를 생략한다.
+   * 기존 호출자(테스트 포함)가 이 필드를 몰라도 이전과 똑같이 신규 분석만 도는
+   * 하위 호환을 위한 기본값이다. 실제 운용은 `resolveAnalyzerSettings`가 설정 파일의
+   * `analysis.maxReanalysisPerRun`을 채워 넣는다.
+   */
+  maxReanalysisPerRun?: number;
   baseUrl?: string;
   /** 미리 읽어둔 템플릿. 없으면 회차마다 파일에서 읽는다. */
   template?: string;
@@ -82,6 +97,7 @@ function describeError(error: unknown): string {
 export async function runAnalysisOnce(options: AnalysisRunOptions): Promise<AnalysisRunSummary> {
   const {
     maxItemsPerRun,
+    maxReanalysisPerRun = 0,
     baseUrl = process.env.AUCTIONBOSS_API_BASE ?? DEFAULT_API_BASE,
     promptVersion = PROMPT_VERSION,
     model = null,
@@ -94,21 +110,48 @@ export async function runAnalysisOnce(options: AnalysisRunOptions): Promise<Anal
   // 회차마다 읽는다 — 프롬프트를 고치고 다음 주기를 기다리면 반영되게 하기 위함.
   const template = options.template ?? loadPromptTemplate();
 
-  const { items, total } = await fetchUnanalyzedItems({ baseUrl, pageSize: maxItemsPerRun, fetchFn });
+  // 1단계: 신규 분석. 항상 먼저 조회하고, 항상 전량 처리한다 — 재분석이 이 한도를
+  // 잠식하지 않는다(design.md D4의 "신규 우선").
+  const { items: newItems, total: newTotal } = await fetchUnanalyzedItems({
+    baseUrl,
+    pageSize: maxItemsPerRun,
+    fetchFn,
+  });
 
-  if (items.length === 0) {
-    logger.info("[analyzer] 미분석 물건 없음");
+  // 2단계: 재분석. 한도가 설정된 경우에만 조회한다(하위 호환 기본값 0 → 조회 자체를
+  // 생략). 1단계에서 이미 고른 물건은 제외한다 — needsAnalysis=true 조건 중 "분석
+  // 없음"이 신규 물건과 겹칠 수 있기 때문이다(design.md D4 "신규 제외").
+  let reanalysisItems: AuctionItem[] = [];
+  if (maxReanalysisPerRun > 0) {
+    const alreadyPicked = new Set(newItems.map((item) => item.id));
+    const { items: candidates } = await fetchReanalysisCandidates({
+      baseUrl,
+      pageSize: maxReanalysisPerRun,
+      promptVersion,
+      fetchFn,
+    });
+    reanalysisItems = candidates.filter((item) => !alreadyPicked.has(item.id));
+  }
+
+  const targets = [...newItems, ...reanalysisItems];
+
+  if (targets.length === 0) {
+    // 두 메시지를 구분한다: 재분석 조회 자체를 안 한 경우(하위 호환 기본 동작)와
+    // 재분석까지 조회했는데도 없는 경우는 "무엇을 확인했는지"가 다르다.
+    logger.info(
+      maxReanalysisPerRun > 0 ? "[analyzer] 미분석 물건도 재분석 대상도 없음" : "[analyzer] 미분석 물건 없음",
+    );
     return { attempted: 0, succeeded: 0, failed: 0 };
   }
 
   logger.info(
-    `[analyzer] 미분석 ${total}건 중 이번 회차 ${items.length}건 분석 시작 (prompt=${promptVersion}` +
-      `${model ? `, model=${model}` : ""})`,
+    `[analyzer] 신규 ${newItems.length}건(전체 미분석 ${newTotal}건 중), 재분석 ${reanalysisItems.length}건 ` +
+      `분석 시작 (prompt=${promptVersion}${model ? `, model=${model}` : ""})`,
   );
 
-  const summary: AnalysisRunSummary = { attempted: items.length, succeeded: 0, failed: 0 };
+  const summary: AnalysisRunSummary = { attempted: targets.length, succeeded: 0, failed: 0 };
 
-  for (const item of items) {
+  for (const item of targets) {
     try {
       const prompt = renderItemPrompt(template, item);
       const result = await runClaude({ prompt, model, timeoutMs });
@@ -152,6 +195,7 @@ export function readPositiveIntEnv(name: string): number | undefined {
 export interface AnalyzerSettings {
   baseUrl: string;
   maxItemsPerRun: number;
+  maxReanalysisPerRun: number;
   intervalMs: number;
   model: string | null;
   timeoutMs: number;
@@ -166,6 +210,8 @@ export function resolveAnalyzerSettings(): AnalyzerSettings {
   return {
     baseUrl: process.env.AUCTIONBOSS_API_BASE ?? DEFAULT_API_BASE,
     maxItemsPerRun: readPositiveIntEnv("AUCTIONBOSS_ANALYZE_MAX") ?? config.analysis.maxItemsPerRun,
+    maxReanalysisPerRun:
+      readPositiveIntEnv("AUCTIONBOSS_ANALYZE_REANALYZE_MAX") ?? config.analysis.maxReanalysisPerRun,
     intervalMs: readPositiveIntEnv("AUCTIONBOSS_ANALYZE_INTERVAL_MS") ?? config.analysis.intervalMs,
     model: process.env.AUCTIONBOSS_ANALYZE_MODEL || null,
     timeoutMs: readPositiveIntEnv("AUCTIONBOSS_ANALYZE_TIMEOUT_MS") ?? DEFAULT_CLAUDE_TIMEOUT_MS,
@@ -197,6 +243,7 @@ export function startAnalyzer(
       await runAnalysisOnce({
         baseUrl: settings.baseUrl,
         maxItemsPerRun: settings.maxItemsPerRun,
+        maxReanalysisPerRun: settings.maxReanalysisPerRun,
         model: settings.model,
         timeoutMs: settings.timeoutMs,
         runClaude: deps?.runClaude,
@@ -213,7 +260,8 @@ export function startAnalyzer(
   };
 
   logger.info(
-    `[analyzer] 시작 — base=${settings.baseUrl}, 주기 ${settings.intervalMs}ms, 회차당 최대 ${settings.maxItemsPerRun}건`,
+    `[analyzer] 시작 — base=${settings.baseUrl}, 주기 ${settings.intervalMs}ms, ` +
+      `회차당 최대 신규 ${settings.maxItemsPerRun}건/재분석 ${settings.maxReanalysisPerRun}건`,
   );
 
   void tick();
@@ -233,12 +281,13 @@ async function main(): Promise<void> {
 
   if (once) {
     consoleLogger.info(
-      `[analyzer] 1회 실행 — base=${settings.baseUrl}, 최대 ${settings.maxItemsPerRun}건` +
-        `${settings.model ? `, model=${settings.model}` : ""}`,
+      `[analyzer] 1회 실행 — base=${settings.baseUrl}, 최대 신규 ${settings.maxItemsPerRun}건/` +
+        `재분석 ${settings.maxReanalysisPerRun}건${settings.model ? `, model=${settings.model}` : ""}`,
     );
     const summary = await runAnalysisOnce({
       baseUrl: settings.baseUrl,
       maxItemsPerRun: settings.maxItemsPerRun,
+      maxReanalysisPerRun: settings.maxReanalysisPerRun,
       model: settings.model,
       timeoutMs: settings.timeoutMs,
     });

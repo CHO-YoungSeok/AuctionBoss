@@ -71,6 +71,18 @@ export interface ItemQuery {
   pageSize?: number;
   /** `false`=분석 결과가 없는 물건만, `true`=있는 물건만, 생략=전체 */
   analyzed?: boolean;
+  /**
+   * `true`=재분석이 필요한 물건만(design.md D4). `analyzed`와 별개의 독립된 필터다 —
+   * `analyzed=false`의 의미(분석 행 없음)는 이 필드가 있어도 바뀌지 않는다.
+   * 항상 `promptVersion`과 함께 와야 한다(판정 조건 3이 프롬프트 버전 비교이기 때문).
+   */
+  needsAnalysis?: boolean;
+  /**
+   * `needsAnalysis=true` 판정에 쓸 호출자의 현재 프롬프트 버전. `needsAnalysis` 없이
+   * 단독으로 와도 오류는 아니지만(호출자가 다른 목적으로 보낼 수 있다) 아무 필터도
+   * 걸지 않는다 — `needsAnalysis`가 있을 때만 읽힌다.
+   */
+  promptVersion?: string;
   /** 용도. 하나라도 일치하면 통과(OR). 저장된 값과 **정확히** 일치해야 한다. */
   usageTypes?: string[];
   /** 최저매각가격 하한(원, 포함). 최저매각가격이 없는(NULL) 물건은 제외된다. */
@@ -96,6 +108,8 @@ export const ITEM_QUERY_PARAMS = [
   "page",
   "pageSize",
   "analyzed",
+  "needsAnalysis",
+  "promptVersion",
   "usage",
   "minPrice",
   "maxPrice",
@@ -132,6 +146,8 @@ interface RawItemQueryParams {
   page?: string;
   pageSize?: string;
   analyzed?: string;
+  needsAnalysis?: string;
+  promptVersion?: string;
   usage?: string[];
   minPrice?: string;
   maxPrice?: string;
@@ -235,6 +251,16 @@ const itemQueryParamsSchema = z
       })
       .transform((value) => value === "true")
       .optional(),
+    // "false"는 지원하지 않는다 — design.md D4가 추가하는 것은 "재분석이 필요한
+    // 물건만" 걸러내는 필터 하나뿐이고, "재분석이 필요 없는 물건만"이라는 반대
+    // 방향의 질의는 이 변경의 요구사항에 없다.
+    needsAnalysis: z
+      .enum(["true"], {
+        errorMap: () => ({ message: "needsAnalysis는 true만 지원합니다" }),
+      })
+      .transform(() => true)
+      .optional(),
+    promptVersion: z.string().min(1, "promptVersion 값은 비어 있을 수 없습니다").optional(),
     // 정규화 단계에서 빈 값이 걸러지므로(lenient) 또는 이슈로 남으므로(strict) 여기서는
     // 방어적 확인만 한다. 개수 상한(`MAX_USAGE_TYPES`)은 SQLite 바인딩 파라미터 상한에
     // 걸리기 전에 400으로 거절하기 위한 방어선이다.
@@ -259,6 +285,20 @@ const itemQueryParamsSchema = z
       .optional(),
   })
   .superRefine((params, ctx) => {
+    // needsAnalysis=true는 항상 promptVersion과 함께 와야 한다(design.md D4) — 판정
+    // 조건 3(프롬프트 버전 비교)의 비교 대상이 없으면 무엇을 "다른 버전"으로 볼지
+    // 정할 수 없다. 이슈를 needsAnalysis 쪽에 붙이는 이유: lenient가 실패한 파라미터를
+    // 이름으로 지워 재시도하는데, promptVersion은 애초에 안 왔으니 params에 없어
+    // 지울 대상이 못 된다 — needsAnalysis 쪽에 붙여야 lenient가 이 파라미터만 버리고
+    // 나머지 필터는 살릴 수 있다.
+    if (params.needsAnalysis === true && params.promptVersion === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["needsAnalysis"],
+        message: "needsAnalysis=true이면 promptVersion이 함께 있어야 합니다",
+      });
+    }
+
     if (params.minPrice === undefined || params.maxPrice === undefined) return;
     if (params.minPrice <= params.maxPrice) return;
     // 두 파라미터 각각에 오류를 붙인다. strict는 둘 다 알려주고, lenient는 이 경로를 보고
@@ -290,6 +330,8 @@ function toItemQuery(params: ParsedItemQueryParams): ItemQuery {
     pageSize: params.pageSize ?? DEFAULT_PAGE_SIZE,
   };
   if (params.analyzed !== undefined) query.analyzed = params.analyzed;
+  if (params.needsAnalysis !== undefined) query.needsAnalysis = params.needsAnalysis;
+  if (params.promptVersion !== undefined) query.promptVersion = params.promptVersion;
   if (params.usage !== undefined) query.usageTypes = params.usage;
   if (params.minPrice !== undefined) query.minPrice = params.minPrice;
   if (params.maxPrice !== undefined) query.maxPrice = params.maxPrice;
@@ -389,6 +431,9 @@ export function parseItemQueryLenient(input: SearchParamsLike): ItemQuery {
 export function hasActiveFilters(query: ItemQuery): boolean {
   return (
     query.analyzed !== undefined ||
+    // promptVersion은 여기 넣지 않는다 — needsAnalysis 없이 단독으로는 아무 것도
+    // 좁히지 않는다(위 ItemQuery.promptVersion 주석 참조).
+    query.needsAnalysis !== undefined ||
     (query.usageTypes !== undefined && query.usageTypes.length > 0) ||
     query.minPrice !== undefined ||
     query.maxPrice !== undefined ||

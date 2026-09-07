@@ -125,8 +125,17 @@ export interface CollectScope {
 
 /** `config/collector.json`의 analysis 절. */
 export interface AnalysisConfig {
-  /** 분석 회차당 최대 건수 — Claude 호출 비용 통제용 (design.md D5) */
+  /**
+   * 분석 회차당 최대 **신규** 분석 건수 — Claude 호출 비용 통제용 (design.md D5).
+   * 재분석은 이 한도와 무관하다 — `maxReanalysisPerRun`이 따로 있다.
+   */
   maxItemsPerRun: number;
+  /**
+   * 분석 회차당 최대 **재분석** 건수(design.md D5). 신규 분석과 별개의 독립된 한도다 —
+   * 총 호출 수 상한은 `maxItemsPerRun + maxReanalysisPerRun`이다. 기본값은 2 — 재분석은
+   * 유찰이 발생할 때마다 생기고 상한이 없으면 유찰이 몰린 날 호출이 폭증한다.
+   */
+  maxReanalysisPerRun: number;
   /** 분석 워커 주기(ms) */
   intervalMs: number;
 }

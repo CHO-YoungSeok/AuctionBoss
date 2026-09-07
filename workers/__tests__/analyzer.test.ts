@@ -87,6 +87,48 @@ function makeFetch(items: AuctionItem[], options?: { postStatus?: number }) {
   return { fetchFn, calls, posts };
 }
 
+/**
+ * 재분석 테스트용 가짜 서버. `analyzed=false`와 `needsAnalysis=true`를 URL로 구분해
+ * 서로 다른 물건 목록을 돌려준다 — 실제 API처럼 `pageSize`만큼만 잘라서 응답한다
+ * (신규 우선 배정 테스트가 "서버가 한도만큼만 돌려준다"에 의존하기 때문이다).
+ */
+function makeTwoPassFetch(options: {
+  newItems: AuctionItem[];
+  reanalysisItems: AuctionItem[];
+  postStatus?: number;
+}) {
+  const { newItems, reanalysisItems, postStatus = 201 } = options;
+  const calls: FetchCall[] = [];
+  const posts: unknown[] = [];
+
+  const fetchFn = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+    calls.push({ url, init });
+    const parsed = new URL(url);
+
+    if (parsed.pathname === "/api/items") {
+      const pageSize = Number(parsed.searchParams.get("pageSize") ?? "0");
+      const pool = parsed.searchParams.get("needsAnalysis") === "true" ? reanalysisItems : newItems;
+      const page = pool.slice(0, pageSize);
+      return new Response(JSON.stringify({ items: page, total: pool.length, page: 1, pageSize }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    if (parsed.pathname === "/api/analyses") {
+      posts.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ ok: postStatus < 400 }), {
+        status: postStatus,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    throw new Error(`예상하지 못한 요청: ${url}`);
+  });
+
+  return { fetchFn, calls, posts };
+}
+
 function makeLogger(): Logger & { lines: string[] } {
   const lines: string[] = [];
   return {
@@ -317,6 +359,157 @@ describe("runAnalysisOnce", () => {
         logger: makeLogger(),
       }),
     ).rejects.toThrow(/형식이 예상과 다릅니다/);
+  });
+});
+
+/**
+ * 재분석(design.md D4/D5, tasks 5.1-5.4). `runAnalysisOnce`가 두 단계로 대상을 조회하는
+ * 규칙만 검증한다 — 실제 재분석 판정(SQL)은 `src/lib/db/__tests__/repository.test.ts`의
+ * `listItems — needsAnalysis`가 고정한다.
+ */
+describe("runAnalysisOnce — 재분석", () => {
+  it("maxReanalysisPerRun을 생략하면(기본값 0) 재분석 조회 자체를 하지 않는다(하위 호환)", async () => {
+    const newItem = makeItem({ id: 1 });
+    // reanalysisItems를 채워도 pageSize=0인 요청 자체가 안 나가야 한다.
+    const { fetchFn, calls, posts } = makeTwoPassFetch({
+      newItems: [newItem],
+      reanalysisItems: [makeItem({ id: 99 })],
+    });
+
+    const summary = await runAnalysisOnce({
+      baseUrl: BASE,
+      maxItemsPerRun: 5,
+      template: TEMPLATE,
+      fetchFn,
+      runClaude: async () => ({ text: "요약", model: null }),
+      logger: makeLogger(),
+    });
+
+    expect(summary).toEqual({ attempted: 1, succeeded: 1, failed: 0 });
+    expect(posts.map((p) => (p as { itemId: number }).itemId)).toEqual([1]);
+    expect(calls.filter((c) => c.url.includes("needsAnalysis"))).toHaveLength(0);
+  });
+
+  it("신규와 재분석을 각각 조회해 함께 분석하고, 재분석 조회는 워커의 프롬프트 버전을 함께 보낸다", async () => {
+    const newItem = makeItem({ id: 1 });
+    const reItem = makeItem({ id: 2 });
+    const { fetchFn, calls, posts } = makeTwoPassFetch({
+      newItems: [newItem],
+      reanalysisItems: [reItem],
+    });
+    const logger = makeLogger();
+
+    const summary = await runAnalysisOnce({
+      baseUrl: BASE,
+      maxItemsPerRun: 5,
+      maxReanalysisPerRun: 3,
+      template: TEMPLATE,
+      fetchFn,
+      runClaude: async () => ({ text: "요약", model: null }),
+      logger,
+    });
+
+    expect(summary).toEqual({ attempted: 2, succeeded: 2, failed: 0 });
+    expect(posts.map((p) => (p as { itemId: number }).itemId).sort()).toEqual([1, 2]);
+
+    const itemCalls = calls.filter((c) => c.url.includes("/api/items"));
+    expect(itemCalls).toHaveLength(2);
+    expect(itemCalls[0]?.url).toBe(`${BASE}/api/items?analyzed=false&pageSize=5`);
+    expect(itemCalls[1]?.url).toBe(
+      `${BASE}/api/items?needsAnalysis=true&promptVersion=${PROMPT_VERSION}&pageSize=3`,
+    );
+
+    const log = logger.lines.join("\n");
+    expect(log).toContain("신규 1건");
+    expect(log).toContain("재분석 1건");
+  });
+
+  it("재분석 후보에 신규 패스가 이미 고른 물건이 섞여 있으면 제외한다(조건 1이 신규와 겹칠 수 있다, design.md D4)", async () => {
+    const shared = makeItem({ id: 1 });
+    const onlyReanalysis = makeItem({ id: 2 });
+    const { fetchFn, posts } = makeTwoPassFetch({
+      newItems: [shared],
+      reanalysisItems: [shared, onlyReanalysis],
+    });
+
+    const summary = await runAnalysisOnce({
+      baseUrl: BASE,
+      maxItemsPerRun: 5,
+      maxReanalysisPerRun: 5,
+      template: TEMPLATE,
+      fetchFn,
+      runClaude: async () => ({ text: "요약", model: null }),
+      logger: makeLogger(),
+    });
+
+    expect(summary).toEqual({ attempted: 2, succeeded: 2, failed: 0 });
+    // id 1은 신규 패스로 한 번만 처리된다 — 재분석 패스에서 다시 잡히지 않는다.
+    expect(posts.map((p) => (p as { itemId: number }).itemId)).toEqual([1, 2]);
+  });
+
+  it("스펙 시나리오 — 신규 분석 우선: 회차 총 한도가 후보 합보다 작으면 신규가 먼저 전량 배정되고 재분석은 남은 한도만 쓴다", async () => {
+    const newItems = [makeItem({ id: 1 }), makeItem({ id: 2 }), makeItem({ id: 3 })];
+    const reanalysisItems = [makeItem({ id: 11 }), makeItem({ id: 12 }), makeItem({ id: 13 })];
+    const { fetchFn, posts } = makeTwoPassFetch({ newItems, reanalysisItems });
+
+    const summary = await runAnalysisOnce({
+      baseUrl: BASE,
+      maxItemsPerRun: 2, // 신규 후보 3건 중 2건만 한도
+      maxReanalysisPerRun: 1, // 재분석 후보 3건 중 1건만 한도
+      template: TEMPLATE,
+      fetchFn,
+      runClaude: async () => ({ text: "요약", model: null }),
+      logger: makeLogger(),
+    });
+
+    expect(summary).toEqual({ attempted: 3, succeeded: 3, failed: 0 });
+    const ids = posts.map((p) => (p as { itemId: number }).itemId);
+    expect(ids.filter((id) => id === 1 || id === 2)).toHaveLength(2); // 신규는 한도만큼 전량
+    expect(ids).toContain(11); // 재분석은 한도(1)만큼만
+    expect(ids).not.toContain(3); // 신규 3번째는 이번 회차 한도를 넘는다
+    expect(ids).not.toContain(12);
+    expect(ids).not.toContain(13);
+  });
+
+  it("재분석은 새 POST로 추가될 뿐이다 — 삭제 요청을 보내지 않는다(이전 분석 보존은 저장소가 보장한다, repository.test.ts의 listAnalyses 참고)", async () => {
+    const reItem = makeItem({ id: 7 });
+    const { fetchFn, calls, posts } = makeTwoPassFetch({ newItems: [], reanalysisItems: [reItem] });
+
+    await runAnalysisOnce({
+      baseUrl: BASE,
+      maxItemsPerRun: 5,
+      maxReanalysisPerRun: 5,
+      template: TEMPLATE,
+      fetchFn,
+      runClaude: async () => ({ text: "재분석 결과", model: null }),
+      logger: makeLogger(),
+    });
+
+    expect(posts).toEqual([{ itemId: 7, body: "재분석 결과", promptVersion: PROMPT_VERSION }]);
+    for (const call of calls) {
+      expect(["GET", "POST"]).toContain(call.init?.method ?? "GET");
+    }
+  });
+
+  it("미분석도 재분석 대상도 없으면 Claude를 호출하지 않고 정상 종료한다", async () => {
+    const { fetchFn, posts } = makeTwoPassFetch({ newItems: [], reanalysisItems: [] });
+    const runClaude = vi.fn();
+    const logger = makeLogger();
+
+    const summary = await runAnalysisOnce({
+      baseUrl: BASE,
+      maxItemsPerRun: 5,
+      maxReanalysisPerRun: 3,
+      template: TEMPLATE,
+      fetchFn,
+      runClaude,
+      logger,
+    });
+
+    expect(summary).toEqual({ attempted: 0, succeeded: 0, failed: 0 });
+    expect(runClaude).not.toHaveBeenCalled();
+    expect(posts).toHaveLength(0);
+    expect(logger.lines.join("\n")).toContain("미분석 물건도 재분석 대상도 없음");
   });
 });
 

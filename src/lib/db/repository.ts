@@ -221,6 +221,57 @@ function baselineWatchedChanges(incoming: AuctionItemInput): DetectedChange[] {
 const ANALYZED_EXISTS = "EXISTS (SELECT 1 FROM analyses WHERE analyses.item_id = items.id)";
 
 /**
+ * 재분석 대상 판정 SQL (design.md D4). 세 조건의 OR:
+ * 1) 분석 행이 아예 없음
+ * 2) 최신 분석 이후에 **실제** 변경(`old_value IS NOT NULL` — 기준점 제외)이 있음
+ * 3) 최신 분석의 `prompt_version`이 요청된 `@promptVersion`과 다름(같음/다름만 본다 —
+ *    세만틱 버전 비교를 하지 않는 이유는 design.md D4에 기록돼 있다)
+ *
+ * "최신 분석"의 기준(`analyzed_at DESC, id DESC`)은 `getLatestAnalysis`와 같다.
+ * 조건 2는 `>` (초과)를 쓴다 — 최신 분석과 같은 시각이거나 그 이전 변경은 이미 그
+ * 분석에 반영됐다고 본다(경계 포함이면 분석 직후의 자기 자신 이력까지 재분석 대상으로
+ * 오판할 수 있다).
+ *
+ * `@promptVersion` 바인딩이 필요하다 — 없으면 `buildFilter`가 미리 막는다.
+ */
+const NEEDS_ANALYSIS_PREDICATE = `(
+  NOT EXISTS (SELECT 1 FROM analyses na WHERE na.item_id = items.id)
+  OR EXISTS (
+    SELECT 1 FROM item_changes nc
+    WHERE nc.item_id = items.id
+      AND nc.old_value IS NOT NULL
+      AND nc.changed_at > (
+        SELECT nla.analyzed_at FROM analyses nla
+        WHERE nla.item_id = items.id
+        ORDER BY nla.analyzed_at DESC, nla.id DESC
+        LIMIT 1
+      )
+  )
+  OR (
+    SELECT nlv.prompt_version FROM analyses nlv
+    WHERE nlv.item_id = items.id
+    ORDER BY nlv.analyzed_at DESC, nlv.id DESC
+    LIMIT 1
+  ) != @promptVersion
+)`;
+
+/**
+ * 재분석 후보 정렬: 가장 오래 전에 분석된 것 우선(`analyzed_at ASC`, design.md D5) —
+ * 최신 변경 우선으로 하면 자주 바뀌는 물건이 재분석 한도를 독점한다.
+ *
+ * 분석이 아예 없는 물건(조건 1)은 서브쿼리가 NULL을 내고, SQLite는 ASC에서 NULL을
+ * 맨 앞에 둔다 — 하지만 이 값은 `listItems`가 `analyzed=false`로 이미 신규 한도만큼
+ * 가져간 물건과 겹칠 수 있어 워커가 두 결과를 합칠 때 중복을 제거한다(workers/analyzer.ts,
+ * design.md D4의 "신규 제외"). 이 순서 자체가 그 dedupe를 보장하지는 않는다.
+ */
+const NEEDS_ANALYSIS_ORDER = `ORDER BY (
+  SELECT ord.analyzed_at FROM analyses ord
+  WHERE ord.item_id = items.id
+  ORDER BY ord.analyzed_at DESC, ord.id DESC
+  LIMIT 1
+) ASC, items.id ASC`;
+
+/**
  * 정렬 기준 → SQL 표현식 화이트리스트 (design.md D2).
  *
  * 사용자 입력이 SQL에 직접 들어가는 경로를 만들지 않는다. `SortKey`에 없는 값은
@@ -297,6 +348,18 @@ function buildFilter(query: ItemQuery): Filter {
     throw new Error(`지원하지 않는 analyzed 값: ${String(query.analyzed)}`);
   }
 
+  if (query.needsAnalysis === true) {
+    // API 계층(item-query.ts의 strict 파서)이 이미 이 조합을 막지만, 저장소를 직접
+    // 호출하는 경로(테스트 포함)도 조용히 잘못된 결과를 내지 않고 던지게 한다.
+    if (query.promptVersion === undefined) {
+      throw new Error("needsAnalysis=true이면 promptVersion이 필요합니다");
+    }
+    conditions.push(NEEDS_ANALYSIS_PREDICATE);
+    params.promptVersion = query.promptVersion;
+  } else if (query.needsAnalysis !== undefined) {
+    throw new Error(`지원하지 않는 needsAnalysis 값: ${String(query.needsAnalysis)}`);
+  }
+
   const usageTypes = query.usageTypes?.filter((usageType) => usageType !== "");
   if (usageTypes !== undefined && usageTypes.length > 0) {
     const placeholders = usageTypes.map((usageType, index) => {
@@ -352,6 +415,8 @@ export interface AuctionRepository {
   listUsageTypes(): string[];
   insertAnalysis(input: AnalysisInput, options?: { now?: IsoDateTime }): Analysis;
   getLatestAnalysis(itemId: number): Analysis | null;
+  /** 물건의 모든 분석을 최신순으로 돌려준다(재분석 이력 열람용, task 6.3). 없으면 빈 배열. */
+  listAnalyses(itemId: number): Analysis[];
   /** 물건의 변경 이력을 시간순으로 돌려준다. 이력이 없으면 빈 배열이다(오류가 아니다). */
   listItemChanges(itemId: number): ItemChange[];
 }
@@ -425,6 +490,12 @@ export function createRepository(db: Db): AuctionRepository {
     WHERE item_id = @itemId
     ORDER BY analyzed_at DESC, id DESC
     LIMIT 1
+  `);
+
+  const selectAnalyses = db.prepare<{ itemId: number }, AnalysisRow>(`
+    SELECT * FROM analyses
+    WHERE item_id = @itemId
+    ORDER BY analyzed_at DESC, id DESC
   `);
 
   const selectUsageTypes = db.prepare<[], { usage_type: string }>(`
@@ -503,7 +574,12 @@ export function createRepository(db: Db): AuctionRepository {
       const page = normalizePage(query.page);
       const pageSize = normalizePageSize(query.pageSize);
       const filter = buildFilter(query);
-      const orderBy = orderByClause(query.sort, query.direction);
+      // 재분석 후보 조회는 정렬 기준이 고정이다(design.md D5, 가장 오래 분석된 것
+      // 우선) — 호출자가 준 sort/direction은 이 모드에서는 쓰이지 않는다.
+      const orderBy =
+        query.needsAnalysis === true
+          ? NEEDS_ANALYSIS_ORDER
+          : orderByClause(query.sort, query.direction);
 
       // 필터 조합마다 SQL이 달라져 문장을 미리 준비해 둘 수 없다 — 그때그때 `db.prepare`한다.
       // 현재 규모(수백 건, 페이지당 요청)에서 `db.prepare` 자체의 비용은 무시할 만큼 작다
@@ -577,6 +653,10 @@ export function createRepository(db: Db): AuctionRepository {
       const row = selectLatestAnalysis.get({ itemId });
       return row ? toAnalysis(row) : null;
     },
+
+    listAnalyses(itemId) {
+      return selectAnalyses.all({ itemId }).map(toAnalysis);
+    },
   };
 }
 
@@ -621,6 +701,10 @@ export function insertAnalysis(
 
 export function getLatestAnalysis(itemId: number): Analysis | null {
   return getRepository().getLatestAnalysis(itemId);
+}
+
+export function listAnalyses(itemId: number): Analysis[] {
+  return getRepository().listAnalyses(itemId);
 }
 
 export function listItemChanges(itemId: number): ItemChange[] {

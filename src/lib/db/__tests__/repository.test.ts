@@ -526,6 +526,193 @@ describe("listItems — lastChangedAt (design.md D6)", () => {
 });
 
 /**
+ * 재분석 대상 판정(design.md D4). 세 조건의 OR — 분석 없음 / 최신 분석 이후 실제 변경 /
+ * 최신 분석의 prompt_version이 요청 버전과 다름. `analyzed=false`의 의미(분석 행 없음)는
+ * 이 필터가 있어도 바뀌지 않아야 한다(회귀).
+ */
+describe("listItems — needsAnalysis (design.md D4)", () => {
+  it("[회귀] needsAnalysis와 무관하게 analyzed=false는 여전히 '분석 없음'만 뜻한다", () => {
+    repo.upsertItems([makeItem({ itemNo: "1" }), makeItem({ itemNo: "2" })], {
+      now: "2026-01-01T00:00:00.000Z",
+    });
+    const [item1, item2] = repo.listItems({ pageSize: 10 }).items;
+    repo.insertAnalysis(
+      { itemId: item1!.id, body: "x", model: null, promptVersion: "v1" },
+      { now: "2026-01-02T00:00:00.000Z" },
+    );
+    // item1은 분석 이후 값이 바뀌어 재분석 대상이 되지만, "분석 자체는 있다"는 사실은
+    // 바뀌지 않는다 — analyzed=false 결과에서 계속 빠져야 한다.
+    repo.upsertItems([makeItem({ itemNo: "1", minBidPrice: 1 })], {
+      now: "2026-01-03T00:00:00.000Z",
+    });
+
+    const unanalyzed = repo.listItems({ analyzed: false, pageSize: 10 });
+    expect(unanalyzed.items.map((item) => item.id)).toEqual([item2!.id]);
+
+    const needsReanalysis = repo.listItems({
+      needsAnalysis: true,
+      promptVersion: "v1",
+      pageSize: 10,
+    });
+    const ids = needsReanalysis.items.map((item) => item.id);
+    expect(ids).toContain(item1!.id); // 실제 변경이 있어 대상
+    expect(ids).toContain(item2!.id); // 분석 자체가 없어 대상(조건 1)
+  });
+
+  it("분석이 아예 없으면 재분석 대상이다(조건 1)", () => {
+    repo.upsertItems([makeItem()]);
+    const item = repo.listItems({ pageSize: 10 }).items[0]!;
+
+    const result = repo.listItems({ needsAnalysis: true, promptVersion: "v1", pageSize: 10 });
+    expect(result.items.map((i) => i.id)).toContain(item.id);
+  });
+
+  it("스펙 시나리오 — 변경된 물건 재분석: 최신 분석 이후 실제 변경이 있으면 대상이다(조건 2)", () => {
+    repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" });
+    const item = repo.listItems({ pageSize: 10 }).items[0]!;
+    repo.insertAnalysis(
+      { itemId: item.id, body: "x", model: null, promptVersion: "v1" },
+      { now: "2026-01-02T00:00:00.000Z" },
+    );
+    repo.upsertItems([makeItem({ minBidPrice: 1 })], { now: "2026-01-03T00:00:00.000Z" });
+
+    const result = repo.listItems({ needsAnalysis: true, promptVersion: "v1", pageSize: 10 });
+    expect(result.items.map((i) => i.id)).toContain(item.id);
+  });
+
+  it("스펙 시나리오 — 프롬프트 버전 갱신에 따른 재분석: 변경이 없어도 버전이 다르면 대상이다(조건 3)", () => {
+    repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" });
+    const item = repo.listItems({ pageSize: 10 }).items[0]!;
+    repo.insertAnalysis(
+      { itemId: item.id, body: "x", model: null, promptVersion: "v1" },
+      { now: "2026-01-02T00:00:00.000Z" },
+    );
+
+    const sameVersion = repo.listItems({ needsAnalysis: true, promptVersion: "v1", pageSize: 10 });
+    expect(sameVersion.items.map((i) => i.id)).not.toContain(item.id);
+
+    const differentVersion = repo.listItems({
+      needsAnalysis: true,
+      promptVersion: "v2",
+      pageSize: 10,
+    });
+    expect(differentVersion.items.map((i) => i.id)).toContain(item.id);
+  });
+
+  it("버전을 되돌려도(v2→v1) 다르면 대상이다 — 같음/다름만 본다(세만틱 비교가 아니다, design.md D4)", () => {
+    repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" });
+    const item = repo.listItems({ pageSize: 10 }).items[0]!;
+    repo.insertAnalysis(
+      { itemId: item.id, body: "x", model: null, promptVersion: "v2" },
+      { now: "2026-01-02T00:00:00.000Z" },
+    );
+
+    const result = repo.listItems({ needsAnalysis: true, promptVersion: "v1", pageSize: 10 });
+    expect(result.items.map((i) => i.id)).toContain(item.id);
+  });
+
+  it("스펙 시나리오 — 변경 없고 버전도 같은 물건: 재분석 대상이 아니다", () => {
+    repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" });
+    const item = repo.listItems({ pageSize: 10 }).items[0]!;
+    repo.insertAnalysis(
+      { itemId: item.id, body: "x", model: null, promptVersion: "v1" },
+      { now: "2026-01-02T00:00:00.000Z" },
+    );
+
+    const result = repo.listItems({ needsAnalysis: true, promptVersion: "v1", pageSize: 10 });
+    expect(result.items.map((i) => i.id)).not.toContain(item.id);
+  });
+
+  it("경계: 최신 분석보다 이전의 변경은 재분석 대상으로 만들지 않는다(그 분석이 이미 반영했다)", () => {
+    repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" }); // 기준점
+    repo.upsertItems([makeItem({ minBidPrice: 1 })], { now: "2026-01-02T00:00:00.000Z" }); // 실제 변경
+    const item = repo.listItems({ pageSize: 10 }).items[0]!;
+    // 분석이 그 변경 이후에 이뤄졌다.
+    repo.insertAnalysis(
+      { itemId: item.id, body: "x", model: null, promptVersion: "v1" },
+      { now: "2026-01-03T00:00:00.000Z" },
+    );
+
+    const result = repo.listItems({ needsAnalysis: true, promptVersion: "v1", pageSize: 10 });
+    expect(result.items.map((i) => i.id)).not.toContain(item.id);
+  });
+
+  it("기준점 행(old_value IS NULL)은 재분석 대상으로 만들지 않는다(design.md D2)", () => {
+    repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" }); // 기준점만 존재
+    const item = repo.listItems({ pageSize: 10 }).items[0]!;
+    repo.insertAnalysis(
+      { itemId: item.id, body: "x", model: null, promptVersion: "v1" },
+      { now: "2026-01-02T00:00:00.000Z" }, // 기준점(2026-01-01)보다 나중
+    );
+
+    const result = repo.listItems({ needsAnalysis: true, promptVersion: "v1", pageSize: 10 });
+    expect(result.items.map((i) => i.id)).not.toContain(item.id);
+  });
+
+  it("재분석 후보는 가장 오래 분석된 것부터 정렬된다(analyzed_at ASC, design.md D5)", () => {
+    repo.upsertItems([
+      makeItem({ itemNo: "1" }),
+      makeItem({ itemNo: "2" }),
+      makeItem({ itemNo: "3" }),
+    ]);
+    const items = repo.listItems({ pageSize: 10 }).items;
+    const idOf = (no: string) => items.find((item) => item.itemNo === no)!.id;
+
+    repo.insertAnalysis(
+      { itemId: idOf("2"), body: "x", model: null, promptVersion: "v0" },
+      { now: "2026-01-05T00:00:00.000Z" },
+    );
+    repo.insertAnalysis(
+      { itemId: idOf("1"), body: "x", model: null, promptVersion: "v0" },
+      { now: "2026-01-01T00:00:00.000Z" },
+    );
+    repo.insertAnalysis(
+      { itemId: idOf("3"), body: "x", model: null, promptVersion: "v0" },
+      { now: "2026-01-10T00:00:00.000Z" },
+    );
+    // 셋 다 프롬프트 버전이 달라 재분석 대상이다 — 정렬 순서만 확인한다.
+    const result = repo.listItems({ needsAnalysis: true, promptVersion: "v1", pageSize: 10 });
+    expect(result.items.map((item) => item.itemNo)).toEqual(["1", "2", "3"]);
+  });
+
+  it("sort/direction을 줘도 needsAnalysis 모드에서는 analyzed_at ASC로 고정된다", () => {
+    repo.upsertItems([makeItem({ itemNo: "1" }), makeItem({ itemNo: "2" })]);
+    const items = repo.listItems({ pageSize: 10 }).items;
+    const idOf = (no: string) => items.find((item) => item.itemNo === no)!.id;
+
+    repo.insertAnalysis(
+      { itemId: idOf("2"), body: "x", model: null, promptVersion: "v0" },
+      { now: "2026-01-01T00:00:00.000Z" },
+    );
+    repo.insertAnalysis(
+      { itemId: idOf("1"), body: "x", model: null, promptVersion: "v0" },
+      { now: "2026-01-05T00:00:00.000Z" },
+    );
+
+    const result = repo.listItems({
+      needsAnalysis: true,
+      promptVersion: "v1",
+      sort: "minBidPrice",
+      direction: "desc",
+      pageSize: 10,
+    });
+    // sort=minBidPrice desc를 따랐다면 순서가 달랐을 것 — analyzed_at asc(2번이 먼저)를 확인한다.
+    expect(result.items.map((item) => item.itemNo)).toEqual(["2", "1"]);
+  });
+
+  it("promptVersion 없이 needsAnalysis:true를 요청하면 저장소가 던진다(API 계층 없이 직접 호출해도 방어)", () => {
+    repo.upsertItems([makeItem()]);
+    expect(() => repo.listItems({ needsAnalysis: true, pageSize: 10 })).toThrow(/promptVersion/);
+  });
+
+  it("지원하지 않는 needsAnalysis 값(false)은 던진다(sort 화이트리스트와 같은 방어)", () => {
+    expect(() => repo.listItems({ needsAnalysis: false, pageSize: 10 })).toThrow(
+      /지원하지 않는 needsAnalysis/,
+    );
+  });
+});
+
+/**
  * 필터·정렬용 데이터셋.
  *
  * | itemNo | 용도                     | 최저가 | 감정가 | 매각기일   | 유찰 | 소재지                    |
@@ -899,5 +1086,48 @@ describe("insertAnalysis / getLatestAnalysis", () => {
     db.prepare("DELETE FROM items WHERE id = ?").run(itemId);
 
     expect(db.prepare("SELECT COUNT(*) AS n FROM analyses").get()).toEqual({ n: 0 });
+  });
+});
+
+describe("listAnalyses", () => {
+  let itemId: number;
+
+  beforeEach(() => {
+    repo.upsertItems([makeItem()]);
+    itemId = repo.listItems().items[0]!.id;
+  });
+
+  it("분석이 없으면 빈 배열이다", () => {
+    expect(repo.listAnalyses(itemId)).toEqual([]);
+  });
+
+  it("최신순(analyzed_at DESC)으로 전부 돌려준다 — 재분석이 이전 분석을 지우지 않는다(spec '이전 분석 보존')", () => {
+    repo.insertAnalysis(
+      { itemId, body: "old", model: null, promptVersion: "v1" },
+      { now: "2026-01-01T00:00:00.000Z" },
+    );
+    repo.insertAnalysis(
+      { itemId, body: "new", model: null, promptVersion: "v2" },
+      { now: "2026-02-01T00:00:00.000Z" },
+    );
+
+    const analyses = repo.listAnalyses(itemId);
+    expect(analyses).toHaveLength(2);
+    expect(analyses.map((a) => a.body)).toEqual(["new", "old"]);
+    expect(analyses.map((a) => a.promptVersion)).toEqual(["v2", "v1"]);
+  });
+
+  it("다른 물건의 분석과 섞이지 않는다", () => {
+    repo.upsertItems([makeItem({ itemNo: "2" })]);
+    const other = repo.listItems({ pageSize: 10 }).items.find((item) => item.itemNo === "2")!;
+    repo.insertAnalysis({ itemId, body: "a", model: null, promptVersion: "v1" });
+    repo.insertAnalysis({ itemId: other.id, body: "b", model: null, promptVersion: "v1" });
+
+    expect(repo.listAnalyses(itemId).map((a) => a.body)).toEqual(["a"]);
+    expect(repo.listAnalyses(other.id).map((a) => a.body)).toEqual(["b"]);
+  });
+
+  it("존재하지 않는 물건 id도 오류 없이 빈 배열을 돌려준다", () => {
+    expect(repo.listAnalyses(999_999)).toEqual([]);
   });
 });

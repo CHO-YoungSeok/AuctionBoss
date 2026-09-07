@@ -10,6 +10,7 @@
   "intervalMs": 600000,
   "analysis": {
     "maxItemsPerRun": 5,
+    "maxReanalysisPerRun": 2,
     "intervalMs": 600000
   }
 }
