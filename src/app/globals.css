@@ -302,6 +302,35 @@ tbody tr:hover {
   white-space: nowrap;
 }
 
+/* 이전 분석 열람 (물건 상세, task 6.3). 클라이언트 JS 없이 동작해야 해서 네이티브
+   <details>/<summary>를 쓴다 — 여기 스타일은 접힘/펼침 시각 표현만 담당한다. */
+.analysis-history {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #eceff3;
+}
+
+.analysis-history summary {
+  color: #1a4fd6;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.analysis-history summary:hover {
+  text-decoration: underline;
+}
+
+.analysis-history-list {
+  list-style: none;
+  margin-top: 0.75rem;
+}
+
+.analysis-history-list > li + li {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #eceff3;
+}
+
 .analysis-body {
   margin-top: 0.75rem;
   padding: 1rem;

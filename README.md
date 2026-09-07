@@ -59,6 +59,11 @@
 - **analyzer는 DB를 직접 열지 않는다.** 서버와는 HTTP로만 통신하므로, 분석기를 다른 머신으로
   옮기거나 여러 대로 늘려도 서버 코드는 바뀌지 않는다. 대신 **서버가 떠 있어야만 분석이 돈다.**
 
+analyzer는 한 회차에 서버를 **두 번** 조회한다: 먼저 `GET /api/items?analyzed=false`로 신규
+미분석 물건을, 그다음 `GET /api/items?needsAnalysis=true&promptVersion=<현재 버전>`로 재분석
+대상을 가져온다(§6 "변경 이력과 재분석" 참고). 신규 조회가 항상 먼저이고 전량 처리되므로,
+재분석 대상이 아무리 쌓여도 신규 분석 물건이 뒤로 밀리지 않는다.
+
 ## 2. 사전 요건
 
 | 항목 | 확인된 버전 / 조건 |
@@ -134,6 +139,7 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
   "intervalMs": 600000,
   "analysis": {
     "maxItemsPerRun": 5,
+    "maxReanalysisPerRun": 2,
     "intervalMs": 600000
   }
 }
@@ -141,12 +147,13 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 
 | 필드 | 기본값 | 의미와 바꿨을 때의 효과 |
 | --- | --- | --- |
-| `scope.courts[]` | 서울중앙지방법원 1곳 | 수집 대상 법원 목록. 최소 1곳 필요(빈 배열이면 시작 시 `CollectorConfigError`). 법원을 늘리면 **법원 수만큼 요청이 배로 늘어난다** — 로봇탐지 위험이 그만큼 커진다(§6). |
+| `scope.courts[]` | 서울중앙지방법원 1곳 | 수집 대상 법원 목록. 최소 1곳 필요(빈 배열이면 시작 시 `CollectorConfigError`). 법원을 늘리면 **법원 수만큼 요청이 배로 늘어난다** — 로봇탐지 위험이 그만큼 커진다(§7). |
 | `scope.courts[].name` | `"서울중앙지방법원"` | 법원 이름. DB `items.court`에 그대로 저장되는 값이다. |
 | `scope.courts[].courtCode` | `"B000210"` | 사이트의 `cortOfcCd`. 빈 문자열이면 어댑터가 `name`으로 `src/lib/sources/courtauction/courts.ts`의 60개 코드표에서 찾는다. 다른 법원 코드는 그 파일 참조. |
-| `intervalMs` | `600000` (10분) | collector 수집 주기. **늘리는 것이 안전한 방향이다** — §6 참고. 이전 회차가 아직 안 끝났으면 이번 tick은 건너뛴다(중첩 실행 없음). |
-| `analysis.maxItemsPerRun` | `5` | analyzer 한 회차에 분석할 최대 물건 수. Claude 호출 비용의 상한이다. 올리면 회차당 비용과 소요 시간이 비례해 늘어난다(호출은 순차 실행). |
-| `analysis.intervalMs` | `600000` (10분) | analyzer 주기. 미분석 물건이 없으면 `[analyzer] 미분석 물건 없음`만 찍고 아무것도 호출하지 않는다. |
+| `intervalMs` | `600000` (10분) | collector 수집 주기. **늘리는 것이 안전한 방향이다** — §7 참고. 이전 회차가 아직 안 끝났으면 이번 tick은 건너뛴다(중첩 실행 없음). |
+| `analysis.maxItemsPerRun` | `5` | analyzer 한 회차에 분석할 최대 **신규** 물건 수(아직 분석 결과가 하나도 없는 물건). Claude 호출 비용의 상한이다. 올리면 회차당 비용과 소요 시간이 비례해 늘어난다(호출은 순차 실행). |
+| `analysis.maxReanalysisPerRun` | `2` | analyzer 한 회차에 재분석할 최대 물건 수(§6 참고). `maxItemsPerRun`과는 **독립된 별도 한도**다 — 회차당 총 Claude 호출 수 상한은 두 값의 **합**(`maxItemsPerRun + maxReanalysisPerRun`, 기본 5+2=7)이지, 하나의 한도를 나눠 쓰는 게 아니다. |
+| `analysis.intervalMs` | `600000` (10분) | analyzer 주기. 신규 미분석 물건도 재분석 대상도 없으면 `[analyzer] 미분석 물건도 재분석 대상도 없음`만 찍고 아무것도 호출하지 않는다. |
 
 설정이 없거나 JSON이 깨졌거나 스키마에 안 맞으면 **기본값으로 조용히 넘어가지 않고 즉시 종료한다**
 (수집 범위가 의도와 다르게 도는 것이 더 나쁘다는 판단). 로딩은 프로세스 수명 동안 캐시되므로
@@ -163,12 +170,13 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 | `AUCTIONBOSS_CONFIG` | 앱, collector, analyzer | `<cwd>/config/collector.json` | 설정 파일 경로. |
 | `AUCTIONBOSS_COLLECT_INTERVAL_MS` | collector | `config.intervalMs` | 수집 주기(ms). 양의 정수. |
 | `AUCTIONBOSS_COLLECT_BACKOFF_MS` | collector | `3600000` (1시간) | 로봇탐지 차단 감지 시 tick을 건너뛸 시간(ms). |
-| `AUCTIONBOSS_COLLECT_PAGE_SIZE` | collector | `40` | 한 요청으로 가져올 **행** 수. **40이 서버 상한이고, 넘기면 경고 후 40으로 클램프된다**(§6). |
+| `AUCTIONBOSS_COLLECT_PAGE_SIZE` | collector | `40` | 한 요청으로 가져올 **행** 수. **40이 서버 상한이고, 넘기면 경고 후 40으로 클램프된다**(§7). |
 | `AUCTIONBOSS_COLLECT_PAGE_DELAY_MS` | collector | `5000` | 페이지 사이 대기(ms). 줄이면 차단 위험이 커진다. |
 | `AUCTIONBOSS_COLLECT_BID_WINDOW_DAYS` | collector | `60` | 매각기일 조회 범위(오늘 ~ 오늘+N일). 줄이면 대상 행 수와 요청 횟수가 함께 줄어든다. |
 | `AUCTIONBOSS_COLLECT_MAX_PAGES` | collector | `50` | 폭주 방지용 페이지 상한. 여기 걸리면 경고 로그를 남기고 그 회차를 중단한다. |
 | `AUCTIONBOSS_API_BASE` | analyzer | `http://localhost:3000` | 서버 주소. 서버 포트를 바꿨으면 필수. |
-| `AUCTIONBOSS_ANALYZE_MAX` | analyzer | `config.analysis.maxItemsPerRun` (5) | 회차당 최대 분석 건수. |
+| `AUCTIONBOSS_ANALYZE_MAX` | analyzer | `config.analysis.maxItemsPerRun` (5) | 회차당 최대 **신규** 분석 건수. |
+| `AUCTIONBOSS_ANALYZE_REANALYZE_MAX` | analyzer | `config.analysis.maxReanalysisPerRun` (2) | 회차당 최대 **재분석** 건수. `AUCTIONBOSS_ANALYZE_MAX`와 독립이며, 총 호출 수 상한은 두 값의 합이다(§6). |
 | `AUCTIONBOSS_ANALYZE_INTERVAL_MS` | analyzer | `config.analysis.intervalMs` (600000) | 분석 주기(ms). |
 | `AUCTIONBOSS_ANALYZE_MODEL` | analyzer | 없음(= CLI 기본 모델) | `claude --model`로 넘길 값. 예: `sonnet`, `haiku`. |
 | `AUCTIONBOSS_ANALYZE_TIMEOUT_MS` | analyzer | `120000` (2분) | `claude` 호출 1건 타임아웃. 넘기면 SIGKILL 후 그 물건만 실패 처리. |
@@ -185,7 +193,7 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 
 ## 5. API
 
-세 개뿐이고, analyzer가 이 중 둘을 계약으로 쓰므로 응답 형태를 임의로 바꾸면 안 된다.
+네 개고, analyzer가 이 중 셋을 계약으로 쓰므로 응답 형태를 임의로 바꾸면 안 된다.
 
 ### `GET /api/items` — 물건 목록
 
@@ -193,7 +201,9 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 | --- | --- | --- | --- |
 | `page` | 정수 ≥ 1 | `1` | 페이지 번호 |
 | `pageSize` | 정수 1~200 | `20` | 페이지 크기 |
-| `analyzed` | `true` \| `false` | (없음 = 전체) | 분석 결과 유무 필터. analyzer는 `analyzed=false`를 쓴다. |
+| `analyzed` | `true` \| `false` | (없음 = 전체) | 분석 결과 유무 필터. analyzer의 1단계(신규 분석)가 `analyzed=false`를 쓴다. **이 필터의 의미는 재분석 기능이 생긴 뒤에도 바뀌지 않았다** — "분석 결과가 하나도 없는 물건"만 뜻하며, 이미 분석됐지만 재분석이 필요한 물건은 포함하지 않는다. |
+| `needsAnalysis` | `true` | (없음) | 재분석 대상 필터(§6 참고). `true`만 지원한다. **반드시 `promptVersion`과 함께 와야 하며, 혼자 오면 400이다.** analyzer의 2단계(재분석)가 쓴다. |
+| `promptVersion` | 문자열(비어 있지 않음) | (없음) | `needsAnalysis=true`의 판정 기준이 되는 "호출자의 현재 프롬프트 버전". `needsAnalysis` 없이 혼자 오면 아무것도 좁히지 않는다(무시된다). |
 
 정렬은 매각기일 오름차순(값이 없는 물건은 뒤로). 잘못된 파라미터는 보정하지 않고 **400**으로 거절한다.
 
@@ -214,7 +224,10 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
       "failedBidCount": 1,
       "status": "유찰 1회",           // 유찰횟수에서 파생한 값 ("신건" | "유찰 N회")
       "firstSeenAt": "2026-09-06T06:55:48.709Z",
-      "lastSeenAt": "2026-09-06T06:55:48.709Z"
+      "lastSeenAt": "2026-09-06T06:55:48.709Z",
+      "lastChangedAt": "2026-09-06T07:05:12.000Z"  // 감시 필드의 가장 최근 "실제" 변경 시각.
+                                                     // 기준점(최초 저장)은 세지 않는다. 변경이
+                                                     // 한 번도 없으면 null(§6 참고).
     }
   ],
   "total": 8,
@@ -231,7 +244,7 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 // 200 OK
 {
   "item": { /* 위와 같은 물건 객체 */ },
-  "analysis": {                 // 분석이 아직 없으면 null
+  "analysis": {                 // 분석이 아직 없으면 null. 분석이 여러 건 쌓였어도 항상 최신 1건만.
     "id": 1,
     "itemId": 1,
     "body": "**요약 평가** — ...",   // markdown 원문
@@ -239,6 +252,35 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
     "promptVersion": "v1",
     "analyzedAt": "2026-09-06T06:56:57.086Z"
   }
+}
+```
+
+이전 분석 이력 전체(최신 포함, 최신순)는 이 엔드포인트가 아니라 물건 상세 페이지
+(`/items/[id]`)가 서버 컴포넌트 안에서 `listAnalyses(itemId)`로 직접 읽어 렌더링한다 —
+이력 전용 API는 없다.
+
+### `GET /api/items/[id]/changes` — 물건 변경 이력
+
+물건의 감시 대상 필드(최저매각가격, 유찰횟수, 매각기일, 진행상태) 변경 이력을 시간순으로
+전부 반환한다.
+
+- 없는 `id`(숫자가 아니거나 물건이 없음)면 **404**.
+- 이력이 없으면(레거시 물건, 또는 최초 저장 기준점뿐인 물건) `"changes": []`를 반환한다 —
+  구별하지 않는다.
+
+```jsonc
+// 200 OK
+{
+  "changes": [
+    {
+      "id": 5,
+      "itemId": 1,
+      "field": "minBidPrice",       // WatchedField: minBidPrice | failedBidCount | auctionDate | status
+      "oldValue": "500000000",      // 문자열로 저장된다(§6 참고). null이면 최초 저장 시의 기준점.
+      "newValue": "350000000",
+      "changedAt": "2026-09-07T13:05:09.350Z"
+    }
+  ]
 }
 ```
 
@@ -258,9 +300,68 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 - 본문 형식 오류: **400** (`{ error, details: [{ field, message }] }`)
 - 존재하지 않는 `itemId`: **404** (저장하지 않는다)
 
-물건당 분석은 여러 건 쌓일 수 있고, 조회는 항상 최신 1건을 돌려준다.
+물건당 분석은 여러 건 쌓일 수 있고(재분석은 새 행을 추가할 뿐 이전 분석을 지우지 않는다),
+조회는 항상 최신 1건을 돌려준다.
 
-## 6. ⚠️ 수집 관련 주의사항
+## 6. 변경 이력과 재분석
+
+### 6.1 변경 이력
+
+`items`는 물건당 1행만 upsert하므로, 원래는 최저매각가격이 저감돼도 현재 값만 남고 과거
+값은 사라진다. 이를 보완하기 위해 **감시 대상 필드(watched fields) 4개**가 바뀔 때마다
+`item_changes` 테이블에 "언제, 무엇이, 얼마에서 얼마로" 바뀌었는지 행을 남긴다:
+
+- `minBidPrice`(최저매각가격), `failedBidCount`(유찰횟수), `auctionDate`(매각기일),
+  `status`(진행상태)
+
+핵심 규칙: **감시 필드의 값이 실제로 바뀔 때만** 이력 행이 생긴다. collector가 10분마다
+같은 물건을 다시 수집해도 값이 그대로면 아무것도 쌓이지 않는다 — 이력 테이블이 무한정
+불어나지 않는 이유다. `소재지`처럼 감시 대상이 아닌 필드만 바뀐 경우도 물건은 갱신되지만
+이력은 남지 않는다. 물건 갱신과 이력 기록은 하나의 트랜잭션이라 원자적이다(한쪽만 반영되는
+경우가 없다).
+
+**이 기능 도입 이전에 이미 수집된 물건에는 기준점 이력이 없다** — 최초 저장 시점을
+소급해서 만들 수 없기 때문이다. 이런 물건은 값이 실제로 바뀌는 첫 순간까지 이력이
+비어 있고, 물건 상세 화면은 이 상태를 (신규 물건이 아직 한 번도 안 바뀐 상태와 똑같이)
+"아직 변동이 없습니다"로 정상 표시한다 — 오류가 아니다.
+
+변경 이력은 `GET /api/items/[id]/changes`(§5)로 조회하거나, 물건 상세 페이지
+(`/items/[id]`)의 "변경 이력" 카드에서 시간순으로 볼 수 있다. 최저매각가격 변경은 하락/상승
+방향과 변화폭(금액·비율)이 함께 표시된다. 목록 화면(`/`)에서는 최근 7일 이내에 실제 변동이
+있었던 물건에 배지가 붙는다.
+
+### 6.2 재분석
+
+analyzer는 처음에는 "분석 결과가 하나도 없는 물건"만 분석했다. 이제는 이미 분석된 물건도
+아래 **세 조건 중 하나**를 만족하면 재분석 대상(candidate)이 된다:
+
+1. 분석 결과가 아직 없는 물건 (기존과 동일)
+2. 최신 분석 이후 감시 대상 필드가 실제로 바뀐 물건 — 최저가가 떨어졌는데 옛 가격 기준
+   분석이 남아 있으면 틀린 정보가 되기 때문
+3. 최신 분석의 프롬프트 버전이 analyzer의 현재 `PROMPT_VERSION`과 **다른**(같음/다름만 보고,
+   높고 낮음은 따지지 않는다) 물건
+
+재분석 대상은 `GET /api/items?needsAnalysis=true&promptVersion=<현재 버전>`(§5)으로 조회하며,
+기존 `analyzed=false` 필터의 의미(분석 결과 유무)는 바뀌지 않는다 — 재분석 대상 여부는 별도
+파라미터로만 알 수 있다.
+
+**`maxItemsPerRun`(신규 분석 한도)과 `maxReanalysisPerRun`(재분석 한도, 기본 2)은 서로
+독립된 한도다.** 회차당 Claude 호출 수 상한은 이 둘의 **합**이다(기본값 기준 5 + 2 = 7건) —
+"둘이 하나의 한도를 나눠 쓴다"가 아니다. 신규 분석이 항상 먼저 전량 배정되므로, 재분석
+대상이 아무리 많아도 아직 한 번도 분석되지 않은 물건이 재분석 대기열에 밀려 미뤄지지
+않는다. 재분석은 **가장 오래전에 분석된 물건부터** 순서대로 뽑는다 — 최근 변경 우선으로
+하면 자주 바뀌는 물건 하나가 한도를 독점할 수 있기 때문이다.
+
+**⚠️ 비용 경고 — 절대 가볍게 볼 일이 아니다.** `workers/lib/prompt.ts`의 `PROMPT_VERSION`
+상수를 올리면, **이미 분석이 끝난 물건 전부**가 위 조건 3에 걸려 재분석 대상이 된다. 물건이
+수백 건이면 Claude 호출 수백 건이 발생한다는 뜻이다. 다만 한 회차에 실제로 소비되는 양은
+`maxReanalysisPerRun`만큼씩 나뉘어 여러 회차에 걸쳐 서서히 빠진다(예: 대상 100건, 한도
+2건/회차 → 50회차, 즉 10분 주기 기준 약 8시간 20분에 걸쳐 소진). **그래도 총 비용 자체가
+줄어드는 것은 아니다** — 프롬프트 버전을 올리는 것은 "전체 물건을 다시 분석하겠다"는 명시적
+지출 결정으로 취급해야 한다. 급하게 소진하고 싶다면 `AUCTIONBOSS_ANALYZE_REANALYZE_MAX`를
+일시적으로 올려서 회차당 처리량을 늘릴 수 있다(그만큼 회차당 비용도 늘어난다).
+
+## 7. ⚠️ 수집 관련 주의사항
 
 **이 섹션은 읽고 넘어가지 말 것.** 근거는 전부 실측이며
 `src/lib/sources/courtauction/NOTES.md` §6.1 / §9와 `design.md` D6에 원본 기록이 있다.
@@ -287,18 +388,20 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
   **사이트 이용약관은 아직 검토하지 않았다.** 현 단계는 **개인/내부 열람 용도**를 전제로 하며,
   수집한 데이터를 외부에 재배포·재판매하기 전에 별도의 법적 검토가 반드시 필요하다.
 
-## 7. 개발
+## 8. 개발
 
 ```bash
-npm test        # vitest run — 78 tests / 5 files
+npm test        # vitest run — 239 tests / 12 files
 npm run typecheck   # tsc --noEmit
 npm run lint        # eslint (설정: eslint.config.mjs, next/core-web-vitals + next/typescript)
 ```
 
 - 테스트 위치 (`vitest.config.mts`가 `src/**/*.test.ts`, `src/**/__tests__/**/*.test.ts`, `workers/**/*.test.ts`를 수집):
   - `src/lib/db/__tests__/client.test.ts`, `repository.test.ts`
-  - `src/lib/domain/__tests__/config.test.ts`
+  - `src/lib/domain/__tests__/config.test.ts`, `item-query.test.ts`
   - `src/lib/sources/courtauction/__tests__/adapter.test.ts` (+ `fixtures.ts`)
+  - `src/app/_lib/__tests__/change-history.test.ts`, `analysis-history.test.ts`, `item-query-url.test.ts`
+  - `src/app/api/items/__tests__/route.test.ts`, `src/app/api/items/[id]/changes/__tests__/route.test.ts`, `src/app/api/items/usage-types/__tests__/route.test.ts`
   - `workers/__tests__/analyzer.test.ts`
 - 테스트는 **네트워크를 타지 않고 실제 DB 파일도 만들지 않는다.** `fetch`, `claude` 실행 함수,
   DB 경로가 전부 주입 지점으로 열려 있어 인메모리 DB와 가짜 fetch로 돈다.
@@ -330,7 +433,7 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 - `/opsx:archive` — 완료된 change를 archive로 이동
 - `/opsx:sync` — change의 델타 스펙을 `openspec/specs/`에 반영
 
-## 8. 프로젝트 구조
+## 9. 프로젝트 구조
 
 중요한 경로만 추렸다.
 
@@ -341,19 +444,22 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 +- src/
 |   +- app/                        # Next.js App Router
 |   |   +- page.tsx                # 물건 목록 (/)
-|   |   +- items/[id]/page.tsx     # 물건 상세 + AI 분석 (/items/:id)
-|   |   +- api/items/route.ts      # GET /api/items
+|   |   +- items/[id]/page.tsx     # 물건 상세 + AI 분석(최신/이전) + 변경 이력 (/items/:id)
+|   |   +- api/items/route.ts      # GET /api/items (analyzed, needsAnalysis, promptVersion)
 |   |   +- api/items/[id]/route.ts # GET /api/items/:id
+|   |   +- api/items/[id]/changes/route.ts  # GET /api/items/:id/changes
 |   |   +- api/analyses/route.ts   # POST /api/analyses
 |   |   +- _lib/format.ts          # 금액/날짜 표시 포맷터
+|   |   +- _lib/change-history.ts  # 변경 이력 표시 판단(기준점 구별, 가격 변화폭 등)
+|   |   +- _lib/analysis-history.ts # 분석 이력 표시 판단(최신/이전 분리)
 |   +- lib/
 |       +- domain/                 # 정규화 도메인 모델 + config 로더
-|       |   +- types.ts            # AuctionItem, Analysis, CollectorConfig ...
+|       |   +- types.ts            # AuctionItem, Analysis, ItemChange, CollectorConfig ...
 |       |   +- config.ts           # config/collector.json 로딩 + zod 검증
 |       +- db/                     # SQLite 접근 (여기 밖으로 snake_case 컬럼명이 안 나간다)
 |       |   +- client.ts           # 연결/WAL/싱글턴, AUCTIONBOSS_DB 해석
-|       |   +- schema.ts           # items / analyses 테이블 DDL
-|       |   +- repository.ts       # upsertItems, listItems, insertAnalysis ...
+|       |   +- schema.ts           # items / analyses / item_changes 테이블 DDL
+|       |   +- repository.ts       # upsertItems, listItems, insertAnalysis, listItemChanges ...
 |       +- sources/                # 수집 소스 어댑터 경계
 |           +- types.ts            # AuctionSource 인터페이스
 |           +- errors.ts           # RobotDetectedError, WafBlockedError ...
@@ -370,26 +476,29 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 |   |   +- claude.ts               # claude CLI headless 호출 + 출력 파싱
 |   |   +- prompt.ts               # 프롬프트 템플릿 로딩/렌더링, PROMPT_VERSION
 |   +- prompts/analyze-item.md     # 분석 프롬프트 템플릿 ({{ITEM_JSON}} 토큰)
-+- openspec/                       # 계획/스펙 (§7)
++- openspec/                       # 계획/스펙 (§8)
 +- data/auctionboss.db             # 기본 DB 파일 (git ignore, 첫 실행 때 생성)
 ```
 
-## 9. 알려진 한계 / 다음 단계
+## 10. 알려진 한계 / 다음 단계
 
 1. **"진행 중" 필터의 의미가 검증되지 않았다.** 사이트에 진행상태 전용 파라미터를 찾지 못해
    매각기일 범위(`오늘 ~ 오늘+60일`)로 대신하고 있다. 이것이 사이트가 말하는 "진행중"과 같은 개념인지는
    미확인이다(수신 행은 전부 `mulJinYn="Y"`였다). — NOTES §6.2 row 0, §9.3
-2. **10분 주기 상시 운용이 미검증이다.** §6 참고. 장시간 무인 운용 로그가 아직 없다.
+2. **10분 주기 상시 운용이 미검증이다.** §7 참고. 장시간 무인 운용 로그가 아직 없다.
 3. **비공식 엔드포인트라 예고 없이 바뀔 수 있다.** zod 검증으로 즉시 감지·로그하지만, 바뀌면 수집은 멈춘다.
    대안인 **상용 데이터 API 어댑터는 아직 구현되어 있지 않다**(`AuctionSource` 인터페이스만 열려 있는 상태).
-4. **재분석 기능이 없다.** 분석은 "분석 결과가 하나도 없는 물건"에만 한 번 붙는다. 물건 정보가
-   갱신돼도 다시 분석하지 않는다. `analyses` 테이블은 물건당 여러 행을 허용하도록 이미 설계돼 있으므로
-   스키마 변경 없이 후속 change에서 명시적 트리거로 붙일 수 있다.
-5. **프롬프트가 1단계 수준이다.** 시세·등기부·권리관계·임차인 정보 없이 물건 JSON 한 덩어리만 보고 쓴 요약이다.
+4. **프롬프트가 1단계 수준이다.** 시세·등기부·권리관계·임차인 정보 없이 물건 JSON 한 덩어리만 보고 쓴 요약이다.
    분석 본문은 markdown이지만 화면에서는 렌더링 없이 원문 그대로 표시한다.
-6. **가격 변동 이력이 없다.** `items`는 물건당 1행을 upsert만 하므로 최저매각가격이 저감돼도
-   현재 값만 남고 과거 값은 사라진다. 유찰에 따른 가격 추이를 보려면 이력 테이블이 필요하다.
-7. **워커가 죽으면 수동 재시작이다.** 프로세스 매니저(pm2 등)나 재시작 정책이 없다. 시작/종료 로그로
+5. **워커가 죽으면 수동 재시작이다.** 프로세스 매니저(pm2 등)나 재시작 정책이 없다. 시작/종료 로그로
    감지만 가능하다. 배포 단계에서 도입 예정.
-8. **목록 화면에 필터가 없다.** 용도별·가격대별 필터, 정렬 선택 같은 것은 붙어 있지 않다(페이지네이션만 있다).
-9. **인증/권한이 없다.** 서버를 띄우면 접근 가능한 누구나 전체를 볼 수 있다. 로컬/내부망 전제다.
+6. **목록 화면에 필터가 없다.** 용도별·가격대별 필터, 정렬 선택 같은 것은 붙어 있지 않다(페이지네이션만 있다).
+7. **인증/권한이 없다.** 서버를 띄우면 접근 가능한 누구나 전체를 볼 수 있다. 로컬/내부망 전제다.
+8. **가짜 변경(노이즈) 필터링 규칙이 없다.** 소스가 같은 물건을 다른 값으로 표기하는 사례가
+   이미 관측됐다(`유찰횟수`와 `최저매각가격`이 어긋나는 행 등, NOTES.md). 그런 노이즈도 지금은
+   "실제 변경"으로 기록되고 재분석을 유발해 비용이 된다. 1차 방어는 `maxReanalysisPerRun`
+   상한뿐이고, 필터링 규칙은 실제 변경 이력을 며칠 관측한 뒤에 정할 예정이다
+   (`openspec/changes/add-price-change-history/design.md` Open Questions).
+9. **"최근 변동" 기준 7일이 검증된 값은 아니다.** 매각기일 주기(보통 1개월 이상)를 감안하면
+   더 길어야 할 수 있다. `src/app/_lib/change-history.ts`의 `RECENT_CHANGE_DAYS` 상수 하나만
+   바꾸면 되므로 조정 자체는 쉽다.

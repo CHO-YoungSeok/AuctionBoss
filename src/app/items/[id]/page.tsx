@@ -8,6 +8,7 @@ import { notFound } from "next/navigation";
 
 import { getRepository } from "@/lib/db";
 
+import { splitAnalysisHistory } from "../../_lib/analysis-history";
 import { formatChangeDisplay, hasRealChange, isRealChange } from "../../_lib/change-history";
 import { formatCount, formatDate, formatDateTime, formatText, formatWon } from "../../_lib/format";
 
@@ -36,7 +37,12 @@ export default async function ItemDetailPage({
   const item = repository.getItemById(Number(id));
   if (!item) notFound();
 
-  const analysis = repository.getLatestAnalysis(item.id);
+  // getLatestAnalysis가 아니라 listAnalyses로 전체를 받아 최신/이전을 직접 나눈다 —
+  // "이전 분석이 몇 건 있는지"와 그 내용을 화면에서 보여줘야 하기 때문이다(spec: 재분석된
+  // 물건 상세). 분리 판정은 순수 헬퍼(analysis-history.ts)로 뽑아 테스트로 고정했다.
+  const { latest: analysis, previous: previousAnalyses } = splitAnalysisHistory(
+    repository.listAnalyses(item.id),
+  );
 
   // 기준점(oldValue===null) 행은 화면에 표시하지 않는다 — 실제 변경만 이력으로 보여준다
   // (design.md D2). 빈 이력(레거시 물건)과 기준점만 있는 이력(신규 물건, 아직 변동 없음)은
@@ -86,6 +92,29 @@ export default async function ItemDetailPage({
             </p>
             {/* 본문은 markdown이지만 1단계에서는 렌더링 라이브러리 없이 원문을 그대로 보여준다. */}
             <pre className="analysis-body">{analysis.body}</pre>
+
+            {previousAnalyses.length > 0 && (
+              // 클라이언트 JS 없이(프로젝트 규칙) 이전 분석을 열람할 수 있어야 하므로
+              // React state 토글이 아니라 네이티브 <details>/<summary>를 쓴다 — 기본
+              // 접힘 상태로 "몇 건 있는지"만 보여주고, 클릭(또는 열람 목적의 키보드 조작)만
+              // 으로 내용이 펼쳐진다. 분석이 정확히 1건일 때는 previousAnalyses가 빈
+              // 배열이라 이 블록 자체가 렌더링되지 않는다(spec: 빈 "이전 분석" 섹션 금지).
+              <details className="analysis-history">
+                <summary>이전 분석 {previousAnalyses.length}건 보기</summary>
+                <ul className="analysis-history-list">
+                  {previousAnalyses.map((previous) => (
+                    <li key={previous.id}>
+                      <p className="muted">
+                        분석 시각 {formatDateTime(previous.analyzedAt)} · 프롬프트 버전{" "}
+                        {formatText(previous.promptVersion)}
+                        {previous.model ? ` · 모델 ${previous.model}` : ""}
+                      </p>
+                      <pre className="analysis-body">{previous.body}</pre>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
           </>
         ) : (
           <p className="empty">분석 대기 중</p>
