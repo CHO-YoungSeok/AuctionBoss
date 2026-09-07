@@ -25,17 +25,23 @@ function change(overrides: Partial<ItemChange>): ItemChange {
     oldValue: "640000000",
     newValue: "448000000",
     changedAt: "2026-09-01T00:00:00.000Z",
+    kind: "change",
     ...overrides,
   };
 }
 
 describe("isRealChange", () => {
-  it("oldValue가 null이면 기준점이므로 false", () => {
-    expect(isRealChange({ oldValue: null })).toBe(false);
+  it("kind가 baseline이면 기준점이므로 false", () => {
+    expect(isRealChange({ kind: "baseline" })).toBe(false);
   });
 
-  it("oldValue가 값이 있으면 실제 변경이므로 true", () => {
-    expect(isRealChange({ oldValue: "100" })).toBe(true);
+  it("kind가 change면 실제 변경이므로 true", () => {
+    expect(isRealChange({ kind: "change" })).toBe(true);
+  });
+
+  // finding 1 회귀: null→값 변화는 oldValue가 null이라도 kind가 change다.
+  it("oldValue가 null이어도 kind가 change면 실제 변경이다(null→값 변화)", () => {
+    expect(isRealChange({ kind: "change" })).toBe(true);
   });
 });
 
@@ -45,11 +51,11 @@ describe("hasRealChange", () => {
   });
 
   it("기준점 행만 있는 배열(신규 물건, 아직 변동 없음)은 false", () => {
-    expect(hasRealChange([{ oldValue: null }, { oldValue: null }])).toBe(false);
+    expect(hasRealChange([{ kind: "baseline" }, { kind: "baseline" }])).toBe(false);
   });
 
   it("실제 변경이 하나라도 섞여 있으면 true", () => {
-    expect(hasRealChange([{ oldValue: null }, { oldValue: "100" }])).toBe(true);
+    expect(hasRealChange([{ kind: "baseline" }, { kind: "change" }])).toBe(true);
   });
 });
 

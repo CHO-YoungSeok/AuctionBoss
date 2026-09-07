@@ -20,6 +20,7 @@ import {
   type AuctionItemInput,
   type IsoDateTime,
   type ItemChange,
+  type ItemChangeKind,
   type ItemQuery,
   type SortDirection,
   type SortKey,
@@ -89,6 +90,7 @@ interface ItemChangeRow {
   old_value: string | null;
   new_value: string | null;
   changed_at: string;
+  kind: ItemChangeKind;
 }
 
 /** `listItems`의 서브쿼리 컬럼까지 포함한 행. 기본 `ItemRow`를 확장한다(design.md D6). */
@@ -97,8 +99,11 @@ interface ItemListRow extends ItemRow {
 }
 
 /**
- * `lastChangedAt`은 `listItems`의 스칼라 서브쿼리로만 채워진다(design.md D6). 다른 조회
- * 경로(`getItemById` 등)는 이 값을 계산하지 않으므로 인자를 생략하면 null이 된다.
+ * `lastChangedAt`은 스칼라 서브쿼리로 채워진다(design.md D6). `listItems`와
+ * `getItemById` 둘 다 이 값을 계산해서 넘긴다(코드 리뷰 finding 5 — 이전에는
+ * `getItemById`만 이 인자를 생략해 항상 null을 돌려줬다, `GET /api/items/[id]`가 그 값을
+ * 그대로 노출해 단일 물건 조회에서만 `lastChangedAt`이 항상 null로 보이는 버그였다).
+ * 인자를 생략하는 호출은 여전히 null이 기본값이다(이 값을 모르는 다른 생성 경로 대비).
  */
 function toAuctionItem(row: ItemRow, lastChangedAt: string | null = null): AuctionItem {
   return {
@@ -138,6 +143,7 @@ function toItemChange(row: ItemChangeRow): ItemChange {
     oldValue: row.old_value,
     newValue: row.new_value,
     changedAt: row.changed_at,
+    kind: row.kind,
   };
 }
 
@@ -186,6 +192,8 @@ interface DetectedChange {
   field: WatchedField;
   oldValue: string | null;
   newValue: string | null;
+  /** 항상 `"change"`다 — 기준점은 `baselineWatchedChanges`가 별도로 만든다(finding 1). */
+  kind: "change";
 }
 
 /** 기존 행과 새 값 사이에 실제로 다른 감시 필드만 골라낸다. */
@@ -198,22 +206,36 @@ function detectWatchedChanges(
     const oldRaw: FieldValue = existing[def.column];
     const newRaw: FieldValue = incoming[def.field];
     if (!watchedValuesEqual(oldRaw, newRaw, def.kind)) {
-      changes.push({ field: def.field, oldValue: toHistoryValue(oldRaw), newValue: toHistoryValue(newRaw) });
+      changes.push({
+        field: def.field,
+        oldValue: toHistoryValue(oldRaw),
+        newValue: toHistoryValue(newRaw),
+        kind: "change",
+      });
     }
   }
   return changes;
 }
 
+interface BaselineChange {
+  field: WatchedField;
+  newValue: string;
+  /** 항상 `"baseline"`이다 — `detectWatchedChanges`의 `"change"`와 명시적으로 구별된다. */
+  kind: "baseline";
+}
+
 /**
- * 최초 저장 시의 기준점 행(design.md D2). `old_value = NULL`로 고정되고, 값이 NULL인
- * 필드는 기준점 자체를 만들지 않는다(양쪽 다 NULL인 무의미한 행을 막기 위함).
+ * 최초 저장 시의 기준점 행(design.md D2). `kind: "baseline"`으로 실제 변경과 명시적으로
+ * 구별되고(finding 1 — 이전에는 `old_value = NULL`이 이 구별의 유일한 마커였는데, 값이
+ * 없던 필드에 값이 처음 생기는 실제 변경도 `old_value = NULL`이라 기준점과 섞였다),
+ * 값이 NULL인 필드는 기준점 자체를 만들지 않는다(값 없는 무의미한 행을 막기 위함).
  */
-function baselineWatchedChanges(incoming: AuctionItemInput): DetectedChange[] {
-  const changes: DetectedChange[] = [];
+function baselineWatchedChanges(incoming: AuctionItemInput): BaselineChange[] {
+  const changes: BaselineChange[] = [];
   for (const def of WATCHED_FIELD_DEFS) {
     const value: FieldValue = incoming[def.field];
     if (value === null) continue;
-    changes.push({ field: def.field, oldValue: null, newValue: toHistoryValue(value) });
+    changes.push({ field: def.field, newValue: String(value), kind: "baseline" });
   }
   return changes;
 }
@@ -221,48 +243,76 @@ function baselineWatchedChanges(incoming: AuctionItemInput): DetectedChange[] {
 const ANALYZED_EXISTS = "EXISTS (SELECT 1 FROM analyses WHERE analyses.item_id = items.id)";
 
 /**
- * 재분석 대상 판정 SQL (design.md D4). 세 조건의 OR:
- * 1) 분석 행이 아예 없음
- * 2) 최신 분석 이후에 **실제** 변경(`old_value IS NOT NULL` — 기준점 제외)이 있음
- * 3) 최신 분석의 `prompt_version`이 요청된 `@promptVersion`과 다름(같음/다름만 본다 —
+ * 재분석 대상 판정 SQL (design.md D4, 코드 리뷰 finding 2로 수정).
+ *
+ * **분석 행이 반드시 존재해야 한다(`ANALYZED_EXISTS`)** — 이전 버전은 "분석 행이 아예
+ * 없음"도 이 OR의 한 갈래(조건 1)로 넣어서, 미분석 물건이 `needsAnalysis=true` 결과에
+ * 섞여 들어왔다. 그 물건들은 재분석 후보 정렬(`analyzed_at ASC`)에서 NULL로 취급되고
+ * SQLite는 ASC에서 NULL을 맨 앞에 두므로, 미분석 물건이 쌓여 있으면 재분석 페이지
+ * (`pageSize`가 작다, design.md D5)가 전부 미분석 물건으로 채워지고 실제 재분석 대상은
+ * 영영 조회되지 않았다 — 워커의 신규/재분석 두 조회가 페이지 크기·정렬 기준이 달라
+ * dedupe로도 못 걸러냈다(workers/analyzer.ts). 미분석 물건은 `analyzed=false` 경로가
+ * 전담하고, 이 조건은 "이미 분석된 적 있는 물건 중에서" 재분석이 필요한지만 본다
+ * (스펙: 재분석 대상 조회는 아직 한 번도 분석되지 않은 물건을 포함해서는 안 된다).
+ *
+ * 분석 행이 있다는 전제 아래 남은 두 조건의 OR:
+ * 1) 최신 분석 이후에 **실제** 변경(`kind = 'change'` — 기준점 제외)이 있음
+ * 2) 최신 분석의 `prompt_version`이 요청된 `@promptVersion`과 다름(같음/다름만 본다 —
  *    세만틱 버전 비교를 하지 않는 이유는 design.md D4에 기록돼 있다)
  *
+ * 그리고 쿨다운(코드 리뷰 finding 3, 스펙 개정 "최소 재분석 간격"): 최신 분석이
+ * `@cooldownBefore`보다 최근이면(= 아직 쿨다운 중이면) 위 두 조건과 무관하게 대상에서
+ * 제외한다. `@cooldownBefore`가 NULL이면(쿨다운 미적용, 호출자가 `reanalysisCooldownHours`를
+ * 안 준 경우) 이 조건 자체를 건너뛴다 — `buildFilter`가 항상 이 파라미터를 바인딩한다
+ * (쿨다운 미적용일 때도 NULL로).
+ *
  * "최신 분석"의 기준(`analyzed_at DESC, id DESC`)은 `getLatestAnalysis`와 같다.
- * 조건 2는 `>` (초과)를 쓴다 — 최신 분석과 같은 시각이거나 그 이전 변경은 이미 그
+ * 변경 비교는 `>` (초과)를 쓴다 — 최신 분석과 같은 시각이거나 그 이전 변경은 이미 그
  * 분석에 반영됐다고 본다(경계 포함이면 분석 직후의 자기 자신 이력까지 재분석 대상으로
  * 오판할 수 있다).
  *
- * `@promptVersion` 바인딩이 필요하다 — 없으면 `buildFilter`가 미리 막는다.
+ * `@promptVersion`/`@cooldownBefore` 바인딩이 필요하다 — 없으면 `buildFilter`가 미리 막는다.
  */
 const NEEDS_ANALYSIS_PREDICATE = `(
-  NOT EXISTS (SELECT 1 FROM analyses na WHERE na.item_id = items.id)
-  OR EXISTS (
-    SELECT 1 FROM item_changes nc
-    WHERE nc.item_id = items.id
-      AND nc.old_value IS NOT NULL
-      AND nc.changed_at > (
-        SELECT nla.analyzed_at FROM analyses nla
-        WHERE nla.item_id = items.id
-        ORDER BY nla.analyzed_at DESC, nla.id DESC
-        LIMIT 1
-      )
+  ${ANALYZED_EXISTS}
+  AND (
+    EXISTS (
+      SELECT 1 FROM item_changes nc
+      WHERE nc.item_id = items.id
+        AND nc.kind = 'change'
+        AND nc.changed_at > (
+          SELECT nla.analyzed_at FROM analyses nla
+          WHERE nla.item_id = items.id
+          ORDER BY nla.analyzed_at DESC, nla.id DESC
+          LIMIT 1
+        )
+    )
+    OR (
+      SELECT nlv.prompt_version FROM analyses nlv
+      WHERE nlv.item_id = items.id
+      ORDER BY nlv.analyzed_at DESC, nlv.id DESC
+      LIMIT 1
+    ) != @promptVersion
   )
-  OR (
-    SELECT nlv.prompt_version FROM analyses nlv
-    WHERE nlv.item_id = items.id
-    ORDER BY nlv.analyzed_at DESC, nlv.id DESC
-    LIMIT 1
-  ) != @promptVersion
+  AND (
+    @cooldownBefore IS NULL
+    OR (
+      SELECT nca.analyzed_at FROM analyses nca
+      WHERE nca.item_id = items.id
+      ORDER BY nca.analyzed_at DESC, nca.id DESC
+      LIMIT 1
+    ) <= @cooldownBefore
+  )
 )`;
 
 /**
  * 재분석 후보 정렬: 가장 오래 전에 분석된 것 우선(`analyzed_at ASC`, design.md D5) —
  * 최신 변경 우선으로 하면 자주 바뀌는 물건이 재분석 한도를 독점한다.
  *
- * 분석이 아예 없는 물건(조건 1)은 서브쿼리가 NULL을 내고, SQLite는 ASC에서 NULL을
- * 맨 앞에 둔다 — 하지만 이 값은 `listItems`가 `analyzed=false`로 이미 신규 한도만큼
- * 가져간 물건과 겹칠 수 있어 워커가 두 결과를 합칠 때 중복을 제거한다(workers/analyzer.ts,
- * design.md D4의 "신규 제외"). 이 순서 자체가 그 dedupe를 보장하지는 않는다.
+ * finding 2 수정 이후로는 `NEEDS_ANALYSIS_PREDICATE`가 분석 행이 있는 물건만 통과시키므로
+ * 이 서브쿼리가 NULL을 낼 일이 없다(모든 후보가 최소 1건의 분석을 갖는다) — 미분석 물건이
+ * NULL로 ASC 맨 앞을 차지해 재분석 후보를 밀어내던 문제는 조건 자체에서 사라졌다. 워커의
+ * 신규/재분석 dedupe(workers/analyzer.ts)는 이제 안전망일 뿐 정확성의 전제가 아니다.
  */
 const NEEDS_ANALYSIS_ORDER = `ORDER BY (
   SELECT ord.analyzed_at FROM analyses ord
@@ -270,6 +320,15 @@ const NEEDS_ANALYSIS_ORDER = `ORDER BY (
   ORDER BY ord.analyzed_at DESC, ord.id DESC
   LIMIT 1
 ) ASC, items.id ASC`;
+
+/** `listItems`가 목록 행에 붙이는 "가장 최근 실제 변경 시각" 스칼라 서브쿼리(design.md D6).
+ * `getItemById`도 같은 식을 쓴다(finding 5) — 두 곳이 각자 SQL을 베끼면 하나만 고쳤을 때
+ * 조용히 어긋난다. */
+const LAST_CHANGED_AT_EXPR = `(
+  SELECT MAX(item_changes.changed_at)
+  FROM item_changes
+  WHERE item_changes.item_id = items.id AND item_changes.kind = 'change'
+)`;
 
 /**
  * 정렬 기준 → SQL 표현식 화이트리스트 (design.md D2).
@@ -320,7 +379,18 @@ export function escapeLikePattern(value: string): string {
 }
 
 /** `listItems`가 쓰는 바인딩 파라미터. 값은 전부 여기 담기고 SQL에는 이름만 들어간다. */
-type BindParams = Record<string, string | number>;
+type BindParams = Record<string, string | number | null>;
+
+/**
+ * 재분석 쿨다운(시간)을 "이 시각 이전에 분석됐어야 재분석 대상"이라는 절대 시각 문자열로
+ * 바꾼다(finding 3). ISO 8601 문자열끼리는 사전식 비교가 시간 순서와 같으므로(이 프로젝트가
+ * 이미 `changed_at`/`analyzed_at` 비교에 쓰는 방식과 동일하다) SQL에서는 문자열 비교만 하면
+ * 된다 — SQLite의 `datetime('now', ...)` 수정자에 기대지 않아 테스트에서 `now`를 주입해
+ * 결정적으로 검증할 수 있다.
+ */
+function computeCooldownBefore(cooldownHours: number, nowIso: string): string {
+  return new Date(new Date(nowIso).getTime() - cooldownHours * 60 * 60 * 1000).toISOString();
+}
 
 interface Filter {
   /** `""` 또는 `"WHERE ..."`. */
@@ -336,7 +406,7 @@ interface Filter {
  * 가격·유찰횟수 필터를 걸면 제외된다. "값을 모르는 물건"을 조건에 맞다고 보는 것보다
  * 제외하는 편이 사용자 기대에 가깝다.
  */
-function buildFilter(query: ItemQuery): Filter {
+function buildFilter(query: ItemQuery, nowIso: string): Filter {
   const conditions: string[] = [];
   const params: BindParams = {};
 
@@ -356,6 +426,19 @@ function buildFilter(query: ItemQuery): Filter {
     }
     conditions.push(NEEDS_ANALYSIS_PREDICATE);
     params.promptVersion = query.promptVersion;
+
+    // 쿨다운(finding 3). 값이 없으면(호출자가 안 줬으면) 미적용 — SQL은 항상 이 바인딩을
+    // 참조하므로 명시적으로 null을 넣는다. 값이 있으면 다른 analysis 설정 필드들과
+    // 마찬가지로 잘못된 값은 조용히 무시하지 않고 던진다.
+    const cooldownHours = query.reanalysisCooldownHours;
+    if (cooldownHours === undefined) {
+      params.cooldownBefore = null;
+    } else {
+      if (!Number.isFinite(cooldownHours) || cooldownHours < 0) {
+        throw new Error(`지원하지 않는 reanalysisCooldownHours 값: ${String(cooldownHours)}`);
+      }
+      params.cooldownBefore = computeCooldownBefore(cooldownHours, nowIso);
+    }
   } else if (query.needsAnalysis !== undefined) {
     throw new Error(`지원하지 않는 needsAnalysis 값: ${String(query.needsAnalysis)}`);
   }
@@ -409,14 +492,28 @@ function normalizePageSize(pageSize: number | undefined): number {
 
 export interface AuctionRepository {
   upsertItems(items: AuctionItemInput[], options?: { now?: IsoDateTime }): UpsertItemsResult;
-  listItems(query?: ItemQuery): ListItemsResult;
+  /**
+   * `options.now`는 `needsAnalysis=true` + `reanalysisCooldownHours`(finding 3)의 쿨다운
+   * 기준 시각으로만 쓰인다. 생략하면 호출 시점의 실제 현재 시각이다 — 테스트가 이 값을
+   * 주입해 쿨다운 경계를 결정적으로 검증할 수 있게 하는 지점이다.
+   */
+  listItems(query?: ItemQuery, options?: { now?: IsoDateTime }): ListItemsResult;
   getItemById(id: number): AuctionItem | null;
   /** 저장된 물건에 실제로 존재하는 용도 목록. 중복 없이 정렬해서 돌려준다. */
   listUsageTypes(): string[];
   insertAnalysis(input: AnalysisInput, options?: { now?: IsoDateTime }): Analysis;
   getLatestAnalysis(itemId: number): Analysis | null;
-  /** 물건의 모든 분석을 최신순으로 돌려준다(재분석 이력 열람용, task 6.3). 없으면 빈 배열. */
-  listAnalyses(itemId: number): Analysis[];
+  /**
+   * 물건의 분석을 최신순으로 돌려준다(재분석 이력 열람용, task 6.3). 없으면 빈 배열.
+   * `options.limit`을 주면 최신 것부터 그 건수만 잘라서 돌려준다(finding 3b — 물건 상세
+   * 페이지가 이 한도 없이 전체를 렌더링하면, 감시 필드가 자주 뒤집히는 물건 하나가 한 달
+   * 사이 수백 건의 분석을 쌓아 페이지 하나가 수 MB의 markdown 본문을 안고 무거워진다).
+   * 전체 건수가 필요하면 `countAnalyses`를 따로 부른다 — 이 메서드는 "화면에 몇 건을
+   * 그릴지"만 책임진다.
+   */
+  listAnalyses(itemId: number, options?: { limit?: number }): Analysis[];
+  /** 물건의 전체 분석 건수. `listAnalyses`가 `limit`으로 잘라도 이 값은 잘리지 않는다. */
+  countAnalyses(itemId: number): number;
   /** 물건의 변경 이력을 시간순으로 돌려준다. 이력이 없으면 빈 배열이다(오류가 아니다). */
   listItemChanges(itemId: number): ItemChange[];
 }
@@ -467,9 +564,15 @@ export function createRepository(db: Db): AuctionRepository {
     `SELECT * FROM items WHERE id = @id`,
   );
 
+  // getItemById 전용(finding 5) — listItems와 같은 lastChangedAt 서브쿼리를 쓴다
+  // (LAST_CHANGED_AT_EXPR 상수 하나를 공유해 두 곳이 어긋나지 않게 한다).
+  const selectItemByIdWithLastChanged = db.prepare<{ id: number }, ItemListRow>(
+    `SELECT items.*, ${LAST_CHANGED_AT_EXPR} AS last_changed_at FROM items WHERE items.id = @id`,
+  );
+
   const insertItemChange = db.prepare(`
-    INSERT INTO item_changes (item_id, field, old_value, new_value, changed_at)
-    VALUES (@itemId, @field, @oldValue, @newValue, @changedAt)
+    INSERT INTO item_changes (item_id, field, old_value, new_value, changed_at, kind)
+    VALUES (@itemId, @field, @oldValue, @newValue, @changedAt, @kind)
   `);
 
   const selectItemChanges = db.prepare<{ itemId: number }, ItemChangeRow>(`
@@ -492,10 +595,17 @@ export function createRepository(db: Db): AuctionRepository {
     LIMIT 1
   `);
 
-  const selectAnalyses = db.prepare<{ itemId: number }, AnalysisRow>(`
+  // finding 3b: `limit`을 항상 바인딩한다 — SQLite는 `LIMIT -1`을 "제한 없음"으로
+  // 처리하므로, limit 옵션이 없는 기존 호출(`listAnalyses(itemId)`)은 그대로 전체를 받는다.
+  const selectAnalysesLimited = db.prepare<{ itemId: number; limit: number }, AnalysisRow>(`
     SELECT * FROM analyses
     WHERE item_id = @itemId
     ORDER BY analyzed_at DESC, id DESC
+    LIMIT @limit
+  `);
+
+  const selectAnalysesCount = db.prepare<{ itemId: number }, { count: number }>(`
+    SELECT COUNT(*) AS count FROM analyses WHERE item_id = @itemId
   `);
 
   const selectUsageTypes = db.prepare<[], { usage_type: string }>(`
@@ -504,16 +614,43 @@ export function createRepository(db: Db): AuctionRepository {
     ORDER BY usage_type
   `);
 
+  /** 자연 키를 배치 내 중복 감지용 문자열로 합친다. items UNIQUE (court, case_no, item_no)와 같은 조합. */
+  function naturalKeyOf(item: Pick<AuctionItemInput, "court" | "caseNo" | "itemNo">): string {
+    return `${item.court} ${item.caseNo} ${item.itemNo}`;
+  }
+
+  /**
+   * 한 자연 키가 이 배치 안에서 어떤 상태로 시작했는지(finding 6).
+   *
+   * `existedBeforeBatch`가 false면 이 물건은 배치가 시작하기 전에는 존재하지 않았다 —
+   * 배치 안에서 같은 키가 여러 번 나와 중간값이 여러 번 바뀌어도(예: insert 후 곧바로
+   * update), 그건 전부 "신규"의 연장일 뿐 "배치 시작 전 저장값 대비 변경"이 아니므로
+   * `changed`에 세지 않는다(design D3: 신규는 `inserted`가 이미 센다). `baseline`은
+   * `existedBeforeBatch`가 true일 때만 의미가 있고, 그 배치 시작 시점의 실제 저장값이다.
+   */
+  interface KeyState {
+    existedBeforeBatch: boolean;
+    baseline?: ExistingItemRow;
+    itemId: number;
+    /** 이 키로 배치 안에서 마지막으로 처리된 입력값 — 최종적으로 DB에 남는 값이다. */
+    finalItem: AuctionItemInput;
+  }
+
   const upsertBatch = db.transaction(
     (items: AuctionItemInput[], now: string): UpsertItemsResult => {
       let inserted = 0;
       let updated = 0;
-      let changed = 0;
+      const keyStates = new Map<string, KeyState>();
+
       for (const item of items) {
         // 먼저 존재 여부와 감시 필드의 저장 전 값을 본다. ON CONFLICT는 신규/갱신 모두
-        // changes=1이라 그것만으로는 구분할 수 없고, 같은 배치 안의 중복 키도 정확히
-        // 세야 한다. 감시 필드 비교는 upsertItem이 덮어쓰기 **전**에만 가능하다
-        // (design.md D3) — 그래서 별도 쿼리로 빼지 않고 이 사전 SELECT를 확장했다.
+        // changes=1이라 그것만으로는 구분할 수 없다. 감시 필드 비교는 upsertItem이
+        // 덮어쓰기 **전**에만 가능하다(design.md D3) — 그래서 별도 쿼리로 빼지 않고 이
+        // 사전 SELECT를 확장했다. 이 `existing`은 "이 행을 처리하기 직전의 저장값"이라
+        // 배치 안에 같은 키가 여러 번 나오면 두 번째 이후는 첫 번째 처리 결과를 보게
+        // 된다 — 그래서 이력(item_changes) 기록은 이 값을 그대로 쓰지만(기존 동작
+        // 유지), `changed` 집계는 아래에서 배치 시작 전 스냅숏(`keyStates`)을 따로 써서
+        // 이 문제를 피한다.
         const existing = selectItemIdByKey.get({
           court: item.court,
           caseNo: item.caseNo,
@@ -533,33 +670,60 @@ export function createRepository(db: Db): AuctionRepository {
           now,
         });
 
+        let itemId: number;
         if (existing) {
           updated += 1;
-          const diffs = detectWatchedChanges(existing, item);
-          if (diffs.length > 0) changed += 1;
-          for (const diff of diffs) {
+          itemId = existing.id;
+          for (const diff of detectWatchedChanges(existing, item)) {
             insertItemChange.run({
-              itemId: existing.id,
+              itemId,
               field: diff.field,
               oldValue: diff.oldValue,
               newValue: diff.newValue,
               changedAt: now,
+              kind: diff.kind,
             });
           }
         } else {
           inserted += 1;
-          const itemId = Number(info.lastInsertRowid);
+          itemId = Number(info.lastInsertRowid);
           for (const baseline of baselineWatchedChanges(item)) {
             insertItemChange.run({
               itemId,
               field: baseline.field,
-              oldValue: baseline.oldValue,
+              oldValue: null,
               newValue: baseline.newValue,
               changedAt: now,
+              kind: baseline.kind,
             });
           }
         }
+
+        const key = naturalKeyOf(item);
+        const state = keyStates.get(key);
+        if (state === undefined) {
+          keyStates.set(key, {
+            existedBeforeBatch: Boolean(existing),
+            baseline: existing,
+            itemId,
+            finalItem: item,
+          });
+        } else {
+          state.finalItem = item;
+        }
       }
+
+      // changed는 "물건 수"다(변경 이력 행 수가 아니다) — 그리고 "이 배치가 시작하기 전에
+      // 이미 있던 물건인데, 배치가 끝난 뒤 최종값이 그 시작 전 값과 실제로 다른가"만 본다.
+      // 이렇게 하면 같은 배치 안에 같은 키가 몇 번 나오든(finding 6) 물건당 한 번만 세고,
+      // 배치 안에서 새로 생긴 물건은 중간에 값이 몇 번 바뀌어도 절대 세지 않는다(신규는
+      // inserted가 이미 센다, design.md D3).
+      let changed = 0;
+      for (const state of keyStates.values()) {
+        if (!state.existedBeforeBatch) continue;
+        if (detectWatchedChanges(state.baseline!, state.finalItem).length > 0) changed += 1;
+      }
+
       return { inserted, updated, changed };
     },
   );
@@ -570,10 +734,11 @@ export function createRepository(db: Db): AuctionRepository {
       return upsertBatch(items, options?.now ?? new Date().toISOString());
     },
 
-    listItems(query = {}) {
+    listItems(query = {}, options) {
       const page = normalizePage(query.page);
       const pageSize = normalizePageSize(query.pageSize);
-      const filter = buildFilter(query);
+      const nowIso = options?.now ?? new Date().toISOString();
+      const filter = buildFilter(query, nowIso);
       // 재분석 후보 조회는 정렬 기준이 고정이다(design.md D5, 가장 오래 분석된 것
       // 우선) — 호출자가 준 sort/direction은 이 모드에서는 쓰이지 않는다.
       const orderBy =
@@ -592,15 +757,11 @@ export function createRepository(db: Db): AuctionRepository {
           .prepare<BindParams, { total: number }>(`SELECT COUNT(*) AS total FROM items ${filter.where}`)
           .get(filter.params)?.total ?? 0;
       // "최근 변경 시각"은 스칼라 서브쿼리 컬럼으로만 추가한다(design.md D6) — WHERE/ORDER
-      // BY/total(위)에는 관여하지 않아 기존 필터·정렬 로직을 건드리지 않는다. 기준점 행
-      // (old_value IS NULL)은 실제 변경이 아니므로 여기서 제외한다.
+      // BY/total(위)에는 관여하지 않아 기존 필터·정렬 로직을 건드리지 않는다. 기준점 행은
+      // 실제 변경이 아니므로 LAST_CHANGED_AT_EXPR이 이미 제외한다.
       const rows = db
         .prepare<BindParams, ItemListRow>(
-          `SELECT items.*, (
-             SELECT MAX(item_changes.changed_at)
-             FROM item_changes
-             WHERE item_changes.item_id = items.id AND item_changes.old_value IS NOT NULL
-           ) AS last_changed_at
+          `SELECT items.*, ${LAST_CHANGED_AT_EXPR} AS last_changed_at
            FROM items ${filter.where} ${orderBy} LIMIT @limit OFFSET @offset`,
         )
         .all({
@@ -618,8 +779,11 @@ export function createRepository(db: Db): AuctionRepository {
     },
 
     getItemById(id) {
-      const row = selectItemById.get({ id });
-      return row ? toAuctionItem(row) : null;
+      // listItems와 같은 lastChangedAt 서브쿼리를 쓴다(finding 5) — 이전에는 이 메서드만
+      // `selectItemById`(서브쿼리 없음)를 써서 항상 null을 돌려줬고, `GET /api/items/[id]`가
+      // 그 값을 그대로 노출해 단일 물건 조회에서만 lastChangedAt이 항상 null로 보였다.
+      const row = selectItemByIdWithLastChanged.get({ id });
+      return row ? toAuctionItem(row, row.last_changed_at) : null;
     },
 
     listUsageTypes() {
@@ -654,8 +818,13 @@ export function createRepository(db: Db): AuctionRepository {
       return row ? toAnalysis(row) : null;
     },
 
-    listAnalyses(itemId) {
-      return selectAnalyses.all({ itemId }).map(toAnalysis);
+    listAnalyses(itemId, options) {
+      const limit = options?.limit ?? -1; // SQLite: LIMIT -1 = 제한 없음
+      return selectAnalysesLimited.all({ itemId, limit }).map(toAnalysis);
+    },
+
+    countAnalyses(itemId) {
+      return selectAnalysesCount.get({ itemId })?.count ?? 0;
     },
   };
 }
@@ -680,8 +849,11 @@ export function upsertItems(
   return getRepository().upsertItems(items, options);
 }
 
-export function listItems(query?: ItemQuery): ListItemsResult {
-  return getRepository().listItems(query);
+export function listItems(
+  query?: ItemQuery,
+  options?: { now?: IsoDateTime },
+): ListItemsResult {
+  return getRepository().listItems(query, options);
 }
 
 export function getItemById(id: number): AuctionItem | null {
@@ -703,8 +875,12 @@ export function getLatestAnalysis(itemId: number): Analysis | null {
   return getRepository().getLatestAnalysis(itemId);
 }
 
-export function listAnalyses(itemId: number): Analysis[] {
-  return getRepository().listAnalyses(itemId);
+export function listAnalyses(itemId: number, options?: { limit?: number }): Analysis[] {
+  return getRepository().listAnalyses(itemId, options);
+}
+
+export function countAnalyses(itemId: number): number {
+  return getRepository().countAnalyses(itemId);
 }
 
 export function listItemChanges(itemId: number): ItemChange[] {

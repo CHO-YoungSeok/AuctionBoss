@@ -23,11 +23,16 @@ export const RECENT_CHANGE_DAYS = 7;
 const RECENT_CHANGE_MS = RECENT_CHANGE_DAYS * 24 * 60 * 60 * 1000;
 
 /**
- * 이 변경 행이 기준점(최초 저장 시 기록, `oldValue === null`)이 아니라 실제 변경인지
- * 판정한다 (design.md D2). 기준점은 이력 목록에 표시하지 않는다.
+ * 이 변경 행이 기준점(최초 저장 시 기록)이 아니라 실제 변경인지 판정한다 (design.md D2).
+ * 기준점은 이력 목록에 표시하지 않는다.
+ *
+ * `kind === "change"`로 판정한다(코드 리뷰 finding 1) — 이전에는 `oldValue !== null`을
+ * 썼는데, 값이 없던 필드에 값이 처음 생기는 실제 변경도 `oldValue === null`이라 기준점과
+ * 구별되지 않는 버그였다(예: 비어 있던 매각기일이 잡히는 경우). `kind`는 저장소가 그
+ * 두 경우를 애초에 다른 값으로 저장하므로 여기서 다시 헷갈릴 수 없다.
  */
-export function isRealChange(change: Pick<ItemChange, "oldValue">): boolean {
-  return change.oldValue !== null;
+export function isRealChange(change: Pick<ItemChange, "kind">): boolean {
+  return change.kind === "change";
 }
 
 /**
@@ -38,7 +43,7 @@ export function isRealChange(change: Pick<ItemChange, "oldValue">): boolean {
  * `changes.length === 0`로 판정하지 않는다: 그러면 기준점 1건뿐인 물건이 "변동 있음"으로
  * 잘못 표시된다.
  */
-export function hasRealChange(changes: ReadonlyArray<Pick<ItemChange, "oldValue">>): boolean {
+export function hasRealChange(changes: ReadonlyArray<Pick<ItemChange, "kind">>): boolean {
   return changes.some(isRealChange);
 }
 

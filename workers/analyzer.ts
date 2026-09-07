@@ -119,8 +119,10 @@ export async function runAnalysisOnce(options: AnalysisRunOptions): Promise<Anal
   });
 
   // 2단계: 재분석. 한도가 설정된 경우에만 조회한다(하위 호환 기본값 0 → 조회 자체를
-  // 생략). 1단계에서 이미 고른 물건은 제외한다 — needsAnalysis=true 조건 중 "분석
-  // 없음"이 신규 물건과 겹칠 수 있기 때문이다(design.md D4 "신규 제외").
+  // 생략). 1단계에서 이미 고른 물건은 제외한다 — 코드 리뷰 finding 2 수정 이후로는
+  // needsAnalysis=true가 "분석 행이 있는 물건"만 반환하므로 신규(미분석) 물건과 원칙적으로
+  // 겹치지 않지만, 이 dedupe는 안전망으로 남겨 둔다(정확성의 전제가 아니다 —
+  // repository.ts의 NEEDS_ANALYSIS_PREDICATE 주석 참고).
   let reanalysisItems: AuctionItem[] = [];
   if (maxReanalysisPerRun > 0) {
     const alreadyPicked = new Set(newItems.map((item) => item.id));

@@ -28,6 +28,33 @@ export function resolveDbPath(explicitPath?: string): string {
 }
 
 /**
+ * `item_changes.kind` 컬럼 마이그레이션 (코드 리뷰 finding 1).
+ *
+ * 이 컬럼이 추가되기 전에 만들어진 DB 파일에는 컬럼 자체가 없다 — `CREATE TABLE IF NOT
+ * EXISTS`는 이미 있는 테이블에 컬럼을 추가해 주지 않으므로(SQLite), 여기서 직접
+ * `ALTER TABLE ... ADD COLUMN`으로 마이그레이션한다. 새로 만드는 DB는 `SCHEMA_SQL`이
+ * 이미 이 컬럼을 갖고 테이블을 만들므로 이 함수는 조용히 아무 것도 하지 않는다.
+ *
+ * 백필 규칙: 이 컬럼이 없던 시절에는 `old_value IS NULL` 하나로 기준점과 실제 변경을
+ * 구별했다(그 방식 자체가 문제였다 — null→값 변화가 기준점과 섞이는 버그, finding 1).
+ * 그 시절에 기록된 행이 실제로 어느 쪽이었는지는 소급해서 알 수 없으므로, 기존 관례
+ * (`old_value IS NULL` = 기준점)를 그대로 백필 값으로 쓴다. 즉 이 마이그레이션 이전에
+ * 저장된 "null→값" 변경은 백필 후에도 기준점으로 재분류된다 — design.md의 기존 리스크
+ * ("기존 DB 마이그레이션 — 이미 저장된 물건들은 기준점 이력을 소급할 수 없다")의 연장선이다.
+ * 이 마이그레이션이 고치는 것은 "이후로 기록되는 행"부터다.
+ */
+function migrateItemChangesKindColumn(db: Db): void {
+  const columns = db.pragma("table_info(item_changes)") as Array<{ name: string }>;
+  const hasKindColumn = columns.some((column) => column.name === "kind");
+  if (hasKindColumn) return;
+
+  db.exec(`
+    ALTER TABLE item_changes ADD COLUMN kind TEXT NOT NULL DEFAULT 'change';
+    UPDATE item_changes SET kind = 'baseline' WHERE old_value IS NULL;
+  `);
+}
+
+/**
  * DB 파일을 열고 pragma·스키마를 적용한 새 연결을 돌려준다.
  * 테스트는 이 함수에 임시 경로나 `":memory:"`를 직접 넘겨 env에 의존하지 않는다.
  */
@@ -40,6 +67,7 @@ export function openDatabase(dbPath: string): Db {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA_SQL);
+  migrateItemChangesKindColumn(db);
   return db;
 }
 

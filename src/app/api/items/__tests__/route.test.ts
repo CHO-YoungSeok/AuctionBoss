@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, getRepository } from "@/lib/db";
 import type { AuctionItemInput } from "@/lib/domain";
 
+import { fetchReanalysisCandidates, type FetchFn } from "../../../../../workers/lib/api";
 import { GET } from "../route";
 
 const originalEnv = process.env.AUCTIONBOSS_DB;
@@ -122,5 +123,62 @@ describe("GET /api/items", () => {
 
     const response = GET(request("analyzed=false&pageSize=5"));
     expect(response.status).toBe(200);
+  });
+
+  /**
+   * 코드 리뷰 finding 7b: `needsAnalysis=true`가 `promptVersion` 없이 오면 저장소의
+   * 방어적 throw(`buildFilter`)가 그대로 새어 나가 500이 될 위험이 있다 — 이 경계를
+   * HTTP 레벨에서 직접 확인한 적이 없었다. 실제로는 `parseItemQuery`(strict 파서)가
+   * 이 조합을 미리 400으로 거절하므로 저장소까지 도달하지 않아야 한다.
+   */
+  it("finding 7 — needsAnalysis=true인데 promptVersion이 없으면 400이다(저장소의 방어적 throw가 500으로 새지 않는다)", async () => {
+    const response = GET(request("needsAnalysis=true"));
+    expect(response.status).toBe(400);
+
+    const body = (await response.json()) as { details: Array<{ field: string }> };
+    expect(body.details.some((detail) => detail.field === "needsAnalysis")).toBe(true);
+  });
+
+  /**
+   * 코드 리뷰 finding 7b: 분석 워커(`workers/lib/api.ts`)가 재분석 조회에 실제로 만드는
+   * URL을 이 라우트가 받아들이는지 확인한다. 손으로 다시 만든 쿼리스트링이 아니라
+   * `fetchReanalysisCandidates`가 실제로 조립한 URL을 그대로 쓴다 — 워커와 라우트의
+   * 계약이 코드로 어긋나면(예: 파라미터 이름 오타) 여기서 바로 드러난다.
+   */
+  it("finding 7 — workers/lib/api.ts가 실제로 만드는 재분석 조회 URL을 라우트가 받아들인다", async () => {
+    const repo = getRepository();
+    repo.upsertItems([makeItem()]);
+    const item = repo.listItems({ pageSize: 10 }).items[0]!;
+    repo.insertAnalysis({ itemId: item.id, body: "x", model: null, promptVersion: "v0" });
+
+    const builtUrls: string[] = [];
+    const captureFetch: FetchFn = async (url) => {
+      builtUrls.push(url);
+      return new Response(JSON.stringify({ items: [], total: 0, page: 1, pageSize: 5 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+
+    await fetchReanalysisCandidates({
+      baseUrl: "http://localhost",
+      pageSize: 5,
+      promptVersion: "v1",
+      fetchFn: captureFetch,
+    });
+    const builtUrl = builtUrls[0]!;
+    expect(builtUrl).toBe("http://localhost/api/items?needsAnalysis=true&promptVersion=v1&pageSize=5");
+
+    // 이제 그 URL을 실제 라우트 핸들러에 그대로 넣는다.
+    const response = GET(new Request(builtUrl));
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { items: unknown[]; total: number };
+    // item의 프롬프트 버전(v0)은 요청 버전(v1)과 다르지만, 방금(테스트 실행 시각) 분석돼
+    // 실제 config/collector.json의 reanalysisCooldownHours(24) 안에 있다 — 라우트가
+    // needsAnalysis=true일 때 실제 설정을 읽어 쿨다운을 적용한다는 것까지 이 한 번의
+    // 호출로 확인된다(finding 3). 그래서 0건이 맞다 — 버전 불일치만으로 대상이
+    // 되려면 쿨다운이 먼저 지나야 한다.
+    expect(body.items).toEqual([]);
+    expect(body.total).toBe(0);
   });
 });

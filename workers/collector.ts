@@ -37,7 +37,7 @@ export interface CollectorOptions {
   blockBackoffMs?: number;
   logger?: Logger;
   /** 저장 함수. 기본은 실제 저장소. 테스트/검증에서 교체할 수 있다. */
-  upsert?: (items: AuctionItemInput[]) => { inserted: number; updated: number };
+  upsert?: (items: AuctionItemInput[]) => { inserted: number; updated: number; changed: number };
   /** 시작하자마자 1회 실행할지. 기본 true (design.md D4). */
   runImmediately?: boolean;
 }
@@ -80,9 +80,13 @@ export function startCollector(options: CollectorOptions): CollectorHandle {
     const items = await options.source.fetchActiveItems(options.scope);
     logger.info(`[collector] #${seq} 수집된 물건 ${items.length}건`);
 
-    const { inserted, updated } = upsert(items);
+    // `changed`(감시 필드가 실제로 바뀐 물건 수)를 로그에 남긴다(코드 리뷰 finding 4) —
+    // auction-collection 스펙이 요구하는 값일 뿐 아니라, finding 3의 재분석 유발 패턴
+    // (감시 필드가 회차마다 뒤집히는 물건)이 실제로 일어나고 있는지 운영자가 알아챌 수
+    // 있는 유일한 신호다. 이전에는 이 값이 upsert()가 계산해도 조용히 버려졌다.
+    const { inserted, updated, changed } = upsert(items);
     logger.info(
-      `[collector] #${seq} 저장 완료 — inserted=${inserted}, updated=${updated}, ` +
+      `[collector] #${seq} 저장 완료 — inserted=${inserted}, updated=${updated}, changed=${changed}, ` +
         `소요 ${formatDuration(Date.now() - startedAt)}`,
     );
   }

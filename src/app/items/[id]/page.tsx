@@ -14,6 +14,16 @@ import { formatCount, formatDate, formatDateTime, formatText, formatWon } from "
 
 export const dynamic = "force-dynamic";
 
+/**
+ * 상세 페이지가 실제로 본문(markdown)을 렌더링하는 "이전 분석"의 최대 건수(코드 리뷰
+ * finding 3b). 감시 필드가 회차마다 뒤집히는 물건은 한 달 사이 재분석이 수백 건 쌓일 수
+ * 있는데(finding 3), 이전에는 `listAnalyses(itemId)`를 한도 없이 불러 전부 인라인
+ * 렌더링했다 — 그런 물건 하나의 상세 페이지가 수백~수천 건의 markdown 본문(수 MB)을
+ * 그대로 안게 된다. 실제 전체 건수는 `countAnalyses`로 별도 표시하고, 본문을 그리는
+ * 건 이 상수(최신 포함 총 조회 건수)로 항상 유계다.
+ */
+const MAX_ANALYSES_FETCHED = 11; // 최신 1건 + 이전 10건
+
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div className="field">
@@ -37,12 +47,18 @@ export default async function ItemDetailPage({
   const item = repository.getItemById(Number(id));
   if (!item) notFound();
 
-  // getLatestAnalysis가 아니라 listAnalyses로 전체를 받아 최신/이전을 직접 나눈다 —
-  // "이전 분석이 몇 건 있는지"와 그 내용을 화면에서 보여줘야 하기 때문이다(spec: 재분석된
-  // 물건 상세). 분리 판정은 순수 헬퍼(analysis-history.ts)로 뽑아 테스트로 고정했다.
+  // getLatestAnalysis가 아니라 listAnalyses로 받아 최신/이전을 직접 나눈다 — "이전 분석이
+  // 몇 건 있는지"와 그 내용을 화면에서 보여줘야 하기 때문이다(spec: 재분석된 물건 상세).
+  // 분리 판정은 순수 헬퍼(analysis-history.ts)로 뽑아 테스트로 고정했다.
+  //
+  // 다만 한도 없이 전체를 받지 않는다(finding 3b) — `limit`으로 렌더링 대상만 잘라 받고,
+  // "몇 건 있는지"는 별도로 `countAnalyses`(잘리지 않는 진짜 전체 건수)에서 가져온다.
+  const totalAnalysesCount = repository.countAnalyses(item.id);
   const { latest: analysis, previous: previousAnalyses } = splitAnalysisHistory(
-    repository.listAnalyses(item.id),
+    repository.listAnalyses(item.id, { limit: MAX_ANALYSES_FETCHED }),
   );
+  // 전체 건수 대비 실제로 렌더링하는 이전 분석 건수 — 나머지는 본문을 아예 불러오지 않는다.
+  const hiddenPreviousCount = Math.max(0, totalAnalysesCount - 1 - previousAnalyses.length);
 
   // 기준점(oldValue===null) 행은 화면에 표시하지 않는다 — 실제 변경만 이력으로 보여준다
   // (design.md D2). 빈 이력(레거시 물건)과 기준점만 있는 이력(신규 물건, 아직 변동 없음)은
@@ -100,7 +116,10 @@ export default async function ItemDetailPage({
               // 으로 내용이 펼쳐진다. 분석이 정확히 1건일 때는 previousAnalyses가 빈
               // 배열이라 이 블록 자체가 렌더링되지 않는다(spec: 빈 "이전 분석" 섹션 금지).
               <details className="analysis-history">
-                <summary>이전 분석 {previousAnalyses.length}건 보기</summary>
+                {/* 표제는 실제 전체 건수(countAnalyses)를 쓴다 — 렌더링 한도(finding 3b) 때문에
+                    "지금 보여줄 수 있는 것"과 "실제로 몇 건 있는지"가 다를 수 있고, 후자를
+                    숨기면 재분석이 얼마나 자주 일어났는지 운영자가 알 방법이 없어진다. */}
+                <summary>이전 분석 {totalAnalysesCount - 1}건 보기</summary>
                 <ul className="analysis-history-list">
                   {previousAnalyses.map((previous) => (
                     <li key={previous.id}>
@@ -113,6 +132,12 @@ export default async function ItemDetailPage({
                     </li>
                   ))}
                 </ul>
+                {hiddenPreviousCount > 0 && (
+                  <p className="muted">
+                    그 외 {hiddenPreviousCount}건은 표시하지 않습니다(최근 {MAX_ANALYSES_FETCHED - 1}건만
+                    렌더링).
+                  </p>
+                )}
               </details>
             )}
           </>

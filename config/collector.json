@@ -11,6 +11,7 @@
   "analysis": {
     "maxItemsPerRun": 5,
     "maxReanalysisPerRun": 2,
+    "reanalysisCooldownHours": 24,
     "intervalMs": 600000
   }
 }

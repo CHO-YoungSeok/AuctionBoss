@@ -15,7 +15,7 @@
 import { NextResponse } from "next/server";
 
 import { getRepository } from "@/lib/db";
-import { parseItemQuery } from "@/lib/domain";
+import { loadCollectorConfig, parseItemQuery } from "@/lib/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +32,17 @@ export function GET(request: Request): NextResponse {
   }
 
   try {
-    const result = getRepository().listItems(parsed.query);
+    // 재분석 쿨다운(코드 리뷰 finding 3)은 URL 파라미터가 아니다 — 워커가 조정할 수 있는
+    // 값이 아니라 서버 설정(config/collector.json의 analysis.reanalysisCooldownHours)에서만
+    // 온다. needsAnalysis=true 요청일 때만 채워 저장소에 넘긴다.
+    const query =
+      parsed.query.needsAnalysis === true
+        ? {
+            ...parsed.query,
+            reanalysisCooldownHours: loadCollectorConfig().analysis.reanalysisCooldownHours,
+          }
+        : parsed.query;
+    const result = getRepository().listItems(query);
     return NextResponse.json(result);
   } catch (error) {
     console.error("[GET /api/items] 물건 목록 조회 실패", error);

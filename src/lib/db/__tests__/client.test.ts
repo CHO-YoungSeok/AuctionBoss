@@ -224,6 +224,142 @@ describe("openDatabase", () => {
       upgraded.close();
     }
   });
+
+  /**
+   * 마이그레이션 경로 확인(3, 코드 리뷰 finding 1): `item_changes.kind` 컬럼이 추가되기
+   * **직전** 스키마(이 코드 리뷰 이전, 커밋 6be2084에 실제로 배포됐던 스키마 — 테이블은
+   * 있지만 `kind` 컬럼이 없다)로 만든 DB 파일을 새 코드로 열었을 때, 오류 없이 컬럼이
+   * 추가되고 기존 행이 `old_value IS NULL` 규칙 그대로 백필되는지 확인한다.
+   *
+   * `CREATE TABLE IF NOT EXISTS`는 이미 있는 테이블에 컬럼을 추가해 주지 않으므로, 이
+   * 케이스는 위 두 마이그레이션 테스트와 달리 `ALTER TABLE`이 실제로 실행되는 유일한
+   * 경로다 — client.ts의 `migrateItemChangesKindColumn`을 직접 검증한다.
+   */
+  it("item_changes.kind 컬럼 추가 전 스키마로 만든 기존 DB 파일에 컬럼이 추가되고 기존 행이 백필된다", () => {
+    const PRE_KIND_COLUMN_SCHEMA_SQL = `
+      CREATE TABLE IF NOT EXISTS items (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        court             TEXT    NOT NULL,
+        case_no           TEXT    NOT NULL,
+        item_no           TEXT    NOT NULL,
+        address           TEXT,
+        usage_type        TEXT,
+        appraisal_price   INTEGER,
+        min_bid_price     INTEGER,
+        auction_date      TEXT,
+        failed_bid_count  INTEGER,
+        status            TEXT,
+        first_seen_at     TEXT    NOT NULL,
+        last_seen_at      TEXT    NOT NULL,
+        UNIQUE (court, case_no, item_no)
+      );
+      CREATE TABLE IF NOT EXISTS analyses (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id        INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+        body           TEXT    NOT NULL,
+        model          TEXT,
+        prompt_version TEXT    NOT NULL,
+        analyzed_at    TEXT    NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS item_changes (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id    INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+        field      TEXT    NOT NULL,
+        old_value  TEXT,
+        new_value  TEXT,
+        changed_at TEXT    NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_item_changes_item_id ON item_changes (item_id, changed_at DESC);
+    `;
+
+    const dbPath = path.join(workDir, "pre-kind-column.db");
+    const legacy = new Database(dbPath);
+    legacy.exec(PRE_KIND_COLUMN_SCHEMA_SQL);
+    legacy
+      .prepare(
+        `INSERT INTO items (id, court, case_no, item_no, min_bid_price, auction_date,
+                            first_seen_at, last_seen_at)
+         VALUES (1, '서울중앙지방법원', '2025타경1', '1', 400000000, '2026-11-01',
+                 '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+      )
+      .run();
+    // 기준점 행(진짜 기준점)과, 마이그레이션 전에는 기준점과 구별할 수 없었던
+    // "null→값" 실제 변경 행을 둘 다 옛 스키마 그대로 심어 둔다 — 마이그레이션이 이
+    // 둘을 구별해 주지는 못하지만(소급 불가, design.md 리스크), 적어도 기존 관례
+    // (old_value IS NULL = 기준점)로 조용히 백필되는지는 확인할 수 있다.
+    legacy
+      .prepare(
+        `INSERT INTO item_changes (item_id, field, old_value, new_value, changed_at)
+         VALUES (1, 'minBidPrice', NULL, '400000000', '2026-01-01T00:00:00.000Z')`,
+      )
+      .run();
+    legacy
+      .prepare(
+        `INSERT INTO item_changes (item_id, field, old_value, new_value, changed_at)
+         VALUES (1, 'auctionDate', '2026-10-01', '2026-11-01', '2026-01-02T00:00:00.000Z')`,
+      )
+      .run();
+    const legacyColumns = legacy
+      .prepare<[], { name: string }>("PRAGMA table_info(item_changes)")
+      .all()
+      .map((row) => row.name);
+    legacy.close();
+
+    // 사전 조건: 옛 DB의 item_changes에는 kind 컬럼이 없다.
+    expect(legacyColumns).not.toContain("kind");
+
+    // 새 코드로 다시 열기 = 마이그레이션. 던지지 않아야 한다.
+    const upgraded = openDatabase(dbPath);
+    try {
+      const columns = upgraded
+        .prepare<[], { name: string }>("PRAGMA table_info(item_changes)")
+        .all()
+        .map((row) => row.name);
+      expect(columns).toContain("kind");
+
+      const repo = createRepository(upgraded);
+      const changes = repo.listItemChanges(1);
+      expect(changes).toHaveLength(2);
+      // old_value가 NULL이던 행은 기존 관례대로 baseline으로 백필된다.
+      expect(changes.find((c) => c.field === "minBidPrice")).toMatchObject({
+        oldValue: null,
+        kind: "baseline",
+      });
+      // old_value가 값이 있던 행(진짜 실제 변경)은 change로 백필된다.
+      expect(changes.find((c) => c.field === "auctionDate")).toMatchObject({
+        oldValue: "2026-10-01",
+        kind: "change",
+      });
+
+      // 마이그레이션 이후에 새로 기록되는 행은 이제 baseline/change가 kind로 명시적으로
+      // 구별된다(더 이상 old_value IS NULL 하나에 기대지 않는다).
+      repo.upsertItems([
+        {
+          court: "서울중앙지방법원",
+          caseNo: "2025타경1",
+          itemNo: "1",
+          address: null,
+          usageType: null,
+          appraisalPrice: null,
+          minBidPrice: 400000000,
+          auctionDate: null, // 기존 값은 '2026-11-01'이었으니 null로 바뀌는 것도 실제 변경
+          failedBidCount: null,
+          status: null,
+        },
+      ]);
+      const auctionDateChanges = repo
+        .listItemChanges(1)
+        .filter((c) => c.field === "auctionDate");
+      expect(auctionDateChanges).toHaveLength(2); // 마이그레이션 백필 1건 + 새 변경 1건
+      expect(auctionDateChanges[1]).toMatchObject({
+        oldValue: "2026-11-01",
+        newValue: null,
+        kind: "change",
+      });
+    } finally {
+      upgraded.close();
+    }
+  });
 });
 
 describe("resolveDbPath", () => {

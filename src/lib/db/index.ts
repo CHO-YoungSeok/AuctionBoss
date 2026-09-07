@@ -4,6 +4,7 @@ export { ItemNotFoundError } from "./errors";
 export {
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
+  countAnalyses,
   createRepository,
   escapeLikePattern,
   getItemById,

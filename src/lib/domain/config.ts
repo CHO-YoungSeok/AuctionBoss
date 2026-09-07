@@ -29,6 +29,10 @@ const analysisConfigSchema = z.object({
   // 잘못된 타입/범위면 즉시 throw한다(design.md D5). "기본 2"는 배포되는
   // config/collector.json 파일 자체의 값이지, 로더가 채우는 값이 아니다.
   maxReanalysisPerRun: z.number().int().positive(),
+  // 코드 리뷰 finding 3: 재분석 쿨다운(시간). 0(쿨다운 없음)은 허용하지만 음수·소수·
+  // 누락·잘못된 타입은 다른 analysis 필드와 똑같이 즉시 throw한다 — 조용히 기본값으로
+  // 넘어가면 비용 통제가 설정 오류로 조용히 꺼진 채 운영될 수 있다.
+  reanalysisCooldownHours: z.number().int().nonnegative(),
   intervalMs: z.number().int().positive(),
 });
 

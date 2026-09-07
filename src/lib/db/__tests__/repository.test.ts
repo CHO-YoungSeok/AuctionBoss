@@ -99,10 +99,32 @@ describe("upsertItems", () => {
   it("한 배치 안에 같은 키가 두 번 들어와도 행은 하나이고 카운트가 정확하다", () => {
     const result = repo.upsertItems([makeItem(), makeItem({ status: "변경" })]);
 
-    expect(result).toEqual({ inserted: 1, updated: 1, changed: 1 });
+    // changed는 0이다(finding 6 수정) — 이 물건은 배치가 시작하기 전에는 존재하지
+    // 않았다(신규). 배치 안에서 두 번째 행이 첫 번째 행과 다른 값(status)을 가져와도
+    // 그건 "배치 시작 전 저장값 대비 변경"이 아니라 신규 저장의 연장일 뿐이다 — 신규는
+    // `inserted`가 이미 센다(design.md D3). 이전에는 이 경우도 changed:1로 잘못
+    // 셌었다(배치 내 두 번째 행이 방금 insert된 값을 "이전 값"으로 오인했기 때문).
+    expect(result).toEqual({ inserted: 1, updated: 1, changed: 0 });
     const { items, total } = repo.listItems();
     expect(total).toBe(1);
     expect(items[0]?.status).toBe("변경"); // 나중 값이 남는다
+  });
+
+  it("배치 안에서 같은 키가 여러 번 나와도 changed는 물건 단위로 한 번만, 그리고 배치 시작 전 값과 실제로 다를 때만 센다(finding 6)", () => {
+    // 이 물건은 이전 호출에서 이미 저장돼 있었다 — 이번 배치의 "시작 전 저장값"이 있다.
+    repo.upsertItems([makeItem({ minBidPrice: 100 })], { now: "2026-01-01T00:00:00.000Z" });
+
+    const result = repo.upsertItems(
+      [
+        makeItem({ minBidPrice: 200 }), // 배치 시작 전(100)과 다르다
+        makeItem({ minBidPrice: 300 }), // 같은 배치 안 두 번째 — 같은 물건, 최종값만 남는다
+      ],
+      { now: "2026-01-02T00:00:00.000Z" },
+    );
+
+    // 물건은 하나뿐이므로 changed도 최대 1 — 배치 안에 몇 번 나왔든 중복 집계하지 않는다.
+    expect(result).toEqual({ inserted: 0, updated: 2, changed: 1 });
+    expect(repo.listItems().items[0]?.minBidPrice).toBe(300); // 최종값(나중 값)이 남는다
   });
 
   it("빈 배열은 아무 것도 하지 않는다", () => {
@@ -129,16 +151,56 @@ describe("변경 이력 (item_changes)", () => {
     expect(changes).toHaveLength(4);
     expect(changes).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ field: "minBidPrice", oldValue: null, newValue: "400000000" }),
-        expect.objectContaining({ field: "failedBidCount", oldValue: null, newValue: "1" }),
-        expect.objectContaining({ field: "auctionDate", oldValue: null, newValue: "2026-10-01" }),
-        expect.objectContaining({ field: "status", oldValue: null, newValue: "진행" }),
+        expect.objectContaining({
+          field: "minBidPrice",
+          oldValue: null,
+          newValue: "400000000",
+          kind: "baseline",
+        }),
+        expect.objectContaining({
+          field: "failedBidCount",
+          oldValue: null,
+          newValue: "1",
+          kind: "baseline",
+        }),
+        expect.objectContaining({
+          field: "auctionDate",
+          oldValue: null,
+          newValue: "2026-10-01",
+          kind: "baseline",
+        }),
+        expect.objectContaining({ field: "status", oldValue: null, newValue: "진행", kind: "baseline" }),
       ]),
     );
     for (const change of changes) {
       expect(change.itemId).toBe(itemId);
       expect(change.changedAt).toBe("2026-01-01T00:00:00.000Z");
+      expect(change.kind).toBe("baseline"); // 전부 기준점이다 — 실제 변경은 하나도 없다.
     }
+  });
+
+  /**
+   * 코드 리뷰 finding 1: `kind`가 기준점/실제 변경을 구별하는 유일한 마커임을 직접
+   * 확인한다. 기준점 행(kind='baseline')과 실제 변경 행(kind='change')이 같은 물건,
+   * 같은 필드에 대해 나란히 존재할 수 있고, `oldValue`만으로는(둘 다 null일 수 있어)
+   * 구별이 안 된다는 것까지 함께 고정한다.
+   */
+  it("기준점 행(kind='baseline')과 실제 변경 행(kind='change')이 명시적으로 구별된다", () => {
+    repo.upsertItems([makeItem({ auctionDate: null })], { now: "2026-01-01T00:00:00.000Z" });
+    const itemId = repo.listItems().items[0]!.id;
+    repo.upsertItems([makeItem({ auctionDate: "2026-11-01" })], { now: "2026-01-02T00:00:00.000Z" });
+
+    const changes = repo.listItemChanges(itemId);
+    const baselineRows = changes.filter((c) => c.kind === "baseline");
+    const changeRows = changes.filter((c) => c.kind === "change");
+
+    // minBidPrice/failedBidCount/status의 기준점(auctionDate 제외, NULL이라 기준점 없음).
+    expect(baselineRows).toHaveLength(3);
+    // auctionDate의 null→값 실제 변경 — oldValue는 baselineRows와 똑같이 null이지만
+    // kind로만 구별된다.
+    expect(changeRows).toEqual([
+      expect.objectContaining({ field: "auctionDate", oldValue: null, newValue: "2026-11-01" }),
+    ]);
   });
 
   it("값이 NULL인 감시 필드는 기준점 행을 만들지 않는다", () => {
@@ -177,7 +239,14 @@ describe("변경 이력 (item_changes)", () => {
     );
   });
 
-  it("null과 값 사이의 변화도 감지한다(비교 규칙: null↔값은 변경)", () => {
+  /**
+   * 코드 리뷰 finding 1의 핵심 회귀 테스트. `oldValue`는 이 실제 변경도(null→값)
+   * 기준점(null→값, D2)과 똑같이 `null`이라 — 이전에는 그 둘을 구별할 방법이 없어서
+   * 이 변경이 기준점으로 오인돼 화면·재분석·목록에서 통째로 사라졌다. `kind`가 그
+   * 구별을 명시적으로 만들고, 그 구별이 재분석 대상 선정과 `lastChangedAt`에도 실제로
+   * 반영되는지까지 확인한다(이전에는 여기서 끝나 버그를 놓쳤다).
+   */
+  it("null과 값 사이의 변화는 실제 변경(kind='change')으로 기록되고, 재분석 대상이 되며 lastChangedAt에 반영된다", () => {
     repo.upsertItems([makeItem({ auctionDate: null })], { now: "2026-01-01T00:00:00.000Z" });
     const itemId = repo.listItems().items[0]!.id;
     // auctionDate가 NULL이라 기준점 행이 없다.
@@ -188,9 +257,28 @@ describe("변경 이력 (item_changes)", () => {
     const auctionDateChanges = repo
       .listItemChanges(itemId)
       .filter((c) => c.field === "auctionDate");
+    // oldValue는 여전히 null이다(값이 없던 상태에서 왔으니까) — 그래서 kind가 유일한
+    // 구별 수단이다. kind가 "change"임을 명시적으로 확인한다("baseline"이 아니다).
     expect(auctionDateChanges).toEqual([
-      expect.objectContaining({ oldValue: null, newValue: "2026-11-01" }),
+      expect.objectContaining({ oldValue: null, newValue: "2026-11-01", kind: "change" }),
     ]);
+
+    // 재분석 대상 선정: 이 변경 이전에 분석이 있었다면, 이 null→값 변경이 그 분석을
+    // 낡게 만들어야 한다 — 기준점으로 취급돼 조용히 무시되면 안 된다.
+    repo.insertAnalysis(
+      { itemId, body: "old", model: null, promptVersion: "v1" },
+      { now: "2026-01-01T12:00:00.000Z" }, // 실제 변경(01-02)보다 이전 분석
+    );
+    const needsReanalysis = repo.listItems({
+      needsAnalysis: true,
+      promptVersion: "v1",
+      pageSize: 10,
+    });
+    expect(needsReanalysis.items.map((i) => i.id)).toContain(itemId);
+
+    // lastChangedAt: 목록에서도 이 변경이 "최근 변동"으로 잡혀야 한다.
+    const item = repo.listItems({ pageSize: 10 }).items.find((i) => i.id === itemId)!;
+    expect(item.lastChangedAt).toBe("2026-01-02T00:00:00.000Z");
   });
 
   it("null과 null은 같음으로 본다(이력이 남지 않는다)", () => {
@@ -312,9 +400,44 @@ describe("변경 이력 (item_changes)", () => {
       repo.upsertItems([makeItem({ minBidPrice: 1 })], { now: "2026-01-02T00:00:00.000Z" }),
     ).toThrow();
 
-    // item_changes가 없어 이력 쪽은 확인할 수 없지만, 물건 쪽 갱신이 롤백됐는지는
-    // 여전히 확인할 수 있다 — 실패 전 값 그대로여야 한다.
-    expect(repo.getItemById(itemId)).toEqual(before);
+    // item_changes가 없어 `repo.getItemById`(finding 5로 lastChangedAt 서브쿼리가 그
+    // 테이블을 참조한다)는 이제 이 상태에서 쓸 수 없다 — 물건 테이블만 직접 SQL로 확인한다.
+    // 물건 쪽 갱신이 롤백됐는지: 실패 전 값 그대로여야 한다.
+    const afterRow = db
+      .prepare<{ id: number }, { min_bid_price: number | null }>(
+        "SELECT min_bid_price FROM items WHERE id = @id",
+      )
+      .get({ id: itemId });
+    expect(afterRow?.min_bid_price).toBe(before?.minBidPrice);
+  });
+
+  /**
+   * 원자성, 반대 방향(코드 리뷰 finding 7a). 위 테스트는 배치 실패 후 `listItems().total`만
+   * 확인했다 — 배치 앞쪽 물건이 이미 쓴 `item_changes` 행까지 롤백되는지는 따로 확인한
+   * 적이 없었다. 배치의 두 번째 물건이 실패하도록 만들고, 첫 번째 물건의 실제 변경
+   * (item_changes에 새로 쓰였을 행)이 커밋되지 않았는지 직접 확인한다.
+   */
+  it("배치 중간에 실패하면 그 전에 처리된 물건의 item_changes 행도 함께 롤백된다(원자성, 반대 방향)", () => {
+    repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" });
+    const itemId = repo.listItems().items[0]!.id;
+    const changesBefore = repo.listItemChanges(itemId);
+
+    // 배치의 첫 번째 물건(itemId)은 실제 변경을 만든다 — item_changes에 새 행이 쓰일
+    // 것이다. 두 번째 물건은 court가 NULL이라 NOT NULL 제약을 어겨 INSERT/UPDATE
+    // 시점에 실패한다(client.test.ts/repository.test.ts의 기존 패턴과 동일).
+    const broken = { ...makeItem({ itemNo: "2" }), court: null } as unknown as AuctionItemInput;
+
+    expect(() =>
+      repo.upsertItems([makeItem({ minBidPrice: 1 }), broken], {
+        now: "2026-01-02T00:00:00.000Z",
+      }),
+    ).toThrow();
+
+    // 배치가 통째로 롤백됐으므로, 첫 번째 물건의 실제 변경(minBidPrice: 1)에 대한
+    // item_changes 행도 커밋되지 않았어야 한다 — 배치 전 이력 그대로다.
+    expect(repo.listItemChanges(itemId)).toEqual(changesBefore);
+    // 물건 자체의 값도 롤백됐는지 같이 확인한다(위 테스트와 대칭).
+    expect(repo.getItemById(itemId)?.minBidPrice).toBe(400_000_000);
   });
 });
 
@@ -530,7 +653,7 @@ describe("listItems — lastChangedAt (design.md D6)", () => {
  * 최신 분석의 prompt_version이 요청 버전과 다름. `analyzed=false`의 의미(분석 행 없음)는
  * 이 필터가 있어도 바뀌지 않아야 한다(회귀).
  */
-describe("listItems — needsAnalysis (design.md D4)", () => {
+describe("listItems — needsAnalysis (design.md D4, 코드 리뷰 finding 2로 조건 1 제거)", () => {
   it("[회귀] needsAnalysis와 무관하게 analyzed=false는 여전히 '분석 없음'만 뜻한다", () => {
     repo.upsertItems([makeItem({ itemNo: "1" }), makeItem({ itemNo: "2" })], {
       now: "2026-01-01T00:00:00.000Z",
@@ -556,15 +679,46 @@ describe("listItems — needsAnalysis (design.md D4)", () => {
     });
     const ids = needsReanalysis.items.map((item) => item.id);
     expect(ids).toContain(item1!.id); // 실제 변경이 있어 대상
-    expect(ids).toContain(item2!.id); // 분석 자체가 없어 대상(조건 1)
+    // item2는 분석 자체가 없다 — finding 2 수정 이후로는 이 경로(재분석 대상 조회)에
+    // 섞이지 않는다. 미분석 물건은 analyzed=false가 전담한다(스펙: "미분석 물건은
+    // 재분석 대상에 섞이지 않음").
+    expect(ids).not.toContain(item2!.id);
   });
 
-  it("분석이 아예 없으면 재분석 대상이다(조건 1)", () => {
+  it("스펙 시나리오 — 미분석 물건은 재분석 대상에 섞이지 않음: 분석이 아예 없으면 재분석 대상이 아니다(finding 2)", () => {
     repo.upsertItems([makeItem()]);
     const item = repo.listItems({ pageSize: 10 }).items[0]!;
 
+    // 이전 버전은 "분석 행이 아예 없음"도 이 필터의 한 조건(OR)이라 미분석 물건이
+    // 여기 섞여 들어왔다 — 재분석 후보 정렬(analyzed_at ASC)에서 그런 물건은 NULL로
+    // 취급되고 SQLite가 ASC에서 NULL을 맨 앞에 둬서, 미분석 물건이 쌓이면 진짜 재분석
+    // 대상이 페이지에서 밀려났다. 이제는 분석 행이 있어야만(EXISTS) 이 필터를 통과한다.
     const result = repo.listItems({ needsAnalysis: true, promptVersion: "v1", pageSize: 10 });
-    expect(result.items.map((i) => i.id)).toContain(item.id);
+    expect(result.items.map((i) => i.id)).not.toContain(item.id);
+  });
+
+  it("미분석 물건 다수 + 실제 재분석 대상 1건이 있어도 재분석 대상만 반환된다(finding 2, 리뷰가 지적한 회귀 시나리오)", () => {
+    // 미분석 물건 여러 건 — 재분석 후보 정렬(analyzed_at ASC)에서 예전에는 이 물건들이
+    // NULL로 맨 앞을 차지해 진짜 재분석 대상을 밀어냈다.
+    repo.upsertItems(
+      Array.from({ length: 5 }, (_, i) => makeItem({ itemNo: `u${i + 1}` })),
+      { now: "2026-01-01T00:00:00.000Z" },
+    );
+    // 실제 재분석 대상: 분석 완료 후 실제 변경.
+    repo.upsertItems([makeItem({ itemNo: "target" })], { now: "2026-01-01T00:00:00.000Z" });
+    const target = repo.listItems({ pageSize: 10 }).items.find((i) => i.itemNo === "target")!;
+    repo.insertAnalysis(
+      { itemId: target.id, body: "x", model: null, promptVersion: "v1" },
+      { now: "2026-01-02T00:00:00.000Z" },
+    );
+    repo.upsertItems([makeItem({ itemNo: "target", minBidPrice: 1 })], {
+      now: "2026-01-03T00:00:00.000Z",
+    });
+
+    // pageSize를 작게 줘도(재분석 한도가 작은 실제 운영 상황을 흉내) target이 나와야 한다 —
+    // 미분석 물건이 결과에 아예 없으므로 정렬·페이지 크기와 무관하게 target을 밀어낼 수 없다.
+    const result = repo.listItems({ needsAnalysis: true, promptVersion: "v1", pageSize: 2 });
+    expect(result.items.map((i) => i.id)).toEqual([target.id]);
   });
 
   it("스펙 시나리오 — 변경된 물건 재분석: 최신 분석 이후 실제 변경이 있으면 대상이다(조건 2)", () => {
@@ -709,6 +863,78 @@ describe("listItems — needsAnalysis (design.md D4)", () => {
     expect(() => repo.listItems({ needsAnalysis: false, pageSize: 10 })).toThrow(
       /지원하지 않는 needsAnalysis/,
     );
+  });
+
+  /**
+   * 재분석 쿨다운(코드 리뷰 finding 3). 소스가 감시 필드를 회차마다 뒤집어 보고하면
+   * 매 회차가 유효한 변경으로 기록돼 재분석이 무한히 유발될 수 있다 — 회차당 건수
+   * 제한(`maxReanalysisPerRun`)만으로는 그 물건이 매 회차 한도를 계속 차지하는 것을
+   * 막지 못한다. 최신 분석이 쿨다운보다 최근이면 실제 변경이 있어도 대상에서 빠져야
+   * 한다.
+   */
+  describe("재분석 쿨다운 (reanalysisCooldownHours, finding 3)", () => {
+    it("최신 분석이 쿨다운 이내면 실제 변경이 있어도 재분석 대상에서 제외된다", () => {
+      repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" });
+      const item = repo.listItems({ pageSize: 10 }).items[0]!;
+      repo.insertAnalysis(
+        { itemId: item.id, body: "x", model: null, promptVersion: "v1" },
+        { now: "2026-01-02T00:00:00.000Z" },
+      );
+      // 분석 3시간 후 실제 변경 — 조건 자체는(변경 있음) 충족한다.
+      repo.upsertItems([makeItem({ minBidPrice: 1 })], { now: "2026-01-02T03:00:00.000Z" });
+
+      // "지금"을 분석 12시간 후로 고정 — 24시간 쿨다운 안이다.
+      const result = repo.listItems(
+        { needsAnalysis: true, promptVersion: "v1", reanalysisCooldownHours: 24, pageSize: 10 },
+        { now: "2026-01-02T12:00:00.000Z" },
+      );
+      expect(result.items.map((i) => i.id)).not.toContain(item.id);
+    });
+
+    it("쿨다운이 지나면 같은 실제 변경이 다시 재분석 대상이 된다", () => {
+      repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" });
+      const item = repo.listItems({ pageSize: 10 }).items[0]!;
+      repo.insertAnalysis(
+        { itemId: item.id, body: "x", model: null, promptVersion: "v1" },
+        { now: "2026-01-02T00:00:00.000Z" },
+      );
+      repo.upsertItems([makeItem({ minBidPrice: 1 })], { now: "2026-01-02T03:00:00.000Z" });
+
+      // "지금"을 분석 25시간 후로 고정 — 24시간 쿨다운이 지났다.
+      const result = repo.listItems(
+        { needsAnalysis: true, promptVersion: "v1", reanalysisCooldownHours: 24, pageSize: 10 },
+        { now: "2026-01-03T01:00:00.000Z" },
+      );
+      expect(result.items.map((i) => i.id)).toContain(item.id);
+    });
+
+    it("reanalysisCooldownHours를 생략하면 쿨다운을 적용하지 않는다(기존 동작과 동일, 하위 호환)", () => {
+      repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" });
+      const item = repo.listItems({ pageSize: 10 }).items[0]!;
+      repo.insertAnalysis(
+        { itemId: item.id, body: "x", model: null, promptVersion: "v1" },
+        { now: "2026-01-02T00:00:00.000Z" },
+      );
+      repo.upsertItems([makeItem({ minBidPrice: 1 })], { now: "2026-01-02T03:00:00.000Z" });
+
+      const result = repo.listItems(
+        { needsAnalysis: true, promptVersion: "v1", pageSize: 10 },
+        { now: "2026-01-02T04:00:00.000Z" }, // 분석 4시간 후 — 쿨다운이 있었다면 걸렸을 시점
+      );
+      expect(result.items.map((i) => i.id)).toContain(item.id);
+    });
+
+    it("음수 reanalysisCooldownHours는 던진다(다른 잘못된 값과 같은 방어)", () => {
+      repo.upsertItems([makeItem()]);
+      expect(() =>
+        repo.listItems({
+          needsAnalysis: true,
+          promptVersion: "v1",
+          reanalysisCooldownHours: -1,
+          pageSize: 10,
+        }),
+      ).toThrow(/reanalysisCooldownHours/);
+    });
   });
 });
 
@@ -1129,5 +1355,61 @@ describe("listAnalyses", () => {
 
   it("존재하지 않는 물건 id도 오류 없이 빈 배열을 돌려준다", () => {
     expect(repo.listAnalyses(999_999)).toEqual([]);
+  });
+
+  /**
+   * 코드 리뷰 finding 3b: 물건 상세 페이지가 이 메서드를 한도 없이 불러 전체를 렌더링하면,
+   * 감시 필드가 자주 뒤집히는 물건 하나가 재분석을 수백 건 쌓아 페이지 하나가 무거워진다.
+   * `limit`으로 렌더링 대상만 잘라 받을 수 있어야 한다.
+   */
+  it("limit을 주면 최신순으로 그 건수만 잘라서 돌려준다", () => {
+    for (let i = 0; i < 5; i += 1) {
+      repo.insertAnalysis(
+        { itemId, body: `분석 ${i}`, model: null, promptVersion: "v1" },
+        { now: `2026-01-0${i + 1}T00:00:00.000Z` },
+      );
+    }
+
+    const limited = repo.listAnalyses(itemId, { limit: 2 });
+    expect(limited).toHaveLength(2);
+    // 최신순(analyzed_at DESC)이므로 가장 나중에 저장한 것부터.
+    expect(limited.map((a) => a.body)).toEqual(["분석 4", "분석 3"]);
+  });
+
+  it("limit을 생략하면 이전과 같이 전체를 돌려준다(하위 호환)", () => {
+    for (let i = 0; i < 3; i += 1) {
+      repo.insertAnalysis(
+        { itemId, body: `분석 ${i}`, model: null, promptVersion: "v1" },
+        { now: `2026-01-0${i + 1}T00:00:00.000Z` },
+      );
+    }
+    expect(repo.listAnalyses(itemId)).toHaveLength(3);
+  });
+});
+
+describe("countAnalyses", () => {
+  it("전체 건수를 돌려준다 — listAnalyses에 limit을 줘도 이 값은 잘리지 않는다", () => {
+    repo.upsertItems([makeItem()]);
+    const itemId = repo.listItems().items[0]!.id;
+
+    for (let i = 0; i < 4; i += 1) {
+      repo.insertAnalysis(
+        { itemId, body: `분석 ${i}`, model: null, promptVersion: "v1" },
+        { now: `2026-01-0${i + 1}T00:00:00.000Z` },
+      );
+    }
+
+    expect(repo.countAnalyses(itemId)).toBe(4);
+    expect(repo.listAnalyses(itemId, { limit: 1 })).toHaveLength(1);
+  });
+
+  it("분석이 없으면 0이다", () => {
+    repo.upsertItems([makeItem()]);
+    const itemId = repo.listItems().items[0]!.id;
+    expect(repo.countAnalyses(itemId)).toBe(0);
+  });
+
+  it("존재하지 않는 물건 id도 오류 없이 0을 돌려준다", () => {
+    expect(repo.countAnalyses(999_999)).toBe(0);
   });
 });

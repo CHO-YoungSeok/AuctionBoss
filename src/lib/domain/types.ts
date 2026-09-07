@@ -76,13 +76,24 @@ export const WATCHED_FIELDS = ["minBidPrice", "failedBidCount", "auctionDate", "
 export type WatchedField = (typeof WATCHED_FIELDS)[number];
 
 /**
+ * 이력 행의 종류: 최초 저장 시의 기준점인지, 실제 값 변경인지 (코드 리뷰 finding 1).
+ *
+ * 이전에는 `oldValue === null`을 이 구별의 유일한 마커로 썼다. 하지만 "값이 없던 필드에
+ * 값이 생기는" 실제 변경(예: 비어 있던 매각기일이 잡히는 경우)도 `oldValue === null`이라
+ * 기준점과 구별할 수 없었다 — 그 변경이 상세 화면·재분석 대상 선정·목록의 "최근 변동"
+ * 표시에서 통째로 사라지는 버그였다. `kind`가 이제 유일한 마커다.
+ */
+export type ItemChangeKind = "baseline" | "change";
+
+/**
  * 물건의 감시 대상 필드 변경 이력 한 건 (design.md D1).
  *
  * `oldValue`/`newValue`는 항상 문자열이다 — 가격(숫자)·매각기일·상태(문자열)가 섞여 있어
  * DB에도 TEXT로 저장되고(D1), 표시 계층이 `field`를 보고 해석한다.
  *
- * `oldValue === null`이면 최초 저장 시의 기준점 행이지 실제 변경이 아니다(design.md D2) —
- * 표시 계층은 이 값으로 기준점과 실제 변경을 구별해야 한다.
+ * `kind === "baseline"`이면 최초 저장 시의 기준점 행이지 실제 변경이 아니다(design.md D2,
+ * finding 1로 마커가 `oldValue === null`에서 `kind`로 바뀌었다) — 표시 계층은 이 값으로
+ * 기준점과 실제 변경을 구별해야 한다.
  */
 export interface ItemChange {
   id: number;
@@ -91,6 +102,7 @@ export interface ItemChange {
   oldValue: string | null;
   newValue: string | null;
   changedAt: IsoDateTime;
+  kind: ItemChangeKind;
 }
 
 /** 분석 결과 저장 요청. */
@@ -136,6 +148,16 @@ export interface AnalysisConfig {
    * 유찰이 발생할 때마다 생기고 상한이 없으면 유찰이 몰린 날 호출이 폭증한다.
    */
   maxReanalysisPerRun: number;
+  /**
+   * 재분석 쿨다운(시간 단위, 코드 리뷰 finding 3). 물건의 최신 분석이 이 시간 이내면
+   * 감시 필드가 다시 바뀌어도 재분석 대상에서 제외한다. 소스가 감시 필드를 회차마다
+   * 뒤집어 보고하면(예: `failedBidCount`가 일시적으로 유실됐다 복구되는 패턴) 매 회차가
+   * 유효한 변경으로 기록돼 재분석이 하루 수백 번 유발될 수 있다 — 회차당 건수 제한
+   * (`maxReanalysisPerRun`)만으로는 그 물건이 매 회차 한도를 계속 차지하는 것을 막지
+   * 못한다. 기본값 24 — 실제 유찰은 월 단위로 일어나므로 24시간 안에서는 정상적인
+   * 재분석 요구가 없다는 전제다. 0을 허용한다(쿨다운 없음 = 이전 동작).
+   */
+  reanalysisCooldownHours: number;
   /** 분석 워커 주기(ms) */
   intervalMs: number;
 }

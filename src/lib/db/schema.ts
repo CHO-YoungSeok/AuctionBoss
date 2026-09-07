@@ -46,14 +46,21 @@ CREATE TABLE IF NOT EXISTS analyses (
 CREATE INDEX IF NOT EXISTS idx_analyses_item_id ON analyses (item_id, analyzed_at DESC);
 
 -- 감시 대상 필드(field는 도메인 필드명, DB 컬럼명이 아니다) 변경 이력 (design.md D1).
--- old_value가 NULL이면 최초 저장 시의 기준점 행이지 실제 변경이 아니다 (design.md D2).
+--
+-- kind ('baseline' | 'change')가 기준점/실제 변경을 구별하는 유일한 마커다. 이전에는
+-- old_value IS NULL로 구별했는데, "값이 없던 필드에 값이 생기는" 실제 변경(null→값)도
+-- old_value가 NULL이라 기준점과 구별할 수 없었다 — 그 변경이 화면·재분석·목록에서
+-- 통째로 사라지는 버그였다(코드 리뷰 finding 1). 새 DB는 이 컬럼을 갖고 시작하고,
+-- 이 컬럼이 없던 기존 DB 파일은 client.ts의 마이그레이션이 ALTER TABLE로 추가한다
+-- (CREATE ... IF NOT EXISTS는 이미 있는 테이블에 컬럼을 추가해 주지 않는다).
 CREATE TABLE IF NOT EXISTS item_changes (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   item_id    INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
   field      TEXT    NOT NULL,
   old_value  TEXT,
   new_value  TEXT,
-  changed_at TEXT    NOT NULL
+  changed_at TEXT    NOT NULL,
+  kind       TEXT    NOT NULL DEFAULT 'change'
 );
 
 -- 물건별 이력 조회(시간순)와 목록의 "최근 변경 시각" 서브쿼리(design.md D6)에 쓰인다.

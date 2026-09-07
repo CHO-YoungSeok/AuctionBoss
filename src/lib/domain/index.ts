@@ -10,6 +10,7 @@ export type {
   IsoDate,
   IsoDateTime,
   ItemChange,
+  ItemChangeKind,
   WatchedField,
   Won,
 } from "./types";

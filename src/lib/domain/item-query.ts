@@ -83,6 +83,15 @@ export interface ItemQuery {
    * 걸지 않는다 — `needsAnalysis`가 있을 때만 읽힌다.
    */
   promptVersion?: string;
+  /**
+   * `needsAnalysis=true` 판정에 적용할 재분석 쿨다운(시간 단위, 코드 리뷰 finding 3).
+   * **URL 파라미터가 아니다** — 클라이언트(분석 워커)가 마음대로 정할 수 있는 값이
+   * 아니라 서버 설정(`config/collector.json`의 `analysis.reanalysisCooldownHours`)에서만
+   * 온다. `GET /api/items` 라우트가 `needsAnalysis=true` 요청일 때만 이 값을 채워
+   * 저장소에 넘긴다. 생략하면(직접 저장소를 호출하는 테스트 등) 쿨다운을 적용하지 않는다
+   * (기존 동작과 동일).
+   */
+  reanalysisCooldownHours?: number;
   /** 용도. 하나라도 일치하면 통과(OR). 저장된 값과 **정확히** 일치해야 한다. */
   usageTypes?: string[];
   /** 최저매각가격 하한(원, 포함). 최저매각가격이 없는(NULL) 물건은 제외된다. */

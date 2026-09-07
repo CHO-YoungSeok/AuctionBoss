@@ -141,6 +141,7 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
   "analysis": {
     "maxItemsPerRun": 5,
     "maxReanalysisPerRun": 2,
+    "reanalysisCooldownHours": 24,
     "intervalMs": 600000
   }
 }
@@ -154,6 +155,7 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 | `intervalMs` | `600000` (10분) | collector 수집 주기. **늘리는 것이 안전한 방향이다** — §7 참고. 이전 회차가 아직 안 끝났으면 이번 tick은 건너뛴다(중첩 실행 없음). |
 | `analysis.maxItemsPerRun` | `5` | analyzer 한 회차에 분석할 최대 **신규** 물건 수(아직 분석 결과가 하나도 없는 물건). Claude 호출 비용의 상한이다. 올리면 회차당 비용과 소요 시간이 비례해 늘어난다(호출은 순차 실행). |
 | `analysis.maxReanalysisPerRun` | `2` | analyzer 한 회차에 재분석할 최대 물건 수(§6 참고). `maxItemsPerRun`과는 **독립된 별도 한도**다 — 회차당 총 Claude 호출 수 상한은 두 값의 **합**(`maxItemsPerRun + maxReanalysisPerRun`, 기본 5+2=7)이지, 하나의 한도를 나눠 쓰는 게 아니다. |
+| `analysis.reanalysisCooldownHours` | `24` | 재분석 쿨다운(시간). 물건의 최신 분석이 이 시간 이내면 감시 필드가 다시 바뀌어도 재분석 대상에서 제외한다. 정수(0 이상), 소수·음수·누락은 다른 `analysis` 필드와 똑같이 시작 시 `CollectorConfigError`로 죽는다. 0을 주면 쿨다운이 완전히 꺼진다(이전 동작과 동일) — **왜 이 필드가 필요한지는 §6.2의 "왜 쿨다운이 필요한가" 문단을 반드시 읽을 것.** |
 | `analysis.intervalMs` | `600000` (10분) | analyzer 주기. 신규 미분석 물건도 재분석 대상도 없으면 `[analyzer] 미분석 물건도 재분석 대상도 없음`만 찍고 아무것도 호출하지 않는다. |
 
 설정이 없거나 JSON이 깨졌거나 스키마에 안 맞으면 **기본값으로 조용히 넘어가지 않고 즉시 종료한다**
@@ -276,9 +278,16 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 }
 ```
 
-이전 분석 이력 전체(최신 포함, 최신순)는 이 엔드포인트가 아니라 물건 상세 페이지
-(`/items/[id]`)가 서버 컴포넌트 안에서 `listAnalyses(itemId)`로 직접 읽어 렌더링한다 —
-이력 전용 API는 없다.
+이전 분석 이력은 이 엔드포인트가 아니라 물건 상세 페이지(`/items/[id]`)가 서버 컴포넌트
+안에서 `listAnalyses(itemId, { limit })`로 직접 읽어 렌더링한다 — 이력 전용 API는 없다.
+
+**단, 상세 페이지는 본문을 무제한으로 그리지 않는다.** `src/app/items/[id]/page.tsx`의
+`MAX_ANALYSES_FETCHED`(11 = 최신 1건 + 이전 10건)만큼만 `listAnalyses`로 가져와 본문을
+렌더링하고, 실제 전체 건수는 `countAnalyses(itemId)`로 별도 조회해 "이전 분석 N건 보기"
+표제와 "그 외 M건은 표시하지 않습니다" 문구에 쓴다 — 표제의 숫자(전체 건수)와 실제로
+펼쳐서 볼 수 있는 건수(최대 10건)가 다를 수 있다는 뜻이다. 이 한도가 없으면, §6.2에서
+설명한 것처럼 감시 필드가 회차마다 뒤집히는 물건 하나가 재분석을 수백 건 쌓아 상세
+페이지 하나가 수 MB의 markdown 본문을 그대로 안게 된다.
 
 ### `GET /api/items/[id]/changes` — 물건 변경 이력
 
@@ -288,37 +297,48 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 - 없는 `id`(숫자가 아니거나 물건이 없음)면 **404**.
 - **`changes`는 필터링되지 않는다 — 최초 저장 시의 기준점 행(baseline)도 그대로 포함된
   전체 이력이다.** 물건이 처음 수집될 때 감시 대상 필드(값이 `NULL`이 아닌 것)마다
-  `oldValue: null`인 기준점 행이 만들어지고(§6.1 D2), 이후 실제 값이 바뀔 때마다
-  `oldValue`가 채워진 행이 추가된다. 두 종류가 같은 배열에 시간순으로 섞여서 나온다 —
+  `kind: "baseline"`인 기준점 행이 만들어지고(§6.1 D2), 이후 실제 값이 바뀔 때마다
+  `kind: "change"`인 행이 추가된다. 두 종류가 같은 배열에 시간순으로 섞여서 나온다 —
   **`"changes": []`는 감시 필드가 전부 `NULL`인 물건에서만 나온다(진짜 빈 이력)**. 두 번
   수집된 보통 물건이면 감시 필드 4개의 기준점 4행 + 실제 변경 수만큼이 반환된다(예:
   `src/app/api/items/[id]/changes/__tests__/route.test.ts`는 최초 수집 1회 + 실제 변경
-  1회 뒤 **6건**(기준점 4 + 변경 2)을 기대한다 — 실측으로도 확인했다: `npm run build` 후
-  스크래치 DB에 위 시나리오를 재현해 `curl`한 결과 정확히 6건이 돌아왔다).
-  클라이언트가 "진짜 변경"만 보고 싶으면 **`oldValue !== null`인 행만 걸러야 한다**
-  (`src/app/_lib/change-history.ts`의 `isRealChange`가 하는 일과 같다).
+  1회 뒤 **6건**(기준점 4 + 변경 2)을 기대한다).
+  **클라이언트가 "진짜 변경"만 보고 싶으면 `kind === "change"`인 행만 걸러야 한다**
+  (`src/app/_lib/change-history.ts`의 `isRealChange`가 하는 일과 같다) — **`oldValue !== null`로
+  거르던 예전 방식은 버그였다.** `NULL`이던 필드에 값이 처음 생기는 것(예: 비어 있던
+  매각기일이 잡히는 경우, 또는 소스 글리치로 지워졌던 값이 복구되는 경우)도 엄연히 "실제
+  변경"이지만, 저장소는 기준점 행을 만들 때와 똑같이 `oldValue: null`로 기록한다 — 그래서
+  `oldValue`의 null 여부만으로는 이 둘을 구별할 수 없다. 예전 방식(`oldValue IS NULL` =
+  기준점)에서는 이런 변경이 기준점과 섞여 상세 페이지의 변경 이력 카드, 목록의 "최근 변동"
+  배지, 재분석 대상 판정(§6.2) 세 곳 모두에서 통째로 사라졌다. `kind`는 저장소가 기록
+  시점에 이 둘을 애초에 다른 값(`"baseline"`/`"change"`)으로 남기므로, 조회 시점에는
+  `oldValue`를 해석할 필요 없이 `kind`만 보면 된다.
 
 ```jsonc
 // 200 OK — 두 번 수집된 물건의 실제 응답 예 (baseline 4건 + 실제 변경 2건)
 {
   "changes": [
     { "id": 1, "itemId": 1, "field": "minBidPrice", "oldValue": null, "newValue": "400000000",
-      "changedAt": "2026-01-01T00:00:00.000Z" },      // ← 기준점(최초 저장). oldValue가 null이면 기준점.
+      "changedAt": "2026-01-01T00:00:00.000Z", "kind": "baseline" },
     { "id": 2, "itemId": 1, "field": "failedBidCount", "oldValue": null, "newValue": "1",
-      "changedAt": "2026-01-01T00:00:00.000Z" },      // ← 기준점
+      "changedAt": "2026-01-01T00:00:00.000Z", "kind": "baseline" },
     { "id": 3, "itemId": 1, "field": "auctionDate", "oldValue": null, "newValue": "2026-10-01",
-      "changedAt": "2026-01-01T00:00:00.000Z" },      // ← 기준점
+      "changedAt": "2026-01-01T00:00:00.000Z", "kind": "baseline" },
     { "id": 4, "itemId": 1, "field": "status", "oldValue": null, "newValue": "진행",
-      "changedAt": "2026-01-01T00:00:00.000Z" },      // ← 기준점
+      "changedAt": "2026-01-01T00:00:00.000Z", "kind": "baseline" },
     { "id": 5, "itemId": 1, "field": "minBidPrice",       // WatchedField: minBidPrice | failedBidCount | auctionDate | status
-      "oldValue": "400000000",      // 문자열로 저장된다(§6.1 참고). null이 아니므로 실제 변경.
+      "oldValue": "400000000",      // 문자열로 저장된다(§6.1 참고).
       "newValue": "300000000",
-      "changedAt": "2026-01-02T00:00:00.000Z" },
+      "changedAt": "2026-01-02T00:00:00.000Z", "kind": "change" },
     { "id": 6, "itemId": 1, "field": "failedBidCount", "oldValue": "1", "newValue": "2",
-      "changedAt": "2026-01-02T00:00:00.000Z" }
+      "changedAt": "2026-01-02T00:00:00.000Z", "kind": "change" }
   ]
 }
 ```
+
+- **`kind`는 `"baseline" | "change"`다** — 기준점/실제 변경을 구별하는 유일한 마커이며,
+  `oldValue`의 null 여부와는 별개다(위 설명 참고). 응답 행의 필드 집합은 항상
+  `{ id, itemId, field, oldValue, newValue, changedAt, kind }`다.
 
 ### `GET /api/items/usage-types` — 저장된 용도 목록
 
@@ -382,6 +402,27 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 방향과 변화폭(금액·비율)이 함께 표시된다. 목록 화면(`/`)에서는 최근 7일 이내에 실제 변동이
 있었던 물건에 배지가 붙는다.
 
+**기준점/실제 변경 구별은 `item_changes.kind`(`'baseline' | 'change'`) 컬럼이 유일한
+기준이다.** 예전에는 `old_value IS NULL`로 구별했는데, "값이 없던 필드에 값이 처음
+생기는" 것도 실제 변경이면서 `old_value`가 여전히 `NULL`로 기록되므로(예: 비어 있던
+매각기일이 잡히거나, 소스 글리치로 사라졌던 값이 복구되는 경우) 기준점과 구별할 방법이
+없었다 — 이런 변경이 상세 페이지의 변경 이력, 목록의 "최근 변동" 배지, §6.2의 재분석 대상
+판정에서 전부 사라지는 버그였다. `kind`는 저장 시점에 이 둘을 명시적으로 다르게 남긴다
+(`src/lib/db/repository.ts`의 `detectWatchedChanges`는 항상 `kind: "change"`를,
+`baselineWatchedChanges`는 항상 `kind: "baseline"`을 쓴다).
+
+이 컬럼이 없던 시절에 만들어진 DB 파일은 앱/워커가 열 때 자동으로 마이그레이션된다
+(`src/lib/db/client.ts`의 `migrateItemChangesKindColumn` — `CREATE TABLE IF NOT EXISTS`는
+이미 있는 테이블에 컬럼을 추가해 주지 않으므로 `ALTER TABLE ... ADD COLUMN`으로 직접
+추가한다). 백필 규칙은 예전 방식 그대로다: `old_value IS NULL`인 기존 행은 `kind =
+'baseline'`으로, 나머지는 `kind = 'change'`로 채운다. **이 백필에는 되돌릴 수 없는 손실이
+있다** — 컬럼이 없던 시절에 기록된 "null → 값" 실제 변경(위에서 설명한 버그 케이스)은
+`old_value`가 `NULL`이라는 이유만으로 이 마이그레이션에서도 그대로 기준점으로
+재분류된다. 그 시절 데이터는 애초에 두 경우를 구별해서 저장하지 않았으므로 소급해서
+복구할 방법이 없다 — 이 마이그레이션이 고치는 것은 "이후로 새로 기록되는 행"부터다.
+(마이그레이션 자체는 `src/lib/db/__tests__/client.test.ts`의 "item_changes.kind 컬럼 추가
+전 스키마로 만든 기존 DB 파일에 컬럼이 추가되고 기존 행이 백필된다" 테스트로 검증돼 있다.)
+
 ### 6.2 재분석
 
 analyzer는 처음에는 "분석 결과가 하나도 없는 물건"만 분석했다. 이제는 이미 분석된 물건도
@@ -396,6 +437,32 @@ analyzer는 처음에는 "분석 결과가 하나도 없는 물건"만 분석했
 재분석 대상은 `GET /api/items?needsAnalysis=true&promptVersion=<현재 버전>`(§5)으로 조회하며,
 기존 `analyzed=false` 필터의 의미(분석 결과 유무)는 바뀌지 않는다 — 재분석 대상 여부는 별도
 파라미터로만 알 수 있다.
+
+위 세 조건을 만족해도, **물건의 최신 분석이 `reanalysisCooldownHours`(기본 24시간) 이내에
+이뤄졌으면 재분석 대상에서 제외된다.** 이 값은 워커가 보내는 URL 파라미터가 아니라
+**서버가 자기 `config/collector.json`을 읽어 스스로 적용**한다(`needsAnalysis=true`
+요청이면 항상 적용됨, `src/app/api/items/route.ts`) — analyzer가 조정할 수 있는 값이
+아니다.
+
+**왜 쿨다운이 필요한가.** `status`(진행상태)는 사이트가 주는 값이 아니라 `failedBidCount`
+(유찰횟수)에서 어댑터가 1:1로 파생시킨 값이다(`0` → `"신건"`, 그 외 → `"유찰 N회"`,
+`src/lib/sources/courtauction/adapter.ts`의 `deriveStatus`). 그래서 소스가 `유찰횟수`를
+수집 회차마다 다르게(예: 일시적으로 유실됐다 복구되는 패턴) 보고하는 물건 하나가 있으면,
+그 물건은 수집될 때마다 감시 필드 최소 2개(`failedBidCount`, `status`)가 동시에 "실제
+변경"으로 기록되고 — 조건 2에 의해 — **매 회차 재분석 대상으로 재적격된다.** 10분
+주기라면 하루 144회 수집(24 × 60 / 10)이 돌므로, 이 물건 하나가 하루 최대 144번, 한 달
+약 4,320번의 유료 Claude 호출을 유발할 수 있다. `maxReanalysisPerRun`은 **회차당** 상한일
+뿐 재분석 대기열 자체를 비우지 못한다 — 대기열에 이 물건이 계속 다시 들어오므로 한도를
+계속 잠식한다. 실제 쓰레기값 없이 진짜 유찰이 일어나는 주기는 대략 월 단위이므로, 24시간
+쿨다운은 정상적인 재분석 요구를 막지 않으면서 이 낭비를 하루 144회에서 하루 1회로
+줄인다. **이건 "성능 최적화"가 아니라 비용 버그를 막는 장치다.**
+
+이 패턴이 실제로 일어나고 있는지는 collector의 회차 로그로 알 수 있다 — `workers/collector.ts`가
+`저장 완료 — inserted=N, updated=N, changed=N` 형태로 매 회차 출력하는 `changed`는
+**감시 대상 필드가 실제로 바뀐 "물건 수"**다(이력 행 수가 아니고, 기준점도 세지 않는다).
+운영자가 지켜봐야 할 신호는 이 값이다: 물건 수(대개 수백 건 규모)에 비해 `changed`가 매
+회차 비정상적으로 크거나 특정 회차마다 반복적으로 비슷한 값이 나오면, 위에서 설명한
+소스 노이즈로 인한 스퓨리어스 변경이 의심되는 상황이다.
 
 **`maxItemsPerRun`(신규 분석 한도)과 `maxReanalysisPerRun`(재분석 한도, 기본 2)은 서로
 독립된 한도다.** 회차당 Claude 호출 수 상한은 이 둘의 **합**이다(기본값 기준 5 + 2 = 7건) —
@@ -444,18 +511,18 @@ analyzer는 처음에는 "분석 결과가 하나도 없는 물건"만 분석했
 ## 8. 개발
 
 ```bash
-npm test        # vitest run — 239 tests / 12 files
+npm test        # vitest run — 260 tests / 13 files
 npm run typecheck   # tsc --noEmit
 npm run lint        # eslint (설정: eslint.config.mjs, next/core-web-vitals + next/typescript)
 ```
 
-- 테스트 위치 (`vitest.config.mts`가 `src/**/*.test.ts`, `src/**/__tests__/**/*.test.ts`, `workers/**/*.test.ts`를 수집):
+- 테스트 위치 (`vitest.config.mts`가 `src/**/*.test.ts`, `src/**/__tests__/**/*.test.ts`, `workers/**/*.test.ts`를 수집. 실측: `npx vitest run` 260 tests / 13 files, `npx vitest list --filesOnly` 아래 13개):
   - `src/lib/db/__tests__/client.test.ts`, `repository.test.ts`
   - `src/lib/domain/__tests__/config.test.ts`, `item-query.test.ts`
   - `src/lib/sources/courtauction/__tests__/adapter.test.ts` (+ `fixtures.ts`)
   - `src/app/_lib/__tests__/change-history.test.ts`, `analysis-history.test.ts`, `item-query-url.test.ts`
   - `src/app/api/items/__tests__/route.test.ts`, `src/app/api/items/[id]/changes/__tests__/route.test.ts`, `src/app/api/items/usage-types/__tests__/route.test.ts`
-  - `workers/__tests__/analyzer.test.ts`
+  - `workers/__tests__/analyzer.test.ts`, `analyzer.integration.test.ts`(재분석 두 단계 선정을 실제 저장소·API 라우트로 구동하는 회귀 테스트)
 - 테스트는 **네트워크를 타지 않고 실제 DB 파일도 만들지 않는다.** `fetch`, `claude` 실행 함수,
   DB 경로가 전부 주입 지점으로 열려 있어 인메모리 DB와 가짜 fetch로 돈다.
 - `npm run build`는 타입 체크와 린트를 함께 수행하므로, 커밋 전 최소 확인은 `npm test && npm run build`다.
@@ -556,12 +623,15 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
    `analyzed`(분석 여부)는 URL로는 받아 유지하지만 폼에 입력칸이 없고, `needsAnalysis`는
    analyzer 전용이라 애초에 사람이 쓸 UI가 없다.
 7. **인증/권한이 없다.** 서버를 띄우면 접근 가능한 누구나 전체를 볼 수 있다. 로컬/내부망 전제다.
-8. **가짜 변경(노이즈) 필터링 규칙이 없다.** 소스가 같은 물건을 다른 값으로 표기하는 사례가
-   이미 관측됐다(`유찰횟수`와 `최저매각가격`이 어긋나는 행 — `openspec/changes/archive/
-   2026-09-07-auction-pipeline-mvp/design.md`). 그런 노이즈도 지금은 "실제 변경"으로
-   기록되고 재분석을 유발해 비용이 된다. 1차 방어는 `maxReanalysisPerRun` 상한뿐이고,
-   필터링 규칙은 실제 변경 이력을 며칠 관측한 뒤에 정할 예정이다
-   (`openspec/changes/add-price-change-history/design.md` Risks / Open Questions).
+8. **가짜 변경(노이즈)을 걸러내는 규칙이 없다.** 소스가 같은 물건을 다른 값으로 표기하는
+   사례가 이미 관측됐다(`유찰횟수`와 `최저매각가격`이 어긋나는 행 — `openspec/changes/archive/
+   2026-09-07-auction-pipeline-mvp/design.md`). 그런 노이즈도 지금은 감시 필드의 "실제
+   변경"으로 그대로 기록되고 재분석을 유발한다 — §6.2의 `reanalysisCooldownHours`(기본
+   24시간)가 **비용의 상한**(물건당 하루 최대 1회 재분석)은 실질적으로 막아 주지만, 노이즈
+   자체를 감지·거부하거나 이력에서 지우지는 않는다. 즉 잘못된 값이 하루 한 번씩은 계속
+   "실제 변경"으로 기록되고 화면에도 그대로 보인다 — 쿨다운은 지혈이지 치료가 아니다.
+   필터링 규칙 자체는 여전히 미정이다(`openspec/changes/add-price-change-history/design.md`
+   Open Questions) — 실제 변경 이력을 며칠 관측한 뒤에 정할 예정이다.
 9. **"최근 변동" 기준 7일이 검증된 값은 아니다.** 매각기일 주기(보통 1개월 이상)를 감안하면
    더 길어야 할 수 있다. `src/app/_lib/change-history.ts`의 `RECENT_CHANGE_DAYS` 상수 하나만
    바꾸면 되므로 조정 자체는 쉽다.
