@@ -8,6 +8,7 @@ import { notFound } from "next/navigation";
 
 import { getRepository } from "@/lib/db";
 
+import { formatChangeDisplay, hasRealChange, isRealChange } from "../../_lib/change-history";
 import { formatCount, formatDate, formatDateTime, formatText, formatWon } from "../../_lib/format";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +37,12 @@ export default async function ItemDetailPage({
   if (!item) notFound();
 
   const analysis = repository.getLatestAnalysis(item.id);
+
+  // 기준점(oldValue===null) 행은 화면에 표시하지 않는다 — 실제 변경만 이력으로 보여준다
+  // (design.md D2). 빈 이력(레거시 물건)과 기준점만 있는 이력(신규 물건, 아직 변동 없음)은
+  // hasRealChange가 똑같이 false로 판정하므로 여기서 따로 갈라 처리하지 않는다.
+  const changes = repository.listItemChanges(item.id);
+  const realChanges = changes.filter(isRealChange).map(formatChangeDisplay);
 
   return (
     <main className="page">
@@ -82,6 +89,29 @@ export default async function ItemDetailPage({
           </>
         ) : (
           <p className="empty">분석 대기 중</p>
+        )}
+      </section>
+
+      <section className="card">
+        <h2>변경 이력</h2>
+        {hasRealChange(changes) ? (
+          <ul className="change-list">
+            {realChanges.map((change) => (
+              <li key={change.id} className="change-row">
+                <span className="change-time">{formatDateTime(change.changedAt)}</span>
+                <span className="change-field">{change.label}</span>
+                <span
+                  className={
+                    change.direction ? `change-value change-${change.direction}` : "change-value"
+                  }
+                >
+                  {change.text}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="empty">아직 변동이 없습니다.</p>
         )}
       </section>
     </main>

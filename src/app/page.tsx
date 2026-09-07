@@ -21,6 +21,7 @@ import {
 } from "@/lib/domain";
 
 import { ItemFilterForm } from "./_components/item-filter-form";
+import { isRecentlyChanged } from "./_lib/change-history";
 import {
   DIRECTION_LABELS,
   SORT_LABELS,
@@ -62,6 +63,9 @@ export default async function ItemListPage({
 
   const sortLabel = SORT_LABELS[query.sort ?? DEFAULT_SORT_KEY];
   const directionLabel = DIRECTION_LABELS[query.direction ?? DEFAULT_SORT_DIRECTION];
+  // 행마다 새로 만들지 않고 렌더링 시작 시점 하나로 고정한다 — 표시 목적으로만 쓰이므로
+  // (design.md D6) 오차는 무의미하지만, 렌더 중 시각이 흔들리지 않는 편이 이해하기 쉽다.
+  const now = new Date();
 
   return (
     <main className="page">
@@ -105,6 +109,9 @@ export default async function ItemListPage({
                   <tr key={item.id}>
                     <td>
                       <Link href={`/items/${item.id}`}>{formatText(item.address)}</Link>
+                      {isRecentlyChanged(item.lastChangedAt, now) ? (
+                        <span className="badge-recent">최근변동</span>
+                      ) : null}
                     </td>
                     <td>{formatText(item.usageType)}</td>
                     <td className="num">{formatWon(item.appraisalPrice)}</td>

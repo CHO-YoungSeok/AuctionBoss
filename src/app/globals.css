@@ -241,6 +241,67 @@ tbody tr:hover {
   word-break: break-word;
 }
 
+/* 변경 이력 (상세 페이지) */
+.change-list {
+  list-style: none;
+}
+
+.change-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.change-row:last-child {
+  border-bottom: none;
+}
+
+.change-time {
+  flex: 0 0 9.5rem;
+  color: #5f6672;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.change-field {
+  flex: 0 0 6rem;
+  color: #3d434d;
+  font-weight: 600;
+}
+
+.change-value {
+  flex: 1 1 16rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 최저가 하락은 관전자에게 가장 의미 있는 이벤트라 눈에 띄게 강조한다. */
+.change-value.change-drop {
+  color: #c0392b;
+  font-weight: 600;
+}
+
+.change-value.change-rise {
+  color: #1a4fd6;
+}
+
+/* 목록에서 최근 변동 물건을 표시하는 배지 (design.md D6). */
+.badge-recent {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  color: #c0392b;
+  background: #fdecea;
+  border: 1px solid #f3c6c1;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
 .analysis-body {
   margin-top: 0.75rem;
   padding: 1rem;
