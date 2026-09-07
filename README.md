@@ -52,7 +52,8 @@
                                               +----------------------+
 ```
 
-핵심 경계 두 가지 (`openspec/changes/auction-pipeline-mvp/design.md` D3/D5):
+핵심 경계 두 가지 (`openspec/changes/archive/2026-09-07-auction-pipeline-mvp/design.md` D3/D5 —
+이 change는 완료되어 archive로 이동했다, §8 참고):
 
 - **수집 소스는 어댑터 뒤로 격리한다.** 사이트 고유 필드명(`jiwonNm`, `srnSaNo` 등)은
   `src/lib/sources/courtauction/` 밖으로 나가지 않는다. 소스를 갈아끼워도 나머지 코드는 그대로다.
@@ -167,7 +168,7 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 | 변수 | 적용 프로세스 | 기본값 | 용도 |
 | --- | --- | --- | --- |
 | `AUCTIONBOSS_DB` | 앱, collector | `<cwd>/data/auctionboss.db` | SQLite 파일 경로. 상대 경로면 cwd 기준으로 절대화된다. `:memory:`도 받는다(테스트용). |
-| `AUCTIONBOSS_CONFIG` | 앱, collector, analyzer | `<cwd>/config/collector.json` | 설정 파일 경로. |
+| `AUCTIONBOSS_CONFIG` | collector, analyzer | `<cwd>/config/collector.json` | 설정 파일 경로. `loadCollectorConfig()`를 호출하는 두 워커만 읽는다 — Next.js 앱은 `config/collector.json`을 아예 import하지 않는다(`src/lib/domain/config.ts` 사용처는 `workers/collector.ts`, `workers/analyzer.ts`뿐). |
 | `AUCTIONBOSS_COLLECT_INTERVAL_MS` | collector | `config.intervalMs` | 수집 주기(ms). 양의 정수. |
 | `AUCTIONBOSS_COLLECT_BACKOFF_MS` | collector | `3600000` (1시간) | 로봇탐지 차단 감지 시 tick을 건너뛸 시간(ms). |
 | `AUCTIONBOSS_COLLECT_PAGE_SIZE` | collector | `40` | 한 요청으로 가져올 **행** 수. **40이 서버 상한이고, 넘기면 경고 후 40으로 클램프된다**(§7). |
@@ -193,19 +194,39 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 
 ## 5. API
 
-네 개고, analyzer가 이 중 셋을 계약으로 쓰므로 응답 형태를 임의로 바꾸면 안 된다.
+다섯 개다(`find src/app/api -name route.ts` 기준: `/api/items`, `/api/items/[id]`,
+`/api/items/[id]/changes`, `/api/items/usage-types`, `/api/analyses`). analyzer는 이 중
+`GET /api/items`(§1의 두 단계 조회에 각각 한 번씩)와 `POST /api/analyses`를 계약으로
+쓰므로 응답 형태를 임의로 바꾸면 안 된다 — 나머지(`/api/items/[id]`, `.../changes`,
+`.../usage-types`)는 웹 UI 전용이라 analyzer와 무관하다.
 
 ### `GET /api/items` — 물건 목록
+
+이 표는 `src/lib/domain/item-query.ts`의 `ITEM_QUERY_PARAMS`와 zod 스키마(`itemQueryParamsSchema`)를
+기준으로 한다 — 이 파일에 없는 파라미터 이름은 API가 조용히 무시한다(모르는 파라미터 이름은
+오류가 아니다).
 
 | 쿼리 파라미터 | 타입 | 기본값 | 설명 |
 | --- | --- | --- | --- |
 | `page` | 정수 ≥ 1 | `1` | 페이지 번호 |
-| `pageSize` | 정수 1~200 | `20` | 페이지 크기 |
+| `pageSize` | 정수 1~200 | `20`(`DEFAULT_PAGE_SIZE`) | 페이지 크기. 200 초과는 400. |
 | `analyzed` | `true` \| `false` | (없음 = 전체) | 분석 결과 유무 필터. analyzer의 1단계(신규 분석)가 `analyzed=false`를 쓴다. **이 필터의 의미는 재분석 기능이 생긴 뒤에도 바뀌지 않았다** — "분석 결과가 하나도 없는 물건"만 뜻하며, 이미 분석됐지만 재분석이 필요한 물건은 포함하지 않는다. |
-| `needsAnalysis` | `true` | (없음) | 재분석 대상 필터(§6 참고). `true`만 지원한다. **반드시 `promptVersion`과 함께 와야 하며, 혼자 오면 400이다.** analyzer의 2단계(재분석)가 쓴다. |
+| `needsAnalysis` | `true` | (없음) | 재분석 대상 필터(§6.2 참고). `true`만 지원한다(`false`는 지원하지 않음 — 400). **반드시 `promptVersion`과 함께 와야 하며, 혼자 오면 400이다.** analyzer의 2단계(재분석)가 쓴다. **이 필터가 걸리면 정렬이 강제로 바뀐다 — 아래 "정렬" 문단 참고.** |
 | `promptVersion` | 문자열(비어 있지 않음) | (없음) | `needsAnalysis=true`의 판정 기준이 되는 "호출자의 현재 프롬프트 버전". `needsAnalysis` 없이 혼자 오면 아무것도 좁히지 않는다(무시된다). |
+| `usage` | 문자열, **반복 파라미터** | (없음 = 전체) | 용도(`usageType`) 필터. 하나라도 일치하면 통과(OR), 저장된 값과 **정확히** 일치해야 한다. **`usage=a&usage=b`처럼 이름을 반복해서 보낸다 — 쉼표로 합쳐 보내면 안 된다.** 실제 수집 데이터의 용도 문자열 자체에 쉼표가 들어 있는 경우가 있다(예: 실측값 `"상가,오피스텔,근린시설"` — `src/lib/sources/courtauction/NOTES.md` §8). 쉼표 구분으로 인코딩하면 이 값이 존재하지 않는 용도 3개로 쪼개져 아무것도 매칭되지 않는다. 최대 `MAX_USAGE_TYPES`(50)개, 초과 시 400. |
+| `minPrice` | 정수 ≥ 0(원) | (없음) | 최저매각가격(`minBidPrice`) 하한, 포함. 값이 `NULL`인 물건은 제외된다. `maxPrice`보다 크면 둘 다 400. |
+| `maxPrice` | 정수 ≥ 0(원) | (없음) | 최저매각가격 상한, 포함. |
+| `minFailed` | 정수 ≥ 0 | (없음) | 유찰횟수(`failedBidCount`) 하한, 포함. 값이 `NULL`인 물건은 제외된다. |
+| `q` | 문자열(비어 있지 않음) | (없음) | 소재지(`address`) 부분 일치 키워드(`LIKE`, 대소문자·특수문자 이스케이프 처리). |
+| `sort` | `auctionDate` \| `minBidPrice` \| `bidRatio` \| `failedBidCount` | `auctionDate`(`DEFAULT_SORT_KEY`) | 정렬 기준. `bidRatio`는 최저매각가격/감정가 비율. |
+| `dir` | `asc` \| `desc` | `asc`(`DEFAULT_SORT_DIRECTION`) | 정렬 방향. 값이 없는(`NULL`) 물건은 방향과 무관하게 항상 뒤로 간다. |
 
-정렬은 매각기일 오름차순(값이 없는 물건은 뒤로). 잘못된 파라미터는 보정하지 않고 **400**으로 거절한다.
+정렬은 기본적으로 매각기일 오름차순이며(값이 없는 물건은 뒤로) `sort`/`dir`로 바꿀 수 있다.
+**단, `needsAnalysis=true`가 걸린 조회는 정렬이 "가장 오래전에 분석된 물건 우선"(`analyzed_at ASC`,
+§6.2)으로 하드코딩되어 있고, 이때는 `sort`/`dir`를 함께 보내도 조용히 무시된다** — analyzer가
+재분석 대상을 뽑을 때 오래된 것부터 소진하도록 저장소(`src/lib/db/repository.ts`의
+`listItems`)가 강제하는 동작이다(`orderByClause` 대신 `NEEDS_ANALYSIS_ORDER` 상수를 쓴다).
+잘못된 파라미터는 보정하지 않고 **400**으로 거절한다.
 
 ```jsonc
 // 200 OK
@@ -265,24 +286,55 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 전부 반환한다.
 
 - 없는 `id`(숫자가 아니거나 물건이 없음)면 **404**.
-- 이력이 없으면(레거시 물건, 또는 최초 저장 기준점뿐인 물건) `"changes": []`를 반환한다 —
-  구별하지 않는다.
+- **`changes`는 필터링되지 않는다 — 최초 저장 시의 기준점 행(baseline)도 그대로 포함된
+  전체 이력이다.** 물건이 처음 수집될 때 감시 대상 필드(값이 `NULL`이 아닌 것)마다
+  `oldValue: null`인 기준점 행이 만들어지고(§6.1 D2), 이후 실제 값이 바뀔 때마다
+  `oldValue`가 채워진 행이 추가된다. 두 종류가 같은 배열에 시간순으로 섞여서 나온다 —
+  **`"changes": []`는 감시 필드가 전부 `NULL`인 물건에서만 나온다(진짜 빈 이력)**. 두 번
+  수집된 보통 물건이면 감시 필드 4개의 기준점 4행 + 실제 변경 수만큼이 반환된다(예:
+  `src/app/api/items/[id]/changes/__tests__/route.test.ts`는 최초 수집 1회 + 실제 변경
+  1회 뒤 **6건**(기준점 4 + 변경 2)을 기대한다 — 실측으로도 확인했다: `npm run build` 후
+  스크래치 DB에 위 시나리오를 재현해 `curl`한 결과 정확히 6건이 돌아왔다).
+  클라이언트가 "진짜 변경"만 보고 싶으면 **`oldValue !== null`인 행만 걸러야 한다**
+  (`src/app/_lib/change-history.ts`의 `isRealChange`가 하는 일과 같다).
 
 ```jsonc
-// 200 OK
+// 200 OK — 두 번 수집된 물건의 실제 응답 예 (baseline 4건 + 실제 변경 2건)
 {
   "changes": [
-    {
-      "id": 5,
-      "itemId": 1,
-      "field": "minBidPrice",       // WatchedField: minBidPrice | failedBidCount | auctionDate | status
-      "oldValue": "500000000",      // 문자열로 저장된다(§6 참고). null이면 최초 저장 시의 기준점.
-      "newValue": "350000000",
-      "changedAt": "2026-09-07T13:05:09.350Z"
-    }
+    { "id": 1, "itemId": 1, "field": "minBidPrice", "oldValue": null, "newValue": "400000000",
+      "changedAt": "2026-01-01T00:00:00.000Z" },      // ← 기준점(최초 저장). oldValue가 null이면 기준점.
+    { "id": 2, "itemId": 1, "field": "failedBidCount", "oldValue": null, "newValue": "1",
+      "changedAt": "2026-01-01T00:00:00.000Z" },      // ← 기준점
+    { "id": 3, "itemId": 1, "field": "auctionDate", "oldValue": null, "newValue": "2026-10-01",
+      "changedAt": "2026-01-01T00:00:00.000Z" },      // ← 기준점
+    { "id": 4, "itemId": 1, "field": "status", "oldValue": null, "newValue": "진행",
+      "changedAt": "2026-01-01T00:00:00.000Z" },      // ← 기준점
+    { "id": 5, "itemId": 1, "field": "minBidPrice",       // WatchedField: minBidPrice | failedBidCount | auctionDate | status
+      "oldValue": "400000000",      // 문자열로 저장된다(§6.1 참고). null이 아니므로 실제 변경.
+      "newValue": "300000000",
+      "changedAt": "2026-01-02T00:00:00.000Z" },
+    { "id": 6, "itemId": 1, "field": "failedBidCount", "oldValue": "1", "newValue": "2",
+      "changedAt": "2026-01-02T00:00:00.000Z" }
   ]
 }
 ```
+
+### `GET /api/items/usage-types` — 저장된 용도 목록
+
+`src/app/api/items/usage-types/route.ts`. 목록 페이지의 용도 필터 체크박스가 어떤 값을
+보여줄지 저장된 데이터에서 직접 뽑아 쓴다(고정 목록이 아니다) — `GET /api/items`의
+`usage` 파라미터에 넣을 수 있는 값의 출처이기도 하다.
+
+```jsonc
+// 200 OK
+{ "usageTypes": ["아파트", "오피스텔", "상가,오피스텔,근린시설"] }
+```
+
+- 물건이 하나도 없으면 빈 배열(오류 아님).
+- 정적 경로(`usage-types`)가 동적 경로(`[id]`)보다 먼저 매칭되므로 `/api/items/usage-types`가
+  `/api/items/[id]`의 `id="usage-types"` 요청으로 잘못 해석되지 않는다(Next.js App Router의
+  기본 라우팅 규칙).
 
 ### `POST /api/analyses` — 분석 결과 저장
 
@@ -364,7 +416,8 @@ analyzer는 처음에는 "분석 결과가 하나도 없는 물건"만 분석했
 ## 7. ⚠️ 수집 관련 주의사항
 
 **이 섹션은 읽고 넘어가지 말 것.** 근거는 전부 실측이며
-`src/lib/sources/courtauction/NOTES.md` §6.1 / §9와 `design.md` D6에 원본 기록이 있다.
+`src/lib/sources/courtauction/NOTES.md` §6.1 / §9와
+`openspec/changes/archive/2026-09-07-auction-pipeline-mvp/design.md` D6에 원본 기록이 있다.
 
 - **사이트에 IP 단위 로봇탐지가 있다.** 차단되면 **HTTP 200을 그대로 유지한 채** 본문만
   `{"status":200,"message":"해당 IP는 비정상적인 접속으로 ... 차단되었습니다.","data":{"ipcheck":false}}`
@@ -416,12 +469,13 @@ openspec/
   config.yaml
   specs/                       # 확정된(배포된) 스펙
   changes/
-    auction-pipeline-mvp/      # 진행 중인 change
+    add-price-change-history/  # 진행 중인 change (예)
       proposal.md              # 왜 하는가
-      design.md                # 설계 결정(D1~D7)과 리스크
+      design.md                # 설계 결정과 리스크
       specs/                   # 이 change가 더하는 스펙 델타
       tasks.md                 # 실행 단위 태스크 목록
-    archive/                   # 완료된 change
+    archive/                   # 완료된 change (예: 2026-09-07-auction-pipeline-mvp/,
+                                #                    2026-09-07-add-item-search-filters/)
 ```
 
 구현 전에 해당 change의 proposal / design / specs / tasks를 먼저 읽는다.
@@ -445,17 +499,22 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 |   +- app/                        # Next.js App Router
 |   |   +- page.tsx                # 물건 목록 (/)
 |   |   +- items/[id]/page.tsx     # 물건 상세 + AI 분석(최신/이전) + 변경 이력 (/items/:id)
-|   |   +- api/items/route.ts      # GET /api/items (analyzed, needsAnalysis, promptVersion)
+|   |   +- api/items/route.ts      # GET /api/items (page, pageSize, analyzed, needsAnalysis,
+|   |   |                          #   promptVersion, usage, minPrice, maxPrice, minFailed, q, sort, dir)
 |   |   +- api/items/[id]/route.ts # GET /api/items/:id
 |   |   +- api/items/[id]/changes/route.ts  # GET /api/items/:id/changes
+|   |   +- api/items/usage-types/route.ts   # GET /api/items/usage-types
 |   |   +- api/analyses/route.ts   # POST /api/analyses
+|   |   +- _components/item-filter-form.tsx # 목록 필터·정렬 폼(순수 <form method="get">)
 |   |   +- _lib/format.ts          # 금액/날짜 표시 포맷터
 |   |   +- _lib/change-history.ts  # 변경 이력 표시 판단(기준점 구별, 가격 변화폭 등)
 |   |   +- _lib/analysis-history.ts # 분석 이력 표시 판단(최신/이전 분리)
+|   |   +- _lib/item-query-url.ts  # ItemQuery -> 목록 페이지 URL 직렬화
 |   +- lib/
 |       +- domain/                 # 정규화 도메인 모델 + config 로더
 |       |   +- types.ts            # AuctionItem, Analysis, ItemChange, CollectorConfig ...
 |       |   +- config.ts           # config/collector.json 로딩 + zod 검증
+|       |   +- item-query.ts       # GET /api/items 쿼리 파라미터 파싱(ItemQuery, strict/lenient)
 |       +- db/                     # SQLite 접근 (여기 밖으로 snake_case 컬럼명이 안 나간다)
 |       |   +- client.ts           # 연결/WAL/싱글턴, AUCTIONBOSS_DB 해석
 |       |   +- schema.ts           # items / analyses / item_changes 테이블 DDL
@@ -492,13 +551,17 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
    분석 본문은 markdown이지만 화면에서는 렌더링 없이 원문 그대로 표시한다.
 5. **워커가 죽으면 수동 재시작이다.** 프로세스 매니저(pm2 등)나 재시작 정책이 없다. 시작/종료 로그로
    감지만 가능하다. 배포 단계에서 도입 예정.
-6. **목록 화면에 필터가 없다.** 용도별·가격대별 필터, 정렬 선택 같은 것은 붙어 있지 않다(페이지네이션만 있다).
+6. **목록 화면 필터에는 UI가 없는 조건도 있다.** 용도·가격대·유찰횟수·소재지 키워드·정렬은
+   `ItemFilterForm`(`src/app/_components/item-filter-form.tsx`)으로 붙어 있다. 다만
+   `analyzed`(분석 여부)는 URL로는 받아 유지하지만 폼에 입력칸이 없고, `needsAnalysis`는
+   analyzer 전용이라 애초에 사람이 쓸 UI가 없다.
 7. **인증/권한이 없다.** 서버를 띄우면 접근 가능한 누구나 전체를 볼 수 있다. 로컬/내부망 전제다.
 8. **가짜 변경(노이즈) 필터링 규칙이 없다.** 소스가 같은 물건을 다른 값으로 표기하는 사례가
-   이미 관측됐다(`유찰횟수`와 `최저매각가격`이 어긋나는 행 등, NOTES.md). 그런 노이즈도 지금은
-   "실제 변경"으로 기록되고 재분석을 유발해 비용이 된다. 1차 방어는 `maxReanalysisPerRun`
-   상한뿐이고, 필터링 규칙은 실제 변경 이력을 며칠 관측한 뒤에 정할 예정이다
-   (`openspec/changes/add-price-change-history/design.md` Open Questions).
+   이미 관측됐다(`유찰횟수`와 `최저매각가격`이 어긋나는 행 — `openspec/changes/archive/
+   2026-09-07-auction-pipeline-mvp/design.md`). 그런 노이즈도 지금은 "실제 변경"으로
+   기록되고 재분석을 유발해 비용이 된다. 1차 방어는 `maxReanalysisPerRun` 상한뿐이고,
+   필터링 규칙은 실제 변경 이력을 며칠 관측한 뒤에 정할 예정이다
+   (`openspec/changes/add-price-change-history/design.md` Risks / Open Questions).
 9. **"최근 변동" 기준 7일이 검증된 값은 아니다.** 매각기일 주기(보통 1개월 이상)를 감안하면
    더 길어야 할 수 있다. `src/app/_lib/change-history.ts`의 `RECENT_CHANGE_DAYS` 상수 하나만
    바꾸면 되므로 조정 자체는 쉽다.
