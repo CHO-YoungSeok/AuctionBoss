@@ -59,6 +59,96 @@ a:hover {
   text-align: center;
 }
 
+/* 필터·정렬 폼 (평범한 GET form). 입력칸이 늘어나도 줄바꿈으로 흐르게 둔다. */
+.filters {
+  margin-bottom: 1.25rem;
+  padding: 1rem 1.25rem;
+  background: #ffffff;
+  border: 1px solid #dfe3e8;
+  border-radius: 6px;
+}
+
+.filter-group {
+  margin-bottom: 0.75rem;
+  padding: 0;
+  border: none;
+}
+
+.filter-group legend {
+  margin-bottom: 0.35rem;
+  color: #5f6672;
+  font-size: 0.85rem;
+}
+
+.checkbox-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+}
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+}
+
+.filter-field {
+  display: flex;
+  flex: 1 1 10rem;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 9rem;
+}
+
+.filter-field > span {
+  color: #5f6672;
+  font-size: 0.85rem;
+}
+
+.filters input[type="text"],
+.filters input[type="number"],
+.filters select {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  color: inherit;
+  background: #ffffff;
+  border: 1px solid #cfd5dd;
+  border-radius: 4px;
+  font: inherit;
+}
+
+.filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.filters button[type="submit"] {
+  padding: 0.4rem 1rem;
+  color: #ffffff;
+  background: #1a4fd6;
+  border: 1px solid #1a4fd6;
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.filters button[type="submit"]:hover {
+  background: #173fab;
+}
+
+.reset-link {
+  font-size: 0.9rem;
+}
+
 .table-scroll {
   overflow-x: auto;
   background: #ffffff;

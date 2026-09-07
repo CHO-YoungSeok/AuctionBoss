@@ -5,7 +5,23 @@
  * 사람이 읽는 문자열로 바꾸는 책임만 지고, 값이 없으면 항상 `EMPTY`("-")를 돌려준다.
  * `_lib`처럼 밑줄로 시작하는 디렉터리는 App Router가 라우트로 취급하지 않는다.
  */
-import type { IsoDate, IsoDateTime, Won } from "@/lib/domain";
+import type { IsoDate, IsoDateTime, SortDirection, SortKey, Won } from "@/lib/domain";
+
+/**
+ * 정렬 기준의 화면 표시 이름. `SortKey`를 키로 하는 `Record`라, 도메인에 정렬 기준이
+ * 추가되면 여기가 컴파일 오류로 걸린다(라벨 없는 선택지가 조용히 빠지지 않는다).
+ */
+export const SORT_LABELS: Record<SortKey, string> = {
+  auctionDate: "매각기일",
+  minBidPrice: "최저매각가격",
+  bidRatio: "감정가 대비 최저가",
+  failedBidCount: "유찰횟수",
+};
+
+export const DIRECTION_LABELS: Record<SortDirection, string> = {
+  asc: "오름차순",
+  desc: "내림차순",
+};
 
 /** 값이 없는 필드의 표시 문자열. */
 export const EMPTY = "-";

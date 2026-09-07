@@ -3,25 +3,31 @@
  *
  * 서버 컴포넌트에서 저장소를 직접 읽는다 — 자기 자신의 API를 fetch하면 같은 프로세스 안에서
  * 왕복 HTTP 요청이 한 번 더 생길 뿐 얻는 게 없다.
+ *
+ * 파라미터는 **lenient 파서**로 읽는다(`parseItemQueryLenient`). API가 잘못된 값을 400으로
+ * 거절하는 것과 의도적으로 다르다 (design.md D4): 워커 같은 API 클라이언트는 오타를 알아야
+ * 하지만, 사람이 URL을 손으로 고쳤을 때 화면이 에러로 죽는 것은 나쁘다. 그래서
+ * `?sort=nope&minPrice=abc&page=0` 같은 URL도 평범한 1페이지 기본 정렬 화면이 된다.
  */
 import Link from "next/link";
 
-import { DEFAULT_PAGE_SIZE, getRepository } from "@/lib/db";
+import { getRepository } from "@/lib/db";
+import { hasActiveFilters, parseItemQueryLenient } from "@/lib/domain";
 
-import { formatCount, formatDate, formatText, formatWon } from "./_lib/format";
+import { ItemFilterForm } from "./_components/item-filter-form";
+import {
+  DIRECTION_LABELS,
+  SORT_LABELS,
+  formatCount,
+  formatDate,
+  formatText,
+  formatWon,
+} from "./_lib/format";
+import { ITEM_LIST_PATH, itemListHref } from "./_lib/item-query-url";
 
 // 수집기가 새로 넣은 데이터가 바로 보여야 하므로 정적 프리렌더를 끈다.
 // (이게 없으면 `next build`가 빌드 시점에 DB를 열어 페이지를 미리 렌더한다.)
 export const dynamic = "force-dynamic";
-
-const PAGE_SIZE = DEFAULT_PAGE_SIZE;
-
-/** `?page=`는 사용자가 손으로 고칠 수 있는 값이라 잘못된 값은 1로 되돌린다. */
-function parsePage(raw: string | string[] | undefined): number {
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  if (!value || !/^\d+$/.test(value)) return 1;
-  return Math.max(1, Number(value));
-}
 
 export default async function ItemListPage({
   searchParams,
@@ -30,22 +36,46 @@ export default async function ItemListPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const page = parsePage(params.page);
+  // 잘못된 파라미터는 여기서 버려지고 기본값으로 복구된다. 아래 링크·폼은 전부 이
+  // 정규화된 `query`에서 만들어지므로, URL의 쓰레기 값이 화면의 링크로 퍼지지 않는다.
+  const query = parseItemQueryLenient(params);
 
-  const { items, total, pageSize } = getRepository().listItems({ page, pageSize: PAGE_SIZE });
+  const repository = getRepository();
+  // 용도 선택지는 저장된 데이터에서 도출한다 — 하드코딩하지 않는다 (design.md D3).
+  const usageTypes = repository.listUsageTypes();
+  const { items, total, page, pageSize } = repository.listItems(query);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  const filtersActive = hasActiveFilters(query);
+  // "DB 자체가 비었다"와 "필터에 걸리는 물건이 없다"는 사용자에게 전혀 다른 상황이라
+  // 안내 문구도, 다음에 할 행동(수집을 기다린다 / 조건을 고친다)도 달라야 한다.
+  const databaseEmpty = total === 0 && !filtersActive;
+
+  const sortLabel = SORT_LABELS[query.sort ?? "auctionDate"];
+  const directionLabel = DIRECTION_LABELS[query.direction ?? "asc"];
 
   return (
     <main className="page">
       <header className="page-header">
         <h1>물건 목록</h1>
         <p className="muted">
-          {total > 0 ? `전체 ${total.toLocaleString("ko-KR")}건 · 매각기일 빠른 순` : null}
+          {total > 0
+            ? `${filtersActive ? "조건에 맞는 물건 " : "전체 "}${total.toLocaleString("ko-KR")}건 · ${sortLabel} ${directionLabel}`
+            : null}
         </p>
       </header>
 
+      {databaseEmpty ? null : <ItemFilterForm query={query} usageTypes={usageTypes} />}
+
       {total === 0 ? (
-        <p className="empty">아직 수집된 물건이 없습니다.</p>
+        databaseEmpty ? (
+          <p className="empty">아직 수집된 물건이 없습니다.</p>
+        ) : (
+          <p className="empty">
+            조건에 맞는 물건이 없습니다.{" "}
+            <Link href={ITEM_LIST_PATH}>필터 초기화</Link>
+          </p>
+        )
       ) : (
         <>
           <div className="table-scroll">
@@ -83,9 +113,14 @@ export default async function ItemListPage({
             <p className="empty">이 페이지에는 물건이 없습니다.</p>
           ) : null}
 
+          {/*
+            페이지 링크는 `page`만 바꾸고 나머지 조건은 전부 그대로 들고 간다.
+            "다음"을 누르면 필터가 사라지는 것이 이 화면의 대표적인 버그라, URL을 손으로
+            조립하지 않고 현재 조건 객체에서 만든다 (`itemListHref`).
+          */}
           <nav className="pagination">
             {page > 1 ? (
-              <Link href={`/?page=${page - 1}`}>← 이전</Link>
+              <Link href={itemListHref(query, { page: page - 1 })}>← 이전</Link>
             ) : (
               <span className="disabled">← 이전</span>
             )}
@@ -93,7 +128,7 @@ export default async function ItemListPage({
               {page} / {totalPages}
             </span>
             {page < totalPages ? (
-              <Link href={`/?page=${page + 1}`}>다음 →</Link>
+              <Link href={itemListHref(query, { page: page + 1 })}>다음 →</Link>
             ) : (
               <span className="disabled">다음 →</span>
             )}

@@ -1,7 +1,7 @@
 ## 1. 쿼리 타입과 파서
 
 - [x] 1.1 `src/lib/domain`에 `SortKey`/`SortDirection` 리터럴 유니언과 `ItemQuery` 타입을 정의하고, URL 파라미터를 `ItemQuery`로 변환하는 zod 스키마 + 파서를 한 곳에 작성 — API와 페이지가 같은 파서를 쓸 수 있게 export하고 `tsc --noEmit` 통과 확인
-- [x] 1.2 파서 단위 테스트: `usage` 쉼표 다중값, 가격 한쪽만 지정, 빈 문자열 파라미터 무시, 허용되지 않은 `sort` 값 거부, 파라미터 전부 없을 때 기존 기본값(page 1, pageSize 20, 필터 없음) 산출 — `npm test` 통과
+- [x] 1.2 파서 단위 테스트: `usage` 반복 파라미터 다중값, 가격 한쪽만 지정, 빈 문자열 파라미터 무시, 허용되지 않은 `sort` 값 거부, 파라미터 전부 없을 때 기존 기본값(page 1, pageSize 20, 필터 없음) 산출 — `npm test` 통과
 
 ## 2. 저장소 필터·정렬
 
