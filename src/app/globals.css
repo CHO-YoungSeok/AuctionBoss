@@ -1,0 +1,165 @@
+/* 내부 도구용 최소 스타일. 화려함보다 가독성이 목적이다. */
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  color: #171717;
+  background: #f6f7f9;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+    "Malgun Gothic", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+a {
+  color: #1a4fd6;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 4rem;
+}
+
+.page-header {
+  margin-bottom: 1.25rem;
+}
+
+.page-header h1 {
+  font-size: 1.5rem;
+  line-height: 1.3;
+}
+
+.breadcrumb {
+  margin-bottom: 1rem;
+}
+
+.muted {
+  color: #5f6672;
+  font-size: 0.9rem;
+}
+
+.empty {
+  padding: 2rem 0;
+  color: #5f6672;
+  text-align: center;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  background: #ffffff;
+  border: 1px solid #dfe3e8;
+  border-radius: 6px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+
+th,
+td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid #eceff3;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: #f2f4f7;
+  font-weight: 600;
+  color: #3d434d;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: #fafbfc;
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.pagination .disabled {
+  color: #a8aeb8;
+}
+
+.page-indicator {
+  font-variant-numeric: tabular-nums;
+}
+
+.card {
+  margin-bottom: 1.25rem;
+  padding: 1.25rem;
+  background: #ffffff;
+  border: 1px solid #dfe3e8;
+  border-radius: 6px;
+}
+
+.card h2 {
+  margin-bottom: 0.75rem;
+  font-size: 1.1rem;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.5rem 1.5rem;
+}
+
+.field {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.field dt {
+  flex: 0 0 7.5rem;
+  color: #5f6672;
+}
+
+.field dd {
+  flex: 1;
+  word-break: break-word;
+}
+
+.analysis-body {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  background: #fafbfc;
+  border: 1px solid #eceff3;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

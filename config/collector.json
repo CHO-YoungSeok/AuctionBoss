@@ -1,0 +1,15 @@
+{
+  "scope": {
+    "courts": [
+      {
+        "name": "서울중앙지방법원",
+        "courtCode": "B000210"
+      }
+    ]
+  },
+  "intervalMs": 600000,
+  "analysis": {
+    "maxItemsPerRun": 5,
+    "intervalMs": 600000
+  }
+}
