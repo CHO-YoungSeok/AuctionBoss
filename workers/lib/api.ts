@@ -44,6 +44,49 @@ const auctionItemSchema = z.object({
   status: z.string().nullable(),
   firstSeenAt: z.string(),
   lastSeenAt: z.string(),
+  lastChangedAt: z.string().nullable().optional(),
+
+  // 확장 필드 (enrich-item-fields, design.md D1~D4, src/lib/domain/types.ts의
+  // AuctionItemInput과 동일한 32개). live-data-and-reports 실측(task 3.1) 중 발견한
+  // 결함 수정: 이 schema가 이 필드들을 몰라 zod가 조용히 strip해 왔다 — 그래서
+  // GET /api/items 응답에는 minArea/minBidPriceRound1/note 등이 실제로 들어 있는데도
+  // analyzer가 파싱한 뒤에는 전부 undefined가 됐고, `computeDerivedFigures`가 항상
+  // "계산 불가"를 반환하고 프롬프트의 물건 JSON에도 이 필드들이 아예 없었다(§9 실측
+  // 참고). 분석 본문이 "면적 또는 최저매각가격 정보 없음"이라고 실제로는 존재하는
+  // 값을 없다고 말하는 것은 design.md D5가 즉시 고치라는 "사용자에게 틀린 정보를
+  // 보여주는 결함"에 해당한다.
+  minArea: z.number().nullable().optional(),
+  maxArea: z.number().nullable().optional(),
+  buildingDescription: z.string().nullable().optional(),
+  minBidPriceRound1: z.number().nullable().optional(),
+  minBidPriceRound2: z.number().nullable().optional(),
+  minBidPriceRound3: z.number().nullable().optional(),
+  minBidPriceRound4: z.number().nullable().optional(),
+  minBidPriceRateRound1: z.number().nullable().optional(),
+  minBidPriceRateRound2: z.number().nullable().optional(),
+  usageCodeLarge: z.string().nullable().optional(),
+  usageCodeMedium: z.string().nullable().optional(),
+  usageCodeSmall: z.string().nullable().optional(),
+  sido: z.string().nullable().optional(),
+  sigungu: z.string().nullable().optional(),
+  dong: z.string().nullable().optional(),
+  lotNumber: z.string().nullable().optional(),
+  buildingName: z.string().nullable().optional(),
+  buildingUnit: z.string().nullable().optional(),
+  coordinateX: z.string().nullable().optional(),
+  coordinateY: z.string().nullable().optional(),
+  coordinateLevel: z.string().nullable().optional(),
+  auctionTime: z.string().nullable().optional(),
+  auctionPlace: z.string().nullable().optional(),
+  auctionDecisionDate: z.string().nullable().optional(),
+  auctionRound: z.number().nullable().optional(),
+  note: z.string().nullable().optional(),
+  duplicateCaseNo: z.string().nullable().optional(),
+  mergedCaseNo: z.string().nullable().optional(),
+  courtDepartment: z.string().nullable().optional(),
+  courtPhone: z.string().nullable().optional(),
+  statusCode: z.string().nullable().optional(),
+  itemStatusCode: z.string().nullable().optional(),
 });
 
 // zod 스키마와 도메인 타입이 어긋나면 컴파일 시점에 잡는다(config.ts와 같은 방식).

@@ -25,9 +25,10 @@ import { POST as analysesPOST } from "../../src/app/api/analyses/route";
 import { GET as itemsGET } from "../../src/app/api/items/route";
 import { runAnalysisOnce } from "../analyzer";
 import type { FetchFn } from "../lib/api";
-import { ITEM_JSON_TOKEN, PROMPT_VERSION } from "../lib/prompt";
+import { DERIVED_FIGURES_TOKEN, ITEM_JSON_TOKEN, PROMPT_VERSION } from "../lib/prompt";
 
 const TEMPLATE = `분석하라.\n\n\`\`\`json\n${ITEM_JSON_TOKEN}\n\`\`\`\n`;
+const TEMPLATE_WITH_DERIVED = `분석하라.\n\n${DERIVED_FIGURES_TOKEN}\n\n\`\`\`json\n${ITEM_JSON_TOKEN}\n\`\`\`\n`;
 
 const originalEnv = process.env.AUCTIONBOSS_DB;
 let workDir: string;
@@ -133,5 +134,64 @@ describe("runAnalysisOnce — 실제 저장소·라우트로 구동하는 두 �
 
     // 신규 3건만 분석되고, 미분석 물건이 재분석 패스에 섞여 다시 처리되지 않는다.
     expect(summary).toEqual({ attempted: 3, succeeded: 3, failed: 0 });
+  });
+});
+
+/**
+ * live-data-and-reports 실측(task 3.1/3.4·6.4) 회귀 케이스.
+ *
+ * 실제 수집 데이터로 analyzer를 돌려 생성된 보고서를 전부 읽어 보니, `minArea`·
+ * `minBidPriceRound1`·`note`("일괄매각") 등이 DB와 `GET /api/items` 응답에는
+ * 실제로 있는데도 모든 분석이 "면적 또는 최저매각가격 정보 없음"/"차수별 최저가
+ * 정보 없음"이라고 답했고, `note`에 "일괄매각"이 있는 물건에서도 그 사실이 전혀
+ * 언급되지 않았다. `derived.test.ts`/`analyzer.test.ts`의 회귀 테스트는 손수 만든
+ * `AuctionItem` 객체를 `renderItemPrompt`에 직접 넣어서만 검증했기 때문에, 실제
+ * 경로(`GET /api/items` 응답 → `workers/lib/api.ts`의 zod 스키마 파싱 → 프롬프트)를
+ * 통과하지 못했다 — 그 zod 스키마가 확장 필드 32개를 몰라 조용히 strip하고 있었다.
+ * 이 테스트는 그 실제 경로 전체(진짜 라우트 핸들러 + 진짜 zod 파싱)를 구동해
+ * 확장 필드가 프롬프트까지 살아서 도달하는지 확인한다.
+ */
+describe("runAnalysisOnce — 확장 필드가 API 라운드트립을 거쳐 프롬프트에 실제로 도달한다 (실데이터 회귀)", () => {
+  it("minArea·minBidPriceRound1·note가 GET /api/items 응답에서 프롬프트까지 살아 있다", async () => {
+    const repo = getRepository();
+    repo.upsertItems(
+      [
+        makeItem({
+          appraisalPrice: 711_000_000,
+          minBidPrice: 711_000_000,
+          minArea: 84,
+          maxArea: 84,
+          minBidPriceRound1: 711_000_000,
+          minBidPriceRateRound1: 100,
+          note: "일괄매각. 제시외 건물 포함",
+        }),
+      ],
+      { now: "2026-01-01T00:00:00.000Z" },
+    );
+
+    let capturedPrompt = "";
+    const summary = await runAnalysisOnce({
+      baseUrl: "http://localhost",
+      maxItemsPerRun: 1,
+      maxReanalysisPerRun: 0,
+      template: TEMPLATE_WITH_DERIVED,
+      fetchFn: realRouteFetch,
+      runClaude: async ({ prompt }) => {
+        capturedPrompt = prompt;
+        return { text: "요약", model: null };
+      },
+    });
+
+    expect(summary).toEqual({ attempted: 1, succeeded: 1, failed: 0 });
+    // derived.ts가 코드로 계산한 값이 프롬프트에 숫자로 박혀 있어야 한다 — "계산 불가"가
+    // 아니다. 이 값이 나오려면 fetchUnanalyzedItems가 돌려준 item에 minArea·
+    // minBidPriceRound1이 실제로 있어야 하므로, zod 스키마가 그 필드들을 strip하면
+    // 이 assertion이 실패한다(수정 전 실제로 실패했다).
+    expect(capturedPrompt).toContain("면적당 최저매각가격: 8,464,286원/㎡");
+    expect(capturedPrompt).toContain("1차: 711,000,000원 (감정가 대비 100%)");
+    expect(capturedPrompt).not.toContain("면적 또는 최저매각가격 정보 없음");
+    expect(capturedPrompt).not.toContain("차수별 최저가 정보 없음");
+    // 물건 JSON 블록에도 note가 원문 그대로 있어야 한다(같은 zod 스키마가 담당).
+    expect(capturedPrompt).toContain('"note": "일괄매각. 제시외 건물 포함"');
   });
 });
