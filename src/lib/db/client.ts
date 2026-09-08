@@ -55,6 +55,66 @@ function migrateItemChangesKindColumn(db: Db): void {
 }
 
 /**
+ * `items`의 확장 컬럼 마이그레이션 (enrich-item-fields, design.md D1).
+ *
+ * `item_changes.kind`와 같은 이유로 같은 방식을 쓴다: 이 컬럼들이 추가되기 전에 만들어진
+ * DB 파일에는 컬럼 자체가 없고, `CREATE TABLE IF NOT EXISTS`는 이미 있는 테이블에
+ * 컬럼을 추가해 주지 않으므로 `ALTER TABLE ... ADD COLUMN`으로 직접 추가한다. 새로
+ * 만드는 DB는 `SCHEMA_SQL`이 이미 이 컬럼들을 갖고 테이블을 만들므로 이 함수는 조용히
+ * 아무 것도 하지 않는다.
+ *
+ * 전부 nullable이라 백필이 없다 — 기존 행은 그대로 NULL로 남고 다음 수집 때 채워진다
+ * (design.md D1: "이 change의 마이그레이션은 값을 소급하지 않는다 — 소급할 데이터가
+ * 없다"). 컬럼 하나하나를 개별 `ALTER TABLE` 문으로 실행한다 — SQLite는 한 번에 여러
+ * 컬럼을 추가하는 문법이 없고, 컬럼별로 존재 여부가 다를 수 있는 상황(예: 이 마이그레이션
+ * 도중 실패했다가 재시도하는 경우)에도 안전하게 재실행되도록 하기 위함이다.
+ */
+function migrateItemExtendedFieldsColumns(db: Db): void {
+  const columns = db.pragma("table_info(items)") as Array<{ name: string }>;
+  const existing = new Set(columns.map((column) => column.name));
+
+  const extendedColumns: Array<[name: string, ddl: string]> = [
+    ["min_area", "INTEGER"],
+    ["max_area", "INTEGER"],
+    ["building_description", "TEXT"],
+    ["min_bid_price_round1", "INTEGER"],
+    ["min_bid_price_round2", "INTEGER"],
+    ["min_bid_price_round3", "INTEGER"],
+    ["min_bid_price_round4", "INTEGER"],
+    ["min_bid_price_rate_round1", "INTEGER"],
+    ["min_bid_price_rate_round2", "INTEGER"],
+    ["usage_code_large", "TEXT"],
+    ["usage_code_medium", "TEXT"],
+    ["usage_code_small", "TEXT"],
+    ["sido", "TEXT"],
+    ["sigungu", "TEXT"],
+    ["dong", "TEXT"],
+    ["lot_number", "TEXT"],
+    ["building_name", "TEXT"],
+    ["building_unit", "TEXT"],
+    ["coordinate_x", "TEXT"],
+    ["coordinate_y", "TEXT"],
+    ["coordinate_level", "TEXT"],
+    ["auction_time", "TEXT"],
+    ["auction_place", "TEXT"],
+    ["auction_decision_date", "TEXT"],
+    ["auction_round", "INTEGER"],
+    ["note", "TEXT"],
+    ["duplicate_case_no", "TEXT"],
+    ["merged_case_no", "TEXT"],
+    ["court_department", "TEXT"],
+    ["court_phone", "TEXT"],
+    ["status_code", "TEXT"],
+    ["item_status_code", "TEXT"],
+  ];
+
+  for (const [name, ddl] of extendedColumns) {
+    if (existing.has(name)) continue;
+    db.exec(`ALTER TABLE items ADD COLUMN ${name} ${ddl}`);
+  }
+}
+
+/**
  * DB 파일을 열고 pragma·스키마를 적용한 새 연결을 돌려준다.
  * 테스트는 이 함수에 임시 경로나 `":memory:"`를 직접 넘겨 env에 의존하지 않는다.
  */
@@ -68,6 +128,7 @@ export function openDatabase(dbPath: string): Db {
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA_SQL);
   migrateItemChangesKindColumn(db);
+  migrateItemExtendedFieldsColumns(db);
   return db;
 }
 

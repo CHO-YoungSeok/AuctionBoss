@@ -686,3 +686,88 @@ AI 분석 품질에 이 소스만으로는 넘을 수 없는 상한이 있다. �
   로봇차단이 더 강하고, 매각물건명세서는 외부 시스템이며, 권리관계는 애초에 존재하지 않는다.
 - 감정평가서를 반드시 넣어야 한다면 **하루 이상 간격을 두고 `selectAeeWevlInfo.on`을 딱 1회만
   호출해 그 엔드포인트만의 차단 임계를 실측**하는 저강도 조사가 선행돼야 한다.
+
+---
+
+## 11. 확장 필드 확정 (enrich-item-fields task 1.1, 2026-09-08)
+
+§3.1과 §8의 실제 응답, `__tests__/fixtures.ts`의 `REAL_ROW`(§8 raw sample을 그대로 옮긴
+행)를 대조해 **실제 응답에 존재하는 것으로 확인된 필드만** 표로 정리한다. 이 표에
+없는 필드는 어댑터에 매핑하지 않았다 — 아래 "포함하지 않은 필드"에 사유를 적는다.
+
+`REAL_ROW`(§8 발췌, 실제 관측 1행) 기준 예시값. "의미 확인" 열은 그 필드의 **의미**가
+확정됐는지를 뜻한다 — 필드가 실제로 오는 것(존재)과 그 값이 무엇을 뜻하는지(의미)는
+별개다. 의미가 `미확인`인 필드는 domain 타입에 "코드표 미확인, 원문 보존" 주석과
+함께 담되 해석하지 않는다(design.md D4).
+
+| 소스 키 | 타입(문자열로 옴) | REAL_ROW 예시값 | 의미 확인 | domain 필드 |
+|---|---|---|---|---|
+| `minArea` | 숫자(㎡) | `"84"` | 확인(면적) | `minArea` |
+| `maxArea` | 숫자(㎡) | `"84"` | 확인(면적) | `maxArea` |
+| `pjbBuldList` | 문자열(줄바꿈 포함) | `"철근콘크리트구조\n84.99㎡"` | 확인(건물구조·면적 서술) | `buildingDescription` |
+| `notifyMinmaePrice1` | 숫자(원) | `"711000000"` | 확인(1차 최저가) | `minBidPriceRound1` |
+| `notifyMinmaePrice2` | 숫자(원) | `"0"` | 확인(2차 최저가, 0=미도래) | `minBidPriceRound2` |
+| `notifyMinmaePrice3` | 숫자(원) | *(REAL_ROW엔 없음, §3.1 요약표에서 슬롯 확인)* | 확인(3차 최저가) — 필드 존재는 design.md D1이 "고정 4개 슬롯"으로 이미 전제한다 | `minBidPriceRound3` |
+| `notifyMinmaePrice4` | 숫자(원) | *(위와 동일)* | 확인(4차 최저가) | `minBidPriceRound4` |
+| `notifyMinmaePriceRate1` | 숫자(%) | `"100"` | 확인(1차 최저가율) | `minBidPriceRateRound1` |
+| `notifyMinmaePriceRate2` | 숫자(%) | *(REAL_ROW엔 없음, §3.1 요약표에서 확인)* | 확인(2차 최저가율) | `minBidPriceRateRound2` |
+| `lclsUtilCd` | 코드 문자열 | `"20000"` | **미확인**(코드표 없음) | `usageCodeLarge` |
+| `mclsUtilCd` | 코드 문자열 | `"20100"` | **미확인** | `usageCodeMedium` |
+| `sclsUtilCd` | 코드 문자열 | `"20104"` | **미확인** | `usageCodeSmall` |
+| `hjguSido` | 문자열 | `"서울특별시"` | 확인 | `sido` |
+| `hjguSigu` | 문자열 | `"성북구"` | 확인 | `sigungu` |
+| `hjguDong` | 문자열 | `"정릉동"` | 확인 | `dong` |
+| `daepyoLotno` | 문자열 | `"1032"` | 확인(대표지번) | `lotNumber` |
+| `buldNm` | 문자열 | `"정릉2차 대주피오레"` | 확인(건물명) | `buildingName` |
+| `buldList` | 문자열 | `"203동 4층 401호"` | 확인(동/층/호 상세) | `buildingUnit` |
+| `xCordi` | 숫자 문자열 | `"312690"` | **미확인**(좌표계 EPSG 불명) | `coordinateX` |
+| `yCordi` | 숫자 문자열 | `"555963"` | **미확인** | `coordinateY` |
+| `cordiLvl` | 코드 문자열 | *(REAL_ROW엔 없음, §3.1 요약표에서 `"1"` 확인)* | **미확인**(좌표 수준 코드표 없음) | `coordinateLevel` |
+| `maeHh1` | 문자열(HHmm) | `"1000"` | 확인(매각기일 시각, 콜론 없는 HHmm) | `auctionTime` |
+| `maePlace` | 문자열 | `"경매법정(제4별관211호)"` | 확인(매각장소) | `auctionPlace` |
+| `maegyuljGiil` | 문자열(YYYYMMDD) | `"20260915"` | 확인(매각결정기일) | `auctionDecisionDate` |
+| `maeGiilCnt` | 숫자 | `"1"` | 확인(매각기일 회차) | `auctionRound` |
+| `mulBigo` | 문자열 | `""`(REAL_ROW) / `"일괄매각"`(BUNDLE_ROWS) | 확인(비고) | `note` |
+| `dupSaNo` | 문자열(`<br/>` 구분) | `"2015타경14083<br/>2021타경102844"` | 확인(중복 사건번호, 구분자 그대로 보존) | `duplicateCaseNo` |
+| `byungSaNo` | 문자열 | `""` | 확인(병합 사건번호) | `mergedCaseNo` |
+| `jpDeptNm` | 문자열 | `"경매1계"` | 확인(담당계 이름) | `courtDepartment` |
+| `tel` | 문자열 | `"530-1820 (제4별관 민사집행과)"` | 확인(담당계 연락처) | `courtPhone` |
+| `jinstatCd` | 코드 문자열 | `"0002100001"` | **미확인**(§3.1·§6.2 row 4에서 이미 UNVERIFIED로 기록) | `statusCode` |
+| `mulStatcd` | 코드 문자열 | `"01"` | **미확인** | `itemStatusCode` |
+
+### 포함하지 않은 필드 (판단 근거)
+
+spec의 MODIFIED 요구사항이 나열한 카테고리에 없고, 화면·분석 어느 쪽에도 당장 쓸
+곳이 없어 이번 change에서는 매핑하지 않는다. 나중에 필요해지면 §3.1 표에 이미 소스
+키가 남아 있으므로 재수집 없이 추가할 수 있다.
+
+- `inqCnt`(조회수), `gwansMulRegCnt`(관심등록수) — "인기도" 성격이라 spec의 정규화
+  모델 카테고리(식별·면적·차수별가격·용도코드·소재지·좌표·매각·사건) 어디에도 안 들어간다.
+- `maeAmt`(낙찰가) — 진행 중 물건 조회 범위에서는 관측값이 항상 `"0"`(미낙찰)이라
+  실질적으로 쓸모가 없고, spec 카테고리에도 없다.
+- `ipgiganFday`/`ipgiganTday`(기간입찰 시작·종료) — spec의 "매각 관련" 카테고리는
+  기일입찰 정보(시각·장소·결정기일·회차)만 요구한다. 기간입찰 전용 필드라 범위 밖.
+- `ipchalGbncd`(입찰구분) — 의미가 §6.2 row 3에서 이미 UNVERIFIED이고 spec 카테고리에도
+  없다. 요청 파라미터로 이미 쓰는 `bidDvsCd`와 같은 계열의 코드로 보이나 확인되지
+  않았다 — 근거 없는 필드를 추가하지 않는다(task 1.1 원칙).
+- `docid`/`saNo`/`mokmulSer`/`boCd` — 행 접기(dedupe)용 내부 키다. 정규화 모델의
+  자연 키(`court`/`caseNo`/`itemNo`)로 이미 대체되므로 도메인에 노출하지 않는다
+  (기존 어댑터 코드가 이미 이렇게 다룬다).
+- `wgs84Xcordi`/`wgs84Ycordi` — §3.1이 이미 "정수 단위라 사실상 쓸모없음"으로 기록했다.
+
+### 판단 근거 메모
+
+- `notifyMinmaePrice3`/`4`, `notifyMinmaePriceRate2`, `cordiLvl`은 `REAL_ROW`(§8 발췌
+  1행)에는 나타나지 않는다 — §8은 "1건만 발췌"라고 명시했고 그 발췌 범위가 이 필드들을
+  빼놓았을 뿐, §3.1의 별도 요약표(부가 필드)와 design.md D1("고정 4개 슬롯")이 이미
+  이 필드들의 존재를 CONFIRMED로 기록해 뒀다. 테스트는 `REAL_ROW`를 변형한 합성 값으로
+  이 경로를 검증한다(`adapter.test.ts`의 "차수별 3·4차..." 케이스) — `REAL_ROW` 자체는
+  "§8을 그대로 옮긴 것"이라는 파일 상단 원칙을 지키기 위해 손대지 않았다.
+- `minBidPriceRound1`(`notifyMinmaePrice1`)은 기존 `minBidPrice`(폴백 파생값)와 같은
+  소스 필드를 읽는다 — 값이 겹치는 게 정상이다. `minBidPrice`는 "화면과 일치하는
+  최종값"이고 `minBidPriceRound1`은 "1차 원값"이라는 서로 다른 목적이라 design.md D1이
+  중복을 감수하고 둘 다 두기로 했다.
+- `buildingUnit`(`buldList`)은 spec의 "소재지 구조화 값" 카테고리가 명시적으로 요구하는
+  5개(시/도·시/군/구·동·대표지번·건물명)에는 없지만, NOTES §3의 같은 "소재지 분해" 표
+  행에 있고 `address`(조합 문자열)만으로는 얻을 수 없는 동/층/호 단위 값이라 포함했다
+  — 판단 근거는 구현 보고서 참조.

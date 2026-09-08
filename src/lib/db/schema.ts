@@ -19,6 +19,42 @@ CREATE TABLE IF NOT EXISTS items (
   status            TEXT,
   first_seen_at     TEXT    NOT NULL,
   last_seen_at      TEXT    NOT NULL,
+  -- ↓ 확장 컬럼 (enrich-item-fields, design.md D1). 전부 nullable — 기존 행은 NULL로
+  -- 남고 다음 수집 때 채워진다(이 change의 마이그레이션은 값을 소급하지 않는다).
+  -- 새 DB는 여기서 만들어지고, 기존 DB 파일은 client.ts의
+  -- migrateItemExtendedFieldsColumns가 ALTER TABLE로 같은 컬럼을 추가한다.
+  min_area                  INTEGER,
+  max_area                  INTEGER,
+  building_description      TEXT,
+  min_bid_price_round1      INTEGER,
+  min_bid_price_round2      INTEGER,
+  min_bid_price_round3      INTEGER,
+  min_bid_price_round4      INTEGER,
+  min_bid_price_rate_round1 INTEGER,
+  min_bid_price_rate_round2 INTEGER,
+  usage_code_large          TEXT,
+  usage_code_medium         TEXT,
+  usage_code_small          TEXT,
+  sido                      TEXT,
+  sigungu                   TEXT,
+  dong                      TEXT,
+  lot_number                TEXT,
+  building_name             TEXT,
+  building_unit             TEXT,
+  coordinate_x              TEXT,
+  coordinate_y              TEXT,
+  coordinate_level          TEXT,
+  auction_time              TEXT,
+  auction_place             TEXT,
+  auction_decision_date     TEXT,
+  auction_round             INTEGER,
+  note                      TEXT,
+  duplicate_case_no         TEXT,
+  merged_case_no            TEXT,
+  court_department          TEXT,
+  court_phone               TEXT,
+  status_code               TEXT,
+  item_status_code          TEXT,
   UNIQUE (court, case_no, item_no)
 );
 

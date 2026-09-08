@@ -481,6 +481,169 @@ describe("openDatabase", () => {
   });
 });
 
+describe("openDatabase — items 확장 컬럼 마이그레이션 (enrich-item-fields)", () => {
+  /**
+   * 마이그레이션 경로 확인(5, enrich-item-fields task 2.2): `items`의 확장 컬럼이
+   * 추가되기 **직전** 스키마(이 change 이전의 최신 스키마 — worker_runs까지는 있지만
+   * 확장 컬럼은 없다)로 물건·이력·분석을 채운 DB 파일을 새 코드로 열었을 때, 오류 없이
+   * 새 컬럼만 추가되고 기존 데이터(물건·이력·분석)가 그대로 보존되며 새 컬럼이 전부
+   * NULL인지 확인한다.
+   */
+  it("items 확장 컬럼 추가 전 스키마로 만든 기존 DB 파일에 새 컬럼이 그대로 적용되고 기존 데이터가 보존된다", () => {
+    const PRE_EXTENDED_FIELDS_SCHEMA_SQL = `
+      CREATE TABLE IF NOT EXISTS items (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        court             TEXT    NOT NULL,
+        case_no           TEXT    NOT NULL,
+        item_no           TEXT    NOT NULL,
+        address           TEXT,
+        usage_type        TEXT,
+        appraisal_price   INTEGER,
+        min_bid_price     INTEGER,
+        auction_date      TEXT,
+        failed_bid_count  INTEGER,
+        status            TEXT,
+        first_seen_at     TEXT    NOT NULL,
+        last_seen_at      TEXT    NOT NULL,
+        UNIQUE (court, case_no, item_no)
+      );
+      CREATE INDEX IF NOT EXISTS idx_items_auction_date ON items (auction_date);
+      CREATE INDEX IF NOT EXISTS idx_items_usage_type ON items (usage_type);
+      CREATE INDEX IF NOT EXISTS idx_items_min_bid_price ON items (min_bid_price);
+      CREATE TABLE IF NOT EXISTS analyses (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id        INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+        body           TEXT    NOT NULL,
+        model          TEXT,
+        prompt_version TEXT    NOT NULL,
+        analyzed_at    TEXT    NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_analyses_item_id ON analyses (item_id, analyzed_at DESC);
+      CREATE TABLE IF NOT EXISTS item_changes (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id    INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+        field      TEXT    NOT NULL,
+        old_value  TEXT,
+        new_value  TEXT,
+        changed_at TEXT    NOT NULL,
+        kind       TEXT    NOT NULL DEFAULT 'change'
+      );
+      CREATE INDEX IF NOT EXISTS idx_item_changes_item_id ON item_changes (item_id, changed_at DESC);
+      CREATE TABLE IF NOT EXISTS worker_runs (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        worker        TEXT    NOT NULL,
+        started_at    TEXT    NOT NULL,
+        finished_at   TEXT,
+        outcome       TEXT    NOT NULL,
+        error_kind    TEXT,
+        error_message TEXT,
+        detail        TEXT,
+        items_changed INTEGER,
+        created_at    TEXT    NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_worker_runs_worker_started_at ON worker_runs (worker, started_at DESC);
+    `;
+
+    const dbPath = path.join(workDir, "pre-extended-fields.db");
+    const legacy = new Database(dbPath);
+    legacy.exec(PRE_EXTENDED_FIELDS_SCHEMA_SQL);
+    legacy
+      .prepare(
+        `INSERT INTO items (id, court, case_no, item_no, usage_type, min_bid_price,
+                            first_seen_at, last_seen_at)
+         VALUES (1, '서울중앙지방법원', '2025타경1', '1', '아파트', 400000000,
+                 '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+      )
+      .run();
+    legacy
+      .prepare(
+        `INSERT INTO item_changes (item_id, field, old_value, new_value, changed_at, kind)
+         VALUES (1, 'minBidPrice', NULL, '400000000', '2026-01-01T00:00:00.000Z', 'baseline')`,
+      )
+      .run();
+    legacy
+      .prepare(
+        `INSERT INTO analyses (item_id, body, model, prompt_version, analyzed_at)
+         VALUES (1, '분석 본문', 'claude', 'v1', '2026-01-02T00:00:00.000Z')`,
+      )
+      .run();
+    const legacyColumns = legacy
+      .prepare<[], { name: string }>("PRAGMA table_info(items)")
+      .all()
+      .map((row) => row.name);
+    legacy.close();
+
+    // 사전 조건: 옛 DB의 items에는 확장 컬럼이 없다.
+    expect(legacyColumns).not.toContain("min_area");
+    expect(legacyColumns).not.toContain("status_code");
+
+    // 새 코드로 다시 열기 = 마이그레이션. 던지지 않아야 한다.
+    const upgraded = openDatabase(dbPath);
+    try {
+      const columns = upgraded
+        .prepare<[], { name: string }>("PRAGMA table_info(items)")
+        .all()
+        .map((row) => row.name);
+      expect(columns).toContain("min_area");
+      expect(columns).toContain("building_description");
+      expect(columns).toContain("min_bid_price_round1");
+      expect(columns).toContain("min_bid_price_round4");
+      expect(columns).toContain("min_bid_price_rate_round2");
+      expect(columns).toContain("usage_code_small");
+      expect(columns).toContain("coordinate_level");
+      expect(columns).toContain("auction_decision_date");
+      expect(columns).toContain("status_code");
+      expect(columns).toContain("item_status_code");
+
+      // 기존 물건·이력·분석 데이터가 전부 그대로 살아 있다.
+      const repo = createRepository(upgraded);
+      const result = repo.listItems({ pageSize: 10 });
+      expect(result.total).toBe(1);
+      const item = result.items[0]!;
+      expect(item.caseNo).toBe("2025타경1");
+      expect(item.minBidPrice).toBe(400000000);
+      expect(repo.listItemChanges(item.id)).toHaveLength(1);
+      expect(repo.countAnalyses(item.id)).toBe(1);
+      expect(repo.getLatestAnalysis(item.id)?.body).toBe("분석 본문");
+
+      // 새 컬럼은 전부 NULL이다 — 이 마이그레이션은 값을 소급하지 않는다(design.md D1).
+      expect(item.minArea).toBeNull();
+      expect(item.buildingDescription).toBeNull();
+      expect(item.minBidPriceRound1).toBeNull();
+      expect(item.usageCodeLarge).toBeNull();
+      expect(item.sido).toBeNull();
+      expect(item.coordinateX).toBeNull();
+      expect(item.auctionDecisionDate).toBeNull();
+      expect(item.note).toBeNull();
+      expect(item.statusCode).toBeNull();
+      expect(item.itemStatusCode).toBeNull();
+
+      // 새 컬럼에 정상적으로 쓰고 읽을 수 있다(다음 수집으로 채워지는 경로).
+      repo.upsertItems([
+        {
+          court: "서울중앙지방법원",
+          caseNo: "2025타경1",
+          itemNo: "1",
+          address: null,
+          usageType: "아파트",
+          appraisalPrice: null,
+          minBidPrice: 400000000,
+          auctionDate: null,
+          failedBidCount: null,
+          status: null,
+          minArea: 84,
+          statusCode: "0002100001",
+        },
+      ]);
+      const updated = repo.getItemById(item.id)!;
+      expect(updated.minArea).toBe(84);
+      expect(updated.statusCode).toBe("0002100001");
+    } finally {
+      upgraded.close();
+    }
+  });
+});
+
 describe("resolveDbPath", () => {
   const originalEnv = process.env.AUCTIONBOSS_DB;
 

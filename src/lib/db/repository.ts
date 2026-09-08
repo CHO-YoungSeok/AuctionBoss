@@ -72,6 +72,40 @@ interface ItemRow {
   status: string | null;
   first_seen_at: string;
   last_seen_at: string;
+  // ↓ 확장 컬럼 (enrich-item-fields, design.md D1). snake_case는 이 파일 밖으로 새지
+  // 않는다 — toAuctionItem이 camelCase 도메인 타입으로 변환한다.
+  min_area: number | null;
+  max_area: number | null;
+  building_description: string | null;
+  min_bid_price_round1: number | null;
+  min_bid_price_round2: number | null;
+  min_bid_price_round3: number | null;
+  min_bid_price_round4: number | null;
+  min_bid_price_rate_round1: number | null;
+  min_bid_price_rate_round2: number | null;
+  usage_code_large: string | null;
+  usage_code_medium: string | null;
+  usage_code_small: string | null;
+  sido: string | null;
+  sigungu: string | null;
+  dong: string | null;
+  lot_number: string | null;
+  building_name: string | null;
+  building_unit: string | null;
+  coordinate_x: string | null;
+  coordinate_y: string | null;
+  coordinate_level: string | null;
+  auction_time: string | null;
+  auction_place: string | null;
+  auction_decision_date: string | null;
+  auction_round: number | null;
+  note: string | null;
+  duplicate_case_no: string | null;
+  merged_case_no: string | null;
+  court_department: string | null;
+  court_phone: string | null;
+  status_code: string | null;
+  item_status_code: string | null;
 }
 
 interface AnalysisRow {
@@ -121,6 +155,38 @@ function toAuctionItem(row: ItemRow, lastChangedAt: string | null = null): Aucti
     firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at,
     lastChangedAt,
+    minArea: row.min_area,
+    maxArea: row.max_area,
+    buildingDescription: row.building_description,
+    minBidPriceRound1: row.min_bid_price_round1,
+    minBidPriceRound2: row.min_bid_price_round2,
+    minBidPriceRound3: row.min_bid_price_round3,
+    minBidPriceRound4: row.min_bid_price_round4,
+    minBidPriceRateRound1: row.min_bid_price_rate_round1,
+    minBidPriceRateRound2: row.min_bid_price_rate_round2,
+    usageCodeLarge: row.usage_code_large,
+    usageCodeMedium: row.usage_code_medium,
+    usageCodeSmall: row.usage_code_small,
+    sido: row.sido,
+    sigungu: row.sigungu,
+    dong: row.dong,
+    lotNumber: row.lot_number,
+    buildingName: row.building_name,
+    buildingUnit: row.building_unit,
+    coordinateX: row.coordinate_x,
+    coordinateY: row.coordinate_y,
+    coordinateLevel: row.coordinate_level,
+    auctionTime: row.auction_time,
+    auctionPlace: row.auction_place,
+    auctionDecisionDate: row.auction_decision_date,
+    auctionRound: row.auction_round,
+    note: row.note,
+    duplicateCaseNo: row.duplicate_case_no,
+    mergedCaseNo: row.merged_case_no,
+    courtDepartment: row.court_department,
+    courtPhone: row.court_phone,
+    statusCode: row.status_code,
+    itemStatusCode: row.item_status_code,
   };
 }
 
@@ -539,25 +605,78 @@ export function createRepository(db: Db): AuctionRepository {
 
   // 자연 키 충돌 시 갱신 대상은 "소스에서 다시 온 값"과 last_seen_at 뿐이다.
   // first_seen_at은 SET 목록에 없으므로 어떤 경우에도 덮어써지지 않는다.
+  // 확장 컬럼(enrich-item-fields, design.md D1)도 신규/갱신 모두 이 문 하나로 처리한다.
+  // WATCHED_FIELDS(감시 대상)에는 넣지 않는다(design.md D2) — item_changes 이력·재분석
+  // 트리거와는 무관하게 최신값으로만 덮어쓴다.
   const upsertItem = db.prepare(`
     INSERT INTO items (
       court, case_no, item_no, address, usage_type, appraisal_price,
       min_bid_price, auction_date, failed_bid_count, status,
+      min_area, max_area, building_description,
+      min_bid_price_round1, min_bid_price_round2, min_bid_price_round3, min_bid_price_round4,
+      min_bid_price_rate_round1, min_bid_price_rate_round2,
+      usage_code_large, usage_code_medium, usage_code_small,
+      sido, sigungu, dong, lot_number, building_name, building_unit,
+      coordinate_x, coordinate_y, coordinate_level,
+      auction_time, auction_place, auction_decision_date, auction_round,
+      note, duplicate_case_no, merged_case_no, court_department, court_phone,
+      status_code, item_status_code,
       first_seen_at, last_seen_at
     ) VALUES (
       @court, @caseNo, @itemNo, @address, @usageType, @appraisalPrice,
       @minBidPrice, @auctionDate, @failedBidCount, @status,
+      @minArea, @maxArea, @buildingDescription,
+      @minBidPriceRound1, @minBidPriceRound2, @minBidPriceRound3, @minBidPriceRound4,
+      @minBidPriceRateRound1, @minBidPriceRateRound2,
+      @usageCodeLarge, @usageCodeMedium, @usageCodeSmall,
+      @sido, @sigungu, @dong, @lotNumber, @buildingName, @buildingUnit,
+      @coordinateX, @coordinateY, @coordinateLevel,
+      @auctionTime, @auctionPlace, @auctionDecisionDate, @auctionRound,
+      @note, @duplicateCaseNo, @mergedCaseNo, @courtDepartment, @courtPhone,
+      @statusCode, @itemStatusCode,
       @now, @now
     )
     ON CONFLICT (court, case_no, item_no) DO UPDATE SET
-      address          = excluded.address,
-      usage_type       = excluded.usage_type,
-      appraisal_price  = excluded.appraisal_price,
-      min_bid_price    = excluded.min_bid_price,
-      auction_date     = excluded.auction_date,
-      failed_bid_count = excluded.failed_bid_count,
-      status           = excluded.status,
-      last_seen_at     = excluded.last_seen_at
+      address                   = excluded.address,
+      usage_type                = excluded.usage_type,
+      appraisal_price           = excluded.appraisal_price,
+      min_bid_price             = excluded.min_bid_price,
+      auction_date              = excluded.auction_date,
+      failed_bid_count          = excluded.failed_bid_count,
+      status                    = excluded.status,
+      min_area                  = excluded.min_area,
+      max_area                  = excluded.max_area,
+      building_description      = excluded.building_description,
+      min_bid_price_round1      = excluded.min_bid_price_round1,
+      min_bid_price_round2      = excluded.min_bid_price_round2,
+      min_bid_price_round3      = excluded.min_bid_price_round3,
+      min_bid_price_round4      = excluded.min_bid_price_round4,
+      min_bid_price_rate_round1 = excluded.min_bid_price_rate_round1,
+      min_bid_price_rate_round2 = excluded.min_bid_price_rate_round2,
+      usage_code_large          = excluded.usage_code_large,
+      usage_code_medium         = excluded.usage_code_medium,
+      usage_code_small          = excluded.usage_code_small,
+      sido                      = excluded.sido,
+      sigungu                   = excluded.sigungu,
+      dong                      = excluded.dong,
+      lot_number                = excluded.lot_number,
+      building_name             = excluded.building_name,
+      building_unit             = excluded.building_unit,
+      coordinate_x              = excluded.coordinate_x,
+      coordinate_y              = excluded.coordinate_y,
+      coordinate_level          = excluded.coordinate_level,
+      auction_time              = excluded.auction_time,
+      auction_place             = excluded.auction_place,
+      auction_decision_date     = excluded.auction_decision_date,
+      auction_round             = excluded.auction_round,
+      note                      = excluded.note,
+      duplicate_case_no         = excluded.duplicate_case_no,
+      merged_case_no            = excluded.merged_case_no,
+      court_department          = excluded.court_department,
+      court_phone               = excluded.court_phone,
+      status_code               = excluded.status_code,
+      item_status_code          = excluded.item_status_code,
+      last_seen_at              = excluded.last_seen_at
   `);
 
   const selectItemById = db.prepare<{ id: number }, ItemRow>(
@@ -667,6 +786,42 @@ export function createRepository(db: Db): AuctionRepository {
           auctionDate: item.auctionDate,
           failedBidCount: item.failedBidCount,
           status: item.status,
+          // 확장 필드는 AuctionItemInput에서 optional이다(이 change의 범위 밖인
+          // workers/**·src/app/**의 기존 리터럴이 이 필드들을 아예 모른 채로 계속
+          // 컴파일돼야 하기 때문 — src/lib/domain/types.ts 주석 참조). better-sqlite3는
+          // undefined를 바인딩하면 던지므로 여기서 `?? null`로 명시적으로 접는다.
+          minArea: item.minArea ?? null,
+          maxArea: item.maxArea ?? null,
+          buildingDescription: item.buildingDescription ?? null,
+          minBidPriceRound1: item.minBidPriceRound1 ?? null,
+          minBidPriceRound2: item.minBidPriceRound2 ?? null,
+          minBidPriceRound3: item.minBidPriceRound3 ?? null,
+          minBidPriceRound4: item.minBidPriceRound4 ?? null,
+          minBidPriceRateRound1: item.minBidPriceRateRound1 ?? null,
+          minBidPriceRateRound2: item.minBidPriceRateRound2 ?? null,
+          usageCodeLarge: item.usageCodeLarge ?? null,
+          usageCodeMedium: item.usageCodeMedium ?? null,
+          usageCodeSmall: item.usageCodeSmall ?? null,
+          sido: item.sido ?? null,
+          sigungu: item.sigungu ?? null,
+          dong: item.dong ?? null,
+          lotNumber: item.lotNumber ?? null,
+          buildingName: item.buildingName ?? null,
+          buildingUnit: item.buildingUnit ?? null,
+          coordinateX: item.coordinateX ?? null,
+          coordinateY: item.coordinateY ?? null,
+          coordinateLevel: item.coordinateLevel ?? null,
+          auctionTime: item.auctionTime ?? null,
+          auctionPlace: item.auctionPlace ?? null,
+          auctionDecisionDate: item.auctionDecisionDate ?? null,
+          auctionRound: item.auctionRound ?? null,
+          note: item.note ?? null,
+          duplicateCaseNo: item.duplicateCaseNo ?? null,
+          mergedCaseNo: item.mergedCaseNo ?? null,
+          courtDepartment: item.courtDepartment ?? null,
+          courtPhone: item.courtPhone ?? null,
+          statusCode: item.statusCode ?? null,
+          itemStatusCode: item.itemStatusCode ?? null,
           now,
         });
 

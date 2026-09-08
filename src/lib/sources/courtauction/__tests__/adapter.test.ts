@@ -31,6 +31,7 @@ import {
   BUNDLE_ROWS,
   MISSING_KEY_ROW,
   MISSING_PAGE_INFO_BODY,
+  NO_EXTENDED_FIELDS_ROW,
   REAL_ROW,
   ROAD_ONLY_ROW,
   ROBOT_BLOCKED_BODY,
@@ -365,7 +366,66 @@ describe("CourtAuctionAdapter — 정규화", () => {
       auctionDate: "2026-09-08",
       failedBidCount: 1,
       status: "유찰 1회", // 소스 필드가 아니라 yuchalCnt에서 파생한 값
+      // ---- 확장 필드 (task 3.3, NOTES.md §11) — REAL_ROW(실제 응답 1행)의 실측값 ----
+      minArea: 84,
+      maxArea: 84,
+      // 원문 그대로 줄바꿈이 보존된다(embedded newline) — 한 줄로 뭉개지지 않는다.
+      buildingDescription: "철근콘크리트구조\n84.99㎡",
+      minBidPriceRound1: 711_000_000,
+      minBidPriceRound2: null, // REAL_ROW의 notifyMinmaePrice2 = "0" → 값 없음(design.md D3)
+      minBidPriceRound3: null, // REAL_ROW에 notifyMinmaePrice3/4 자체가 없다
+      minBidPriceRound4: null,
+      minBidPriceRateRound1: 100,
+      minBidPriceRateRound2: null,
+      usageCodeLarge: "20000",
+      usageCodeMedium: "20100",
+      usageCodeSmall: "20104",
+      sido: "서울특별시",
+      sigungu: "성북구",
+      dong: "정릉동",
+      lotNumber: "1032",
+      buildingName: "정릉2차 대주피오레",
+      buildingUnit: "203동 4층 401호",
+      // 좌표계 불명(design.md D4) — 숫자로 변환하지 않고 실제 원문 문자열 그대로.
+      coordinateX: "312690",
+      coordinateY: "555963",
+      coordinateLevel: null, // REAL_ROW에 cordiLvl 자체가 없다
+      auctionTime: "1000",
+      auctionPlace: "경매법정(제4별관211호)",
+      auctionDecisionDate: "2026-09-15",
+      auctionRound: 1,
+      note: null, // REAL_ROW의 mulBigo = ""
+      duplicateCaseNo: "2015타경14083<br/>2021타경102844",
+      mergedCaseNo: null, // REAL_ROW의 byungSaNo = ""
+      courtDepartment: "경매1계",
+      courtPhone: "530-1820 (제4별관 민사집행과)",
+      // 코드표 미확인(UNVERIFIED, design.md D4) — 해석하지 않고 원문 그대로 보존된다.
+      statusCode: "0002100001",
+      itemStatusCode: "01",
     });
+  });
+
+  it("차수별 3·4차 최저가·2차 최저가율·좌표수준도 원문 그대로 매핑한다 (NOTES §3.1, task 3.3)", async () => {
+    // REAL_ROW에는 notifyMinmaePrice3/4·notifyMinmaePriceRate2·cordiLvl이 없어(§8 발췌
+    // 범위 밖) 위 테스트가 이 필드들을 검증하지 못한다. NOTES §3.1 "부가 필드" 표의
+    // 예시값으로 채운 합성 행으로 나머지 매핑 경로를 확인한다.
+    const row = {
+      ...REAL_ROW,
+      notifyMinmaePrice2: "0",
+      notifyMinmaePrice3: "0",
+      notifyMinmaePrice4: "0",
+      notifyMinmaePriceRate2: "100",
+      cordiLvl: "1",
+    };
+    const { adapter } = makeAdapter([validBody({ rows: [row] })]);
+    const {
+      items: [item],
+    } = await adapter.fetchActiveItems(SCOPE);
+    // notifyMinmaePrice3/4가 "0"(값 없음, design.md D3)이어도 null로 접힌다.
+    expect(item.minBidPriceRound3).toBeNull();
+    expect(item.minBidPriceRound4).toBeNull();
+    expect(item.minBidPriceRateRound2).toBe(100);
+    expect(item.coordinateLevel).toBe("1"); // 코드표 미확인 — 문자열 그대로, 숫자 변환 없음
   });
 
   it("유찰 0회는 신건으로 파생한다", async () => {
@@ -446,6 +506,120 @@ describe("CourtAuctionAdapter — 정규화", () => {
       items: [item],
     } = await adapter.fetchActiveItems(SCOPE);
     expect(item.address).toBe(REAL_ROW.printSt);
+  });
+
+  // ------------------------------------------------------------- 확장 필드 (task 3.4/3.5)
+
+  it("확장 필드가 전부 비어 있어도 물건은 정상 수집되고 기존 필드 처리는 그대로다 (task 3.4)", async () => {
+    const { adapter } = makeAdapter([validBody({ rows: [NO_EXTENDED_FIELDS_ROW] })]);
+    const {
+      items: [item],
+    } = await adapter.fetchActiveItems(SCOPE);
+
+    // 기존 필드는 확장 필드 유무와 무관하게 그대로 정상 매핑된다.
+    expect(item).toMatchObject({
+      court: "서울중앙지방법원",
+      caseNo: "2026타경9999",
+      itemNo: "1",
+      address: "서울특별시 어딘가 1",
+      usageType: "아파트",
+      appraisalPrice: 500_000_000,
+      minBidPrice: 400_000_000, // notifyMinmaePrice1이 없어 minmaePrice로 폴백
+      auctionDate: "2026-10-01",
+      failedBidCount: 0,
+      status: "신건",
+    });
+
+    // 확장 필드는 전부 null이다 — 값을 지어내지 않는다(design.md D3).
+    expect(item.minArea).toBeNull();
+    expect(item.maxArea).toBeNull();
+    expect(item.buildingDescription).toBeNull();
+    expect(item.minBidPriceRound1).toBeNull();
+    expect(item.minBidPriceRound2).toBeNull();
+    expect(item.minBidPriceRound3).toBeNull();
+    expect(item.minBidPriceRound4).toBeNull();
+    expect(item.minBidPriceRateRound1).toBeNull();
+    expect(item.minBidPriceRateRound2).toBeNull();
+    expect(item.usageCodeLarge).toBeNull();
+    expect(item.usageCodeMedium).toBeNull();
+    expect(item.usageCodeSmall).toBeNull();
+    expect(item.sido).toBeNull();
+    expect(item.sigungu).toBeNull();
+    expect(item.dong).toBeNull();
+    expect(item.lotNumber).toBeNull();
+    expect(item.buildingName).toBeNull();
+    expect(item.buildingUnit).toBeNull();
+    expect(item.coordinateX).toBeNull();
+    expect(item.coordinateY).toBeNull();
+    expect(item.coordinateLevel).toBeNull();
+    expect(item.auctionTime).toBeNull();
+    expect(item.auctionPlace).toBeNull();
+    expect(item.auctionDecisionDate).toBeNull();
+    expect(item.auctionRound).toBeNull();
+    expect(item.note).toBeNull();
+    expect(item.duplicateCaseNo).toBeNull();
+    expect(item.mergedCaseNo).toBeNull();
+    expect(item.courtDepartment).toBeNull();
+    expect(item.courtPhone).toBeNull();
+    expect(item.statusCode).toBeNull();
+    expect(item.itemStatusCode).toBeNull();
+  });
+
+  it(
+    "행은 왔고 정상 수집됐는데 확장 필드가 전부 비면 필드명 변경 의심 경고를 남기고, " +
+      "그 경고가 회차를 죽이지 않는다 (task 3.5, design.md D6)",
+    async () => {
+      const logger = collectingLogger();
+      const { adapter } = makeAdapter([validBody({ rows: [NO_EXTENDED_FIELDS_ROW] })], {
+        logger,
+      });
+
+      const { items, pagesRequested } = await adapter.fetchActiveItems(SCOPE);
+
+      // 경고만 남기고 정상적으로 물건을 돌려준다 — throw하지 않는다.
+      expect(items).toHaveLength(1);
+      expect(pagesRequested).toBe(1);
+      expect(logger.warns.join("\n")).toContain("확장 필드가 전부 비어 있습니다");
+      expect(logger.warns.join("\n")).toContain("응답 필드명 변경을 의심할 것");
+    },
+  );
+
+  it("확장 필드가 하나라도 있으면(REAL_ROW) 필드명 변경 의심 경고를 남기지 않는다", async () => {
+    const logger = collectingLogger();
+    const { adapter } = makeAdapter([validBody({ rows: [REAL_ROW] })], { logger });
+    await adapter.fetchActiveItems(SCOPE);
+    expect(logger.warns.join("\n")).not.toContain("확장 필드가 전부 비어 있습니다");
+  });
+});
+
+// --------------------------------------------------------- 회귀 (task 3.6)
+
+describe("CourtAuctionAdapter — 회귀 (task 3.6, 확장 필드 추가가 기존 계약을 바꾸지 않는다)", () => {
+  it("AuctionSource 계약은 여전히 { items, pagesRequested } 뿐이다", async () => {
+    const { adapter } = makeAdapter([validBody({ rows: [REAL_ROW] })]);
+    const result = await adapter.fetchActiveItems(SCOPE);
+    expect(Object.keys(result).sort()).toEqual(["items", "pagesRequested"]);
+    expect(typeof result.pagesRequested).toBe("number");
+    expect(Array.isArray(result.items)).toBe(true);
+  });
+
+  it("기존 10개 핵심 필드의 값과 의미는 확장 필드 추가 이후에도 바뀌지 않는다", async () => {
+    const { adapter } = makeAdapter([validBody({ rows: [REAL_ROW] })]);
+    const {
+      items: [item],
+    } = await adapter.fetchActiveItems(SCOPE);
+    expect(item).toMatchObject({
+      court: "서울중앙지방법원",
+      caseNo: "2011타경28497",
+      itemNo: "1",
+      address: "서울특별시 성북구 정릉동 1032 정릉2차 대주피오레 203동 4층 401호",
+      usageType: "아파트",
+      appraisalPrice: 711_000_000,
+      minBidPrice: 711_000_000,
+      auctionDate: "2026-09-08",
+      failedBidCount: 1,
+      status: "유찰 1회",
+    });
   });
 });
 

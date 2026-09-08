@@ -45,6 +45,108 @@ export interface AuctionItemInput {
   failedBidCount: number | null;
   /** 진행상태. 소스가 주는 문자열을 그대로 보존한다. 예: `진행`, `변경`, `취하` */
   status: string | null;
+
+  // -------------------------------------------------------------------------
+  // 확장 필드 (enrich-item-fields, design.md D1~D4)
+  //
+  // 전부 **optional + `| null`**이다. 기존 10개 핵심 필드는 `| null`(필수 프로퍼티)로
+  // "어댑터가 필드를 빠뜨리는 실수"를 타입 검사로 잡는다는 원칙을 썼지만, 이 확장
+  // 필드들은 `?`(optional)를 함께 쓴다 — 이 change의 범위가 `src/lib/**`로 한정돼
+  // `workers/**`·`src/app/**`에 있는 기존 `AuctionItemInput` 리터럴(예:
+  // `workers/__tests__/collector.test.ts`)을 고칠 수 없기 때문이다. 그 파일들은 이
+  // 필드들을 전혀 모른 채로 계속 컴파일돼야 한다. 저장소(`src/lib/db/repository.ts`)는
+  // 이 생략(undefined)을 `?? null`로 받아 DB 바인딩에서 안전하게 처리한다.
+  //
+  // 값 없음 표현(design.md D3): 소스는 값이 없을 때 `""` 또는 `"0"`을 보낸다.
+  // - **가격·면적·차수별 최저가율**은 0을 유효값으로 보지 않는다 — 이 도메인에서
+  //   최저가 0원·면적 0㎡는 "값 없음"이지 실제 0이 아니다(기존 `pickMinBidPrice`가
+  //   이미 0을 폴백 트리거로 쓰는 선례).
+  // - **`failedBidCount`(기존 필드)의 0만 유효값**이다(신건). 아래 확장 필드 중에는
+  //   0이 유효한 필드가 없다 — `auctionRound`(매각기일 회차)도 관측상 1부터 시작해
+  //   가격·면적과 같은 규칙(0 = 값 없음)을 적용한다(판단 근거는 어댑터 주석 참조).
+  // - **좌표·코드값은 숫자로 변환하지 않고 문자열 그대로 저장**하므로(D4) 애초에
+  //   0-vs-없음 판정이 필요 없다.
+
+  /** 최소 면적(㎡). 0은 값 없음(면적 0㎡는 실존하지 않는다, design.md D3). */
+  minArea?: number | null;
+  /** 최대 면적(㎡). 0은 값 없음(위와 동일). */
+  maxArea?: number | null;
+  /** 건물 구조·면적 서술. 원문에 줄바꿈이 포함될 수 있다(예: `"철근콘크리트구조\n84.99㎡"`). */
+  buildingDescription?: string | null;
+
+  /**
+   * 차수별 최저매각가격(1~4차, design.md D1). 소스가 고정 4슬롯으로 주므로 배열이 아니라
+   * 컬럼 4개로 둔다. 0은 값 없음(가격 0원은 값 없음, design.md D3) — `minBidPrice`(기존
+   * 필드, `notifyMinmaePrice1` 우선 파생값)와 별개로 raw 차수별 값을 그대로 보존한다.
+   */
+  minBidPriceRound1?: number | null;
+  minBidPriceRound2?: number | null;
+  minBidPriceRound3?: number | null;
+  minBidPriceRound4?: number | null;
+  /**
+   * 차수별 최저매각가율(%, 1~2차만 NOTES.md §11에서 CONFIRMED). 0은 값 없음(가격과 같은
+   * 도메인 규칙 — 최저가율 0%는 값이 없다는 뜻이지 실제 비율이 아니다).
+   */
+  minBidPriceRateRound1?: number | null;
+  minBidPriceRateRound2?: number | null;
+
+  /**
+   * 용도 대/중/소분류 코드. ⚠️ **코드표 미확인(UNVERIFIED, design.md D4)** — 해석하지
+   * 않고 원문 문자열 그대로 저장한다. 화면에 라벨을 붙이면 추측이 사실처럼 보인다.
+   */
+  usageCodeLarge?: string | null;
+  usageCodeMedium?: string | null;
+  usageCodeSmall?: string | null;
+
+  /** 소재지 구조화 값: 시/도, 시/군/구, 동, 대표지번, 건물명, 동/층/호 등 상세. */
+  sido?: string | null;
+  sigungu?: string | null;
+  dong?: string | null;
+  lotNumber?: string | null;
+  buildingName?: string | null;
+  /** 동/층/호 등 건물 상세(예: `"203동 4층 401호"`). `address`(조합 문자열)와 별개로 둔다. */
+  buildingUnit?: string | null;
+
+  /**
+   * x·y 좌표와 좌표 수준. ⚠️ **좌표계(EPSG) 미확인(UNVERIFIED, design.md D4)** — 숫자로
+   * 변환하지 않고 원문 문자열 그대로 저장한다(변환 자체가 이미 "이 값은 숫자다"라는
+   * 해석이 될 수 있어서가 아니라, 실제로 어떤 단위·정밀도인지 몰라 연산에 쓸 수 없기
+   * 때문이다). 지도에는 쓰지 않는다 — 저장만 해 두면 좌표계가 확인됐을 때 재수집 없이
+   * 쓸 수 있다.
+   */
+  coordinateX?: string | null;
+  coordinateY?: string | null;
+  /** 좌표 수준 코드. ⚠️ 코드표 미확인 — 원문 보존, 해석 금지. */
+  coordinateLevel?: string | null;
+
+  /** 매각기일 시각. 원문 형식 그대로 보존(예: `"1000"` = 10:00, 콜론으로 재포맷하지 않는다). */
+  auctionTime?: string | null;
+  /** 매각장소. */
+  auctionPlace?: string | null;
+  /** 매각결정기일. `auctionDate`와 같은 규칙으로 `YYYY-MM-DD`로 변환한다. */
+  auctionDecisionDate?: IsoDate | null;
+  /** 매각기일 회차. 0은 값 없음으로 취급한다(관측상 회차는 1부터 시작 — 어댑터 주석 참조). */
+  auctionRound?: number | null;
+
+  /** 비고. */
+  note?: string | null;
+  /** 중복 사건번호. 소스가 `<br/>`로 여러 건을 이어 보낼 수 있어 원문 그대로 저장한다(분리 안 함). */
+  duplicateCaseNo?: string | null;
+  /** 병합 사건번호. */
+  mergedCaseNo?: string | null;
+  /** 담당계 이름. */
+  courtDepartment?: string | null;
+  /** 담당계 연락처. */
+  courtPhone?: string | null;
+
+  /**
+   * 진행상태 원시 코드(`jinstatCd`). ⚠️ **코드표 미확인(UNVERIFIED, design.md D4)** —
+   * 기존 `status`(유찰횟수에서 파생한 표시용 문자열)와 달리 해석하지 않은 원문이다.
+   * 화면에는 그대로 노출하거나 아예 표시하지 않는다.
+   */
+  statusCode?: string | null;
+  /** 물건 상태 원시 코드(`mulStatcd`). ⚠️ 코드표 미확인 — 원문 보존, 해석 금지. */
+  itemStatusCode?: string | null;
 }
 
 /** DB에 저장된 물건 한 건. */

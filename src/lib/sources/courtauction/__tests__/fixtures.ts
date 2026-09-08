@@ -158,6 +158,30 @@ export const ROAD_ONLY_ROW = {
   printSt: "서울특별시 관악구 남부순환로192길 10",
 };
 
+/**
+ * 자연 키와 기존 10개 핵심 필드만 있고 **확장 필드가 전부 없는** 행 (task 3.4/3.5).
+ * 이 기능 이전에 수집된 행이거나, 사이트가 확장 필드명을 바꾼 경우를 흉내낸다.
+ * `minBidPrice`는 `minmaePrice`로만 채워지도록(§3.1 폴백 규칙) `notifyMinmaePrice1`을
+ * 아예 빼 뒀다 — 넣으면 `minBidPriceRound1`(확장 필드)도 같이 채워져 "확장 필드가
+ * 전부 비었다"는 전제가 깨진다.
+ */
+export const NO_EXTENDED_FIELDS_ROW = {
+  docid: "B0002102026013009999911",
+  boCd: "B000210",
+  saNo: "20260130099999",
+  maemulSer: "1",
+  mokmulSer: "1",
+  srnSaNo: "2026타경9999",
+  jiwonNm: "서울중앙지방법원",
+  dspslUsgNm: "아파트",
+  gamevalAmt: "500000000",
+  minmaePrice: "400000000",
+  maeGiil: "20261001",
+  yuchalCnt: "0",
+  addrGbncd: "A",
+  printSt: "서울특별시 어딘가 1",
+};
+
 /** 자연 키(`srnSaNo`)가 빠진 행 — spec의 "필수 필드 누락 → 제외 + 경고" 대상. */
 export const MISSING_KEY_ROW = {
   docid: "B0002102024013009999911",

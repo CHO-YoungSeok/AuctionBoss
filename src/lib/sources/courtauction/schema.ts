@@ -58,6 +58,71 @@ export const searchRowSchema = z.object({
   maeGiil: textish,
   /** 유찰횟수 */
   yuchalCnt: numericish,
+
+  // ---------------------------------------------------------------------
+  // 확장 필드 (enrich-item-fields, NOTES.md §11). 전부 optional — design.md D6:
+  // 하나만 안 와도 회차 전체를 ResponseSchemaError로 죽이면 안 된다(부가 정보 때문에
+  // 수집이 멈추는 것은 잘못된 트레이드오프).
+  // ---------------------------------------------------------------------
+
+  /** 최소 면적(㎡) */
+  minArea: numericish,
+  /** 최대 면적(㎡) */
+  maxArea: numericish,
+  /** 건물 구조·면적 서술. 줄바꿈 포함 가능(`"철근콘크리트구조\n84.99㎡"`) */
+  pjbBuldList: textish,
+
+  /** 차수별 최저매각가격 1~4차(고정 4슬롯, design.md D1). 1차는 위에서 이미 선언했다. */
+  notifyMinmaePrice2: numericish,
+  notifyMinmaePrice3: numericish,
+  notifyMinmaePrice4: numericish,
+  /** 차수별 최저매각가율(%). 1~2차만 실제 응답에서 CONFIRMED(NOTES §11) */
+  notifyMinmaePriceRate1: numericish,
+  notifyMinmaePriceRate2: numericish,
+
+  /** 용도 대/중/소분류 코드. 코드표 미확인(UNVERIFIED) — 원문 보존 */
+  lclsUtilCd: textish,
+  mclsUtilCd: textish,
+  sclsUtilCd: textish,
+
+  /** 소재지 분해: 시/도, 시/군/구, 동, 대표지번, 건물명, 동/층/호 상세 */
+  hjguSido: textish,
+  hjguSigu: textish,
+  hjguDong: textish,
+  daepyoLotno: textish,
+  buldNm: textish,
+  buldList: textish,
+
+  /** x·y 좌표. 좌표계(EPSG) 미확인(UNVERIFIED) — 숫자 변환 없이 원문 보존 */
+  xCordi: textish,
+  yCordi: textish,
+  /** 좌표 수준 코드. 코드표 미확인(UNVERIFIED) */
+  cordiLvl: textish,
+
+  /** 매각기일 시각(예: `"1000"` = 10:00) */
+  maeHh1: textish,
+  /** 매각장소 */
+  maePlace: textish,
+  /** 매각결정기일 `YYYYMMDD` */
+  maegyuljGiil: textish,
+  /** 매각기일 회차 */
+  maeGiilCnt: numericish,
+
+  /** 비고 */
+  mulBigo: textish,
+  /** 중복 사건번호(`<br/>`로 여러 건을 이어 보낼 수 있음) */
+  dupSaNo: textish,
+  /** 병합 사건번호 */
+  byungSaNo: textish,
+  /** 담당계 이름 */
+  jpDeptNm: textish,
+  /** 담당계 연락처 */
+  tel: textish,
+
+  /** 진행상태 원시 코드. 코드표 미확인(UNVERIFIED) — 해석 금지 */
+  jinstatCd: textish,
+  /** 물건 상태 원시 코드. 코드표 미확인(UNVERIFIED) — 해석 금지 */
+  mulStatcd: textish,
 });
 
 export type SearchRow = z.infer<typeof searchRowSchema>;

@@ -151,6 +151,20 @@ function text(value: string | null | undefined): string | null {
 }
 
 /**
+ * 가격·면적·회차율처럼 **0이 "값 없음"을 의미하는** 확장 필드용 정수 변환(design.md D3).
+ * `toInt`가 0을 그대로 돌려주는 것과 달리 0을 null로 접는다.
+ *
+ * ⚠️ `failedBidCount`(유찰횟수)에는 쓰지 않는다 — 그 필드는 0이 유효값(신건)이라
+ * 일반 `toInt`를 그대로 쓴다. 확장 필드 중 `auctionRound`(매각기일 회차)도 이 함수를
+ * 쓴다 — 관측된 값이 전부 1 이상이라 회차가 0부터 시작한다는 근거가 없고, 유찰횟수처럼
+ * "0 = 정상적인 첫 상태"라는 도메인 의미가 확인되지 않았기 때문이다(판단 근거, task 1.2).
+ */
+function toIntNonZero(value: string | number | null | undefined): number | null {
+  const n = toInt(value);
+  return n === null || n === 0 ? null : n;
+}
+
+/**
  * 진행상태 문자열.
  *
  * ⚠️ **소스에서 오는 값이 아니라 우리가 만들어 내는 값이다(derived).** 응답에는
@@ -471,12 +485,24 @@ export class CourtAuctionAdapter implements AuctionSource {
       );
     }
 
-    return [...groups.values()].map((group) => this.toItem(group.rows));
+    const items = [...groups.values()].map((group) => this.toItem(group.rows));
+
+    // design.md D6: 행 자체는 정상 접혔는데(자연 키는 있음) 확장 필드가 전부 비어 있으면
+    // 사이트가 그 필드들의 이름을 바꿨을 가능성이 높다 — 자연키 누락 행 전체 제외 경고와
+    // 같은 패턴(위)이되, 여기서는 수집을 죽이지 않고 경고만 남긴다(부가 정보이므로).
+    if (items.length > 0 && items.every((item) => !hasAnyExtendedField(item))) {
+      this.logger.warn(
+        `[courtauction] ${court.name}: 수신한 ${items.length}건에 확장 필드가 전부 비어 있습니다 — 응답 필드명 변경을 의심할 것`,
+      );
+    }
+
+    return items;
   }
 
   private toItem(rows: SearchRow[]): AuctionItemInput {
     // 목적물 행끼리 사건/기일/금액은 같다(NOTES §8 샘플에서 확인). 주소만 다르므로
-    // 주소 외 필드는 첫 행에서 읽는다.
+    // 주소 외 필드는 첫 행에서 읽는다. 확장 필드도 design.md D1대로 물건당 스칼라
+    // 값이라 같은 전제를 쓴다.
     const head = rows[0];
     const failedBidCount = toInt(head.yuchalCnt);
     return {
@@ -490,8 +516,96 @@ export class CourtAuctionAdapter implements AuctionSource {
       auctionDate: toIsoDate(head.maeGiil),
       failedBidCount,
       status: deriveStatus(failedBidCount),
+
+      // ---- 확장 필드 (NOTES.md §11) ----
+      minArea: toIntNonZero(head.minArea),
+      maxArea: toIntNonZero(head.maxArea),
+      buildingDescription: text(head.pjbBuldList),
+
+      minBidPriceRound1: toIntNonZero(head.notifyMinmaePrice1),
+      minBidPriceRound2: toIntNonZero(head.notifyMinmaePrice2),
+      minBidPriceRound3: toIntNonZero(head.notifyMinmaePrice3),
+      minBidPriceRound4: toIntNonZero(head.notifyMinmaePrice4),
+      minBidPriceRateRound1: toIntNonZero(head.notifyMinmaePriceRate1),
+      minBidPriceRateRound2: toIntNonZero(head.notifyMinmaePriceRate2),
+
+      // 코드표 미확인(UNVERIFIED, design.md D4) — 해석 없이 원문 그대로.
+      usageCodeLarge: text(head.lclsUtilCd),
+      usageCodeMedium: text(head.mclsUtilCd),
+      usageCodeSmall: text(head.sclsUtilCd),
+
+      sido: text(head.hjguSido),
+      sigungu: text(head.hjguSigu),
+      dong: text(head.hjguDong),
+      lotNumber: text(head.daepyoLotno),
+      buildingName: text(head.buldNm),
+      buildingUnit: text(head.buldList),
+
+      // 좌표계 미확인(UNVERIFIED, design.md D4) — 숫자 변환 없이 원문 그대로.
+      coordinateX: text(head.xCordi),
+      coordinateY: text(head.yCordi),
+      coordinateLevel: text(head.cordiLvl),
+
+      auctionTime: text(head.maeHh1),
+      auctionPlace: text(head.maePlace),
+      auctionDecisionDate: toIsoDate(head.maegyuljGiil),
+      auctionRound: toIntNonZero(head.maeGiilCnt),
+
+      note: text(head.mulBigo),
+      duplicateCaseNo: text(head.dupSaNo),
+      mergedCaseNo: text(head.byungSaNo),
+      courtDepartment: text(head.jpDeptNm),
+      courtPhone: text(head.tel),
+
+      // 코드표 미확인(UNVERIFIED, design.md D4) — 해석 없이 원문 그대로.
+      statusCode: text(head.jinstatCd),
+      itemStatusCode: text(head.mulStatcd),
     };
   }
+}
+
+/**
+ * `toItem`이 채우는 확장 필드 이름 전부(design.md D1, NOTES.md §11).
+ * "행은 왔는데 확장 필드가 전부 비었다" 경고(task 3.5)를 판정하는 데만 쓴다.
+ */
+const EXTENDED_FIELD_KEYS = [
+  "minArea",
+  "maxArea",
+  "buildingDescription",
+  "minBidPriceRound1",
+  "minBidPriceRound2",
+  "minBidPriceRound3",
+  "minBidPriceRound4",
+  "minBidPriceRateRound1",
+  "minBidPriceRateRound2",
+  "usageCodeLarge",
+  "usageCodeMedium",
+  "usageCodeSmall",
+  "sido",
+  "sigungu",
+  "dong",
+  "lotNumber",
+  "buildingName",
+  "buildingUnit",
+  "coordinateX",
+  "coordinateY",
+  "coordinateLevel",
+  "auctionTime",
+  "auctionPlace",
+  "auctionDecisionDate",
+  "auctionRound",
+  "note",
+  "duplicateCaseNo",
+  "mergedCaseNo",
+  "courtDepartment",
+  "courtPhone",
+  "statusCode",
+  "itemStatusCode",
+] as const satisfies readonly (keyof AuctionItemInput)[];
+
+/** 확장 필드가 하나라도 값을 가졌는지. 전부 null/undefined면 false. */
+function hasAnyExtendedField(item: AuctionItemInput): boolean {
+  return EXTENDED_FIELD_KEYS.some((key) => item[key] !== null && item[key] !== undefined);
 }
 
 /**
