@@ -298,6 +298,44 @@ describe("startCollector — 건너뜀 사유 구별(4.3)", () => {
     expect(recordSkippedRunMock).toHaveBeenCalledWith("collector", "backoff");
     expect(recordSkippedRunMock).not.toHaveBeenCalledWith("collector", "overlap");
   });
+
+  // hardening-round2 group 2 — "차단 후 백오프 창이 지나면 수집이 다시 시도되는가"는
+  // 이 프로젝트에서 한 번도 테스트되지 않았다(위 테스트는 "창 안에서 건너뛴다"만 본다).
+  // 실제 사이트 차단으로 복귀를 관측하는 것은 위험하므로(design.md D1), 아주 짧은
+  // blockBackoffMs + 실제 짧은 대기(위 "overlap" 테스트와 같은 패턴)로 창이 지나가는
+  // 상황만 흉내낸다 — Date.now()를 모킹하지 않는다(collector.ts가 실제로 그렇게 동작하므로
+  // 그대로 재현하는 편이 모킹보다 신뢰도가 높다).
+  it("백오프 창이 지나면 다음 tick은 건너뛰지 않고 다시 수집을 시도한다(복귀)", async () => {
+    let calls = 0;
+    const source: AuctionSource = {
+      fetchActiveItems: async () => {
+        calls += 1;
+        if (calls === 1) throw new RobotDetectedError("차단", null);
+        return { items: [], pagesRequested: 1 };
+      },
+    };
+
+    const handle = startCollector(baseOptions({ source, blockBackoffMs: 5 }));
+    await handle.tick(); // 1회차: blocked, 5ms 백오프 시작
+    recordSkippedRunMock.mockClear();
+    finishRunMock.mockClear();
+
+    await new Promise((r) => setTimeout(r, 30)); // 백오프 창(5ms)이 지나가도록 실제로 대기
+
+    await handle.tick(); // 2회차: 창이 지났으니 skip하지 않고 실제로 재시도해야 한다
+    await handle.stop();
+
+    // "건너뛰지 않았다"는 recordSkippedRun이 backoff로 또 호출되지 않은 것으로 확인하고,
+    // "실제로 재시도했다"는 소스가 두 번째로 호출된 것(calls===2)과 finishRun이 success로
+    // 기록된 것으로 확인한다 — 두 조건 다 확인해야 "그냥 안 건너뛰었다"가 아니라 "정상
+    // 수집이 재개됐다"는 것을 알 수 있다.
+    expect(calls).toBe(2);
+    expect(recordSkippedRunMock).not.toHaveBeenCalledWith("collector", "backoff");
+    expect(finishRunMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ outcome: "success" }),
+    );
+  });
 });
 
 describe("startCollector — 기록 실패가 수집을 막지 않는다(4.2, 스펙 MUST NOT)", () => {
