@@ -42,46 +42,14 @@ export function formatAreaRange({ minArea, maxArea }: AreaFields): string {
 // ---------------------------------------------------------------------------
 // 면적당 가격 (task 4.4)
 //
-// 판단 근거: `minArea`/`maxArea`는 REAL_ROW를 포함한 관측값에서 대부분 같은 값이지만,
-// 다를 때는 "이 물건이 차지할 수 있는 가장 작은 면적" 기준으로 나누는 편이 입찰자에게
-// 더 보수적인(면적당 가격이 더 높게 나오는, 즉 손해를 과소평가하지 않는) 수치를 준다는
-// 판단으로 `minArea`를 우선한다. `minArea`가 없으면 `maxArea`로 대체한다. 이 선택은
-// design.md의 "면적당 가격을 정렬 기준으로 쓸지는 나중에 판단" open question과 무관하게
-// 화면 표시 하나만을 위한 결정이다.
+// 계산 자체(`computePricePerArea`)는 `src/lib/domain/price.ts`에 있다 — 분석 워커
+// (`workers/lib/derived.ts`, enrich-item-fields 실데이터 검증 이후 추가)도 똑같은 계산이
+// 필요해졌고, `workers/**`는 `src/app/**`를 import하지 않으므로(분석기와 웹 앱의 독립성)
+// 화면과 분석 워커 어느 쪽에도 속하지 않는 도메인 계층으로 옮겨 공유한다. 이 파일은 그
+// 공유 함수를 그대로 재노출한다 — 정의를 두 번 하지 않기 위함이다.
 // ---------------------------------------------------------------------------
 
-/** `AuctionItem`에서 면적당 가격 계산에 쓰는 부분집합. */
-export type PricePerAreaFields = Pick<AuctionItem, "minBidPrice" | "minArea" | "maxArea">;
-
-/**
- * 최저매각가격 ÷ 면적(원/㎡)을 계산한다. 실패하는 모든 경우를 가드해서 `NaN`/`Infinity`가
- * 호출자에게 새 나가지 않게 한다:
- * - `minBidPrice`가 없거나(null) 숫자가 아니면 계산하지 않는다.
- * - 면적이 둘 다 없으면 계산하지 않는다.
- * - 면적이 0 이하이면(이론상 데이터 계층이 0을 이미 null로 접어 두지만, 방어적으로 다시
- *   확인한다) 0으로 나누기가 되므로 계산하지 않는다.
- * - 결과가 `Number.isFinite`가 아니면(부동소수 오차로 Infinity가 나오는 극단값 등) null.
- *
- * 면적 선택은 위 판단 근거대로 `minArea` 우선, 없으면 `maxArea`.
- */
-export function computePricePerArea({
-  minBidPrice,
-  minArea,
-  maxArea,
-}: PricePerAreaFields): number | null {
-  if (typeof minBidPrice !== "number" || !Number.isFinite(minBidPrice)) return null;
-
-  const area =
-    typeof minArea === "number" && Number.isFinite(minArea) && minArea > 0
-      ? minArea
-      : typeof maxArea === "number" && Number.isFinite(maxArea) && maxArea > 0
-        ? maxArea
-        : null;
-  if (area === null) return null;
-
-  const result = minBidPrice / area;
-  return Number.isFinite(result) ? result : null;
-}
+export { computePricePerArea, type PricePerAreaFields } from "@/lib/domain";
 
 /** `computePricePerArea`의 결과를 화면 문자열로 만든다. 원 단위 반올림 후 천 단위 구분. */
 export function formatPricePerArea(value: number | null): string {

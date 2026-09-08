@@ -41,6 +41,8 @@ export {
   resolveConfigPath,
 } from "./config";
 
+export { computePricePerArea, type PricePerAreaFields } from "./price";
+
 export {
   DEFAULT_PAGE_SIZE,
   DEFAULT_SORT_DIRECTION,

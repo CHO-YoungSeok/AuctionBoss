@@ -21,6 +21,7 @@ import {
   type RunClaudeOptions,
 } from "../lib/claude";
 import {
+  DERIVED_FIGURES_TOKEN,
   ITEM_JSON_TOKEN,
   PROMPT_VERSION,
   loadPromptTemplate,
@@ -29,6 +30,10 @@ import {
 
 const BASE = "http://localhost:9999";
 const TEMPLATE = `분석하라.\n\n\`\`\`json\n${ITEM_JSON_TOKEN}\n\`\`\`\n`;
+// renderItemPrompt 자체 테스트 중 파생 지표 블록을 검증하는 케이스는 이 템플릿을 쓴다 —
+// 위 TEMPLATE에는 DERIVED_FIGURES_TOKEN이 없어(단순 문자열 교체라 토큰이 없으면 그냥
+// 아무 일도 안 일어난다) 파생 지표가 렌더된 프롬프트 어디에도 나타나지 않기 때문이다.
+const TEMPLATE_WITH_DERIVED = `분석하라.\n\n${DERIVED_FIGURES_TOKEN}\n\n\`\`\`json\n${ITEM_JSON_TOKEN}\n\`\`\`\n`;
 
 function makeItem(overrides: Partial<AuctionItem> = {}): AuctionItem {
   return {
@@ -187,6 +192,49 @@ describe("renderItemPrompt", () => {
     const prompt = renderItemPrompt(TEMPLATE, makeItem({ appraisalPrice: null, address: null }));
     expect(prompt).toContain('"appraisalPrice": null');
     expect(prompt).toContain('"address": null');
+  });
+
+  // 실데이터 검증 실패(v2)의 회귀 케이스: minArea·minBidPrice·minBidPriceRound1·
+  // minBidPriceRateRound1이 전부 non-null인 실제 관측값(NOTES.md §11)을 넣었을 때,
+  // 모델에게 계산을 맡기지 않고 렌더된 프롬프트 자체에 계산된 숫자가 이미 박혀 있어야
+  // 한다 — 이 assertion이 그 실패를 잡았을 assertion이다.
+  it("파생 지표(면적당 가격·차수별 표)가 계산된 숫자 그대로 프롬프트에 박힌다 (실데이터 회귀)", () => {
+    const item = makeItem({
+      appraisalPrice: 711_000_000,
+      minBidPrice: 711_000_000,
+      minArea: 84,
+      maxArea: 84,
+      minBidPriceRound1: 711_000_000,
+      minBidPriceRateRound1: 100,
+    });
+    const prompt = renderItemPrompt(TEMPLATE_WITH_DERIVED, item);
+
+    // 면적당 최저매각가격 = 711,000,000 / 84 = 8,464,285.71... → 반올림 후 천 단위 구분.
+    expect(prompt).toContain("면적당 최저매각가격: 8,464,286원/㎡");
+    // 1차 표: 가격·감정가 대비 비율이 숫자로 명시돼야 한다.
+    expect(prompt).toContain("1차: 711,000,000원 (감정가 대비 100%)");
+    expect(prompt).not.toContain("면적 또는 최저매각가격 정보 없음");
+    expect(prompt).not.toContain("차수별 최저가 정보 없음");
+  });
+
+  it("면적·차수별 값이 전부 없으면 지어내지 않고 계산 불가 이유를 그대로 밝힌다", () => {
+    const item = makeItem({
+      appraisalPrice: null,
+      minBidPrice: null,
+      minArea: null,
+      maxArea: null,
+      minBidPriceRound1: null,
+      minBidPriceRound2: null,
+      minBidPriceRound3: null,
+      minBidPriceRound4: null,
+    });
+    const prompt = renderItemPrompt(TEMPLATE_WITH_DERIVED, item);
+
+    expect(prompt).toContain("면적당 최저매각가격: 계산 불가 — 면적 또는 최저매각가격 정보 없음");
+    expect(prompt).toContain("차수별 최저가 추이: 계산 불가 — 차수별 최저가 정보 없음");
+    // 값을 지어내지 않았는지 — "원/㎡"(단위)나 숫자 회차 표가 전혀 없어야 한다.
+    expect(prompt).not.toContain("원/㎡");
+    expect(prompt).not.toMatch(/\d차: [\d,]+원/);
   });
 });
 
