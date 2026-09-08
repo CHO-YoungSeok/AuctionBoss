@@ -73,23 +73,49 @@ describe("classifyDiscountStage", () => {
     expect(classifyDiscountStage(1.2)).toBe("appraisal");
   });
 
-  it("0.8 이상 1 미만이면 firstDrop(80%대) — 경계값 포함", () => {
+  it("0.8 이상이면 firstDrop(80%대) — 경계값 포함", () => {
     expect(classifyDiscountStage(0.8)).toBe("firstDrop");
     expect(classifyDiscountStage(0.99)).toBe("firstDrop");
   });
 
-  it("0.64 이상 0.8 미만이면 secondDrop(64%대) — 경계값 포함", () => {
+  it("0.64 이상이면 secondDrop(64%대) — 경계값 포함", () => {
     expect(classifyDiscountStage(0.64)).toBe("secondDrop");
     expect(classifyDiscountStage(0.79)).toBe("secondDrop");
   });
 
-  it("0.64 미만이면 deepDrop(64% 미만)", () => {
-    expect(classifyDiscountStage(0.639)).toBe("deepDrop");
+  // 재조정(task 6.1) — 실측 분포 0.51=20건이 이전에는 "64% 미만" 한 칸에 뭉쳐 있었다.
+  it("0.512(0.8³) 이상이면 thirdDrop(51%대) — 경계값 포함", () => {
+    expect(classifyDiscountStage(0.512)).toBe("thirdDrop");
+    expect(classifyDiscountStage(0.6)).toBe("thirdDrop");
+  });
+
+  it("0.4096(0.8⁴) 이상이면 fourthDrop(41%대) — 경계값 포함", () => {
+    expect(classifyDiscountStage(0.4096)).toBe("fourthDrop");
+    expect(classifyDiscountStage(0.5)).toBe("fourthDrop");
+  });
+
+  it("그 아래는 deepDrop(41% 미만) — 실측 최댓값(0.327681, 0.8⁵ 근방)도 여기 속한다", () => {
+    expect(classifyDiscountStage(0.327681)).toBe("deepDrop");
+    expect(classifyDiscountStage(0.03)).toBe("deepDrop");
     expect(classifyDiscountStage(0)).toBe("deepDrop");
   });
 
+  // 실측 노이즈(discount.ts STAGE_TOLERANCE 주석 참고) — 이론값보다 미세하게(최대
+  // 6×10⁻⁶) 낮은 실측값도 같은 단계로 분류돼야 한다. 실제 관측값을 그대로 쓴다.
+  it("실측 노이즈가 있는 경계값도 올바른 단계로 분류된다(id 5, id 3 패턴)", () => {
+    expect(classifyDiscountStage(0.7999997995643531)).toBe("firstDrop"); // 실측 id 5
+    expect(classifyDiscountStage(0.639999531426452)).toBe("secondDrop"); // 실측 id 3
+  });
+
   it("모든 단계에 텍스트 라벨이 있다 — 색에만 의존하지 않는다", () => {
-    const stages: DiscountStage[] = ["appraisal", "firstDrop", "secondDrop", "deepDrop"];
+    const stages: DiscountStage[] = [
+      "appraisal",
+      "firstDrop",
+      "secondDrop",
+      "thirdDrop",
+      "fourthDrop",
+      "deepDrop",
+    ];
     for (const stage of stages) {
       expect(DISCOUNT_STAGE_LABELS[stage]).toEqual(expect.any(String));
       expect(DISCOUNT_STAGE_LABELS[stage].length).toBeGreaterThan(0);

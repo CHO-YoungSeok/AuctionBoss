@@ -33,16 +33,28 @@ function makeFields(overrides: Partial<DerivedFiguresFields> = {}): DerivedFigur
 describe("computeDerivedFigures — 면적당 가격", () => {
   it("실데이터 패턴(§11): minArea·minBidPrice가 있으면 계산된다", () => {
     const { pricePerArea } = computeDerivedFigures(
-      makeFields({ minBidPrice: 711_000_000, minArea: 84 }),
+      makeFields({ minBidPrice: 711_000_000, minArea: 84, maxArea: 84 }),
     );
-    expect(pricePerArea).toEqual({ computed: true, wonPerArea: 711_000_000 / 84 });
+    expect(pricePerArea).toEqual({
+      computed: true,
+      wonPerArea: 711_000_000 / 84,
+      basisArea: 84,
+      basisField: "minArea",
+      basisAmbiguous: false,
+    });
   });
 
   it("minArea가 null이면 maxArea로 대체한다", () => {
     const { pricePerArea } = computeDerivedFigures(
       makeFields({ minBidPrice: 711_000_000, minArea: null, maxArea: 84 }),
     );
-    expect(pricePerArea).toEqual({ computed: true, wonPerArea: 711_000_000 / 84 });
+    expect(pricePerArea).toEqual({
+      computed: true,
+      wonPerArea: 711_000_000 / 84,
+      basisArea: 84,
+      basisField: "maxArea",
+      basisAmbiguous: false,
+    });
   });
 
   it("minArea가 0이면(값 없음) 계산 불가 — maxArea도 없으면 이유를 밝힌다", () => {
@@ -57,6 +69,22 @@ describe("computeDerivedFigures — 면적당 가격", () => {
       makeFields({ minBidPrice: null, minArea: 84 }),
     );
     expect(pricePerArea).toEqual({ computed: false, reason: PRICE_PER_AREA_UNAVAILABLE_REASON });
+  });
+
+  // ux-overhaul-phase1 design.md D2, 실데이터 id 48 패턴: minArea > maxArea(역전)에서도
+  // minArea가 우선 쓰이고(기존 규칙 유지), 이번엔 basisAmbiguous로 "둘 다 있고 다르다"는
+  // 사실이 드러난다 — 분석 프롬프트가 이 기준을 명시할 수 있게 하는 것이 이 필드의 목적이다.
+  it("실데이터 id 48 패턴(minArea=11414, maxArea=80, 역전): minArea 우선 + basisAmbiguous", () => {
+    const { pricePerArea } = computeDerivedFigures(
+      makeFields({ minBidPrice: 711_000_000, minArea: 11_414, maxArea: 80 }),
+    );
+    expect(pricePerArea).toEqual({
+      computed: true,
+      wonPerArea: 711_000_000 / 11_414,
+      basisArea: 11_414,
+      basisField: "minArea",
+      basisAmbiguous: true,
+    });
   });
 });
 

@@ -9,39 +9,110 @@ import {
   formatStructuredAddress,
   formatUsageCodes,
   listRoundPrices,
+  toPyeong,
 } from "../item-extensions";
 
+describe("toPyeong", () => {
+  it("㎡를 평으로 환산한다 (1평 = 3.3058㎡, 소수 1자리)", () => {
+    expect(toPyeong(84)).toBe(25.4);
+    expect(toPyeong(50)).toBe(15.1);
+  });
+
+  it("정확히 1평이면 1.0", () => {
+    expect(toPyeong(3.3058)).toBe(1);
+  });
+
+  it("0이면 null(변환 불가, 값 없음과 같은 취급)", () => {
+    expect(toPyeong(0)).toBeNull();
+  });
+
+  it("음수이면 null(데이터 이상값, 지어내지 않는다)", () => {
+    expect(toPyeong(-10)).toBeNull();
+  });
+
+  it("NaN/Infinity면 null", () => {
+    expect(toPyeong(Number.NaN)).toBeNull();
+    expect(toPyeong(Number.POSITIVE_INFINITY)).toBeNull();
+  });
+
+  it("결과는 항상 소수 1자리를 넘지 않는다(원본보다 정밀도를 꾸며내지 않는다)", () => {
+    const result = toPyeong(11_414);
+    expect(result).not.toBeNull();
+    if (result !== null) {
+      expect(Math.round(result * 10)).toBe(result * 10);
+    }
+  });
+});
+
 describe("formatAreaRange", () => {
-  it("min/max가 같으면 한 번만 보여준다 (REAL_ROW 관측값)", () => {
-    expect(formatAreaRange({ minArea: 84, maxArea: 84 })).toBe("84㎡");
+  it("min/max가 같으면 한 번만 평과 함께 보여준다 (REAL_ROW 관측값)", () => {
+    expect(formatAreaRange({ minArea: 84, maxArea: 84 })).toBe("84㎡ (25.4평)");
   });
 
-  it("min/max가 다르면 범위로 보여준다", () => {
-    expect(formatAreaRange({ minArea: 50, maxArea: 84 })).toBe("50㎡ ~ 84㎡");
+  it("정상 범위(min<=max, 둘이 다름)는 기존처럼 범위로 잇는다 — 실데이터 52%(tasks.md 1.2)", () => {
+    expect(formatAreaRange({ minArea: 50, maxArea: 84 })).toBe("50㎡ (15.1평) ~ 84㎡ (25.4평)");
   });
 
-  it("한쪽만 있으면 그 값만 보여준다", () => {
-    expect(formatAreaRange({ minArea: 84, maxArea: null })).toBe("84㎡");
-    expect(formatAreaRange({ minArea: null, maxArea: 84 })).toBe("84㎡");
+  it("한쪽만 있으면 그 값만 평과 함께 보여준다", () => {
+    expect(formatAreaRange({ minArea: 84, maxArea: null })).toBe("84㎡ (25.4평)");
+    expect(formatAreaRange({ minArea: null, maxArea: 84 })).toBe("84㎡ (25.4평)");
   });
 
   it("둘 다 없으면 EMPTY", () => {
     expect(formatAreaRange({ minArea: null, maxArea: null })).toBe(EMPTY);
     expect(formatAreaRange({ minArea: undefined, maxArea: undefined })).toBe(EMPTY);
   });
-});
 
-describe("computePricePerArea", () => {
-  it("정상 값이면 최저매각가격 ÷ minArea", () => {
-    expect(computePricePerArea({ minBidPrice: 711_000_000, minArea: 84, maxArea: 84 })).toBeCloseTo(
-      711_000_000 / 84,
+  // design.md D1 — 실데이터 id 48(minArea=11414, maxArea=80)의 실제 역전 케이스.
+  it("역전(min > max)이면 범위로 잇지 않고 '면적 A/B'로 병기하며 의미 미확정을 밝힌다 (실데이터 id 48)", () => {
+    expect(formatAreaRange({ minArea: 11_414, maxArea: 80 })).toBe(
+      "면적 A 11414㎡ (3452.7평) · 면적 B 80㎡ (24.2평) (의미 미확정)",
     );
   });
 
-  it("minArea가 없으면 maxArea로 대체한다", () => {
+  it("역전이어도 값을 정렬해 뒤집지 않는다 — minArea가 항상 '면적 A' 자리다", () => {
+    const reversed = formatAreaRange({ minArea: 11_414, maxArea: 80 });
+    // "80㎡ ~ 11414㎡"처럼 오름차순 범위로 보이면 안 된다(없는 사실을 만드는 것).
+    expect(reversed).not.toMatch(/^80㎡.*~.*11414㎡/);
+    expect(reversed.indexOf("11414㎡")).toBeLessThan(reversed.indexOf("80㎡"));
+  });
+});
+
+describe("computePricePerArea", () => {
+  it("정상 값이면 최저매각가격 ÷ minArea, basisField는 minArea, basisAmbiguous는 false(같은 값)", () => {
+    const result = computePricePerArea({ minBidPrice: 711_000_000, minArea: 84, maxArea: 84 });
+    expect(result).not.toBeNull();
+    expect(result?.pricePerArea).toBeCloseTo(711_000_000 / 84);
+    expect(result?.basisArea).toBe(84);
+    expect(result?.basisField).toBe("minArea");
+    expect(result?.basisAmbiguous).toBe(false);
+  });
+
+  it("minArea가 없으면 maxArea로 대체하고 basisField가 maxArea가 된다", () => {
+    const result = computePricePerArea({ minBidPrice: 711_000_000, minArea: null, maxArea: 84 });
+    expect(result?.pricePerArea).toBeCloseTo(711_000_000 / 84);
+    expect(result?.basisField).toBe("maxArea");
+    expect(result?.basisAmbiguous).toBe(false);
+  });
+
+  // design.md D2, 실데이터 id 48 패턴 — 역전된 물건에서도 minArea가 그대로 우선 쓰인다
+  // (이번 change가 바꾸지 않는 것). basisAmbiguous만 true가 되어 호출자가 기준을 밝힐
+  // 신호가 된다.
+  it("역전된 면적(id 48: minArea=11414, maxArea=80)에서도 minArea 우선 — basisAmbiguous는 true", () => {
+    const result = computePricePerArea({ minBidPrice: 711_000_000, minArea: 11_414, maxArea: 80 });
+    expect(result?.basisField).toBe("minArea");
+    expect(result?.basisArea).toBe(11_414);
+    expect(result?.pricePerArea).toBeCloseTo(711_000_000 / 11_414);
+    expect(result?.basisAmbiguous).toBe(true);
+  });
+
+  it("한쪽만 있으면 basisAmbiguous는 항상 false", () => {
     expect(
-      computePricePerArea({ minBidPrice: 711_000_000, minArea: null, maxArea: 84 }),
-    ).toBeCloseTo(711_000_000 / 84);
+      computePricePerArea({ minBidPrice: 711_000_000, minArea: 84, maxArea: null })?.basisAmbiguous,
+    ).toBe(false);
+    expect(
+      computePricePerArea({ minBidPrice: 711_000_000, minArea: null, maxArea: 84 })?.basisAmbiguous,
+    ).toBe(false);
   });
 
   it("면적이 둘 다 없으면 null (NaN/Infinity 아님)", () => {
@@ -72,7 +143,8 @@ describe("computePricePerArea", () => {
     for (const c of cases) {
       const result = computePricePerArea(c);
       if (result !== null) {
-        expect(Number.isFinite(result)).toBe(true);
+        expect(Number.isFinite(result.pricePerArea)).toBe(true);
+        expect(Number.isFinite(result.basisArea)).toBe(true);
       }
     }
   });
@@ -83,8 +155,25 @@ describe("formatPricePerArea", () => {
     expect(formatPricePerArea(null)).toBe(EMPTY);
   });
 
-  it("값이 있으면 천 단위 구분 + 원/㎡", () => {
-    expect(formatPricePerArea(711_000_000 / 84)).toBe("8,464,286원/㎡");
+  it("basisAmbiguous가 false면(같은 값) 기준 표기를 생략한다", () => {
+    const result = computePricePerArea({ minBidPrice: 711_000_000, minArea: 84, maxArea: 84 });
+    expect(formatPricePerArea(result)).toBe("8,464,286원/㎡");
+  });
+
+  it("한쪽만 있으면 기준 표기를 생략한다", () => {
+    const result = computePricePerArea({ minBidPrice: 711_000_000, minArea: 84, maxArea: null });
+    expect(formatPricePerArea(result)).toBe("8,464,286원/㎡");
+  });
+
+  // design.md D2 — 실데이터 id 48 패턴. 기준(면적 A)을 밝혀야 사용자가 검증할 수 있다.
+  it("basisAmbiguous가 true면(둘 다 있고 다름) 기준 면적을 밝힌다", () => {
+    const result = computePricePerArea({ minBidPrice: 711_000_000, minArea: 11_414, maxArea: 80 });
+    expect(formatPricePerArea(result)).toBe("62,292원/㎡ (면적 A 11,414㎡ 기준)");
+  });
+
+  it("NaN/Infinity/undefined 문자열이 나오지 않는다", () => {
+    const result = computePricePerArea({ minBidPrice: 711_000_000, minArea: 84, maxArea: 84 });
+    expect(formatPricePerArea(result)).not.toMatch(/NaN|Infinity|undefined/);
   });
 });
 

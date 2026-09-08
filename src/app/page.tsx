@@ -11,7 +11,7 @@
  */
 import Link from "next/link";
 
-import { getRepository, getUnreadCount } from "@/lib/db";
+import { getRepository, getUnreadCount, getWorkerStatus } from "@/lib/db";
 import {
   DEFAULT_SORT_DIRECTION,
   DEFAULT_SORT_KEY,
@@ -22,7 +22,10 @@ import {
 
 import { BookmarkToggleForm } from "./_components/bookmark-toggle-form";
 import { ItemFilterForm } from "./_components/item-filter-form";
+import { formatMismatchDescription, detectFailedBidRateMismatch } from "./_lib/bid-mismatch";
 import { isRecentlyChanged } from "./_lib/change-history";
+import { buildCollectionBanner, formatCoverage, shouldWarnCollection } from "./_lib/collection-banner";
+import { computeDDay, formatDDay } from "./_lib/d-day";
 import {
   DISCOUNT_STAGE_LABELS,
   classifyDiscountStage,
@@ -35,11 +38,13 @@ import {
   SORT_LABELS,
   formatCount,
   formatDate,
+  formatDateTime,
   formatText,
   formatWon,
 } from "./_lib/format";
-import { computePricePerArea, formatPricePerArea } from "./_lib/item-extensions";
+import { formatAreaRange, computePricePerArea, formatPricePerArea } from "./_lib/item-extensions";
 import { ITEM_LIST_PATH, itemListHref } from "./_lib/item-query-url";
+import { NOTE_FLAG_LABELS, detectNoteFlags } from "./_lib/note-flags";
 import { formatRegionSummary } from "./_lib/region-summary";
 
 // 수집기가 새로 넣은 데이터가 바로 보여야 하므로 정적 프리렌더를 끈다.
@@ -85,6 +90,22 @@ export default async function ItemListPage({
   // (design.md D6) 오차는 무의미하지만, 렌더 중 시각이 흔들리지 않는 편이 이해하기 쉽다.
   const now = new Date();
 
+  // 신선도·커버리지 배너(design.md D6, tasks.md 7.1~7.2/7.4) — 새 쿼리를 만들지 않는다.
+  // `getWorkerStatus`는 `/status`가 이미 쓰는 함수를 그대로 재사용하고, 분석 커버리지는
+  // `listItems({analyzed:true})`(기존 파라미터)로 얻는다. `pageSize: 1`로 행은 최소한만
+  // 받고 `total`(별도 COUNT 쿼리, 필터와 무관하게 항상 계산됨)만 쓴다. 분모(전체 건수)는
+  // 현재 화면의 필터와 무관하게 DB 전체 기준이어야 "분석 N/389건"이 실제 전체 대비로
+  // 읽힌다 — 그래서 `query`가 아니라 빈 조건으로 별도 호출한다.
+  const collectorStatus = getWorkerStatus("collector", { now: now.toISOString() });
+  const totalItemCount = repository.listItems({ pageSize: 1 }).total;
+  const analyzedItemCount = repository.listItems({ analyzed: true, pageSize: 1 }).total;
+  const collectionBanner = buildCollectionBanner({
+    collectorStatus,
+    analyzedCount: analyzedItemCount,
+    totalCount: totalItemCount,
+  });
+  const collectionWarning = shouldWarnCollection(collectionBanner.collectorState);
+
   return (
     <main className="page">
       <header className="page-header">
@@ -110,6 +131,21 @@ export default async function ItemListPage({
           </Link>
         </p>
       </header>
+
+      {/* 신선도·커버리지 배너(design.md D6, spec: "신선도와 커버리지") — 분석이 전체의
+          일부뿐인데 목록 어디에도 그 사실이 없어 상세를 열어야만 알 수 있었다. 수집이
+          차단·정지 상태면 낡은 가격을 아무 일 없다는 얼굴로 보여주지 않도록 경고 색으로
+          바뀐다(spec: "수집이 차단되었거나 오래 멈춘 상태면 목록에서 그 사실을 알 수
+          있어야 한다"). */}
+      <p className={collectionWarning ? "collection-banner collection-banner-warning" : "collection-banner"}>
+        마지막 수집: {formatDateTime(collectionBanner.lastCollectedAt)}
+        {collectionBanner.targetCourts.length > 0
+          ? ` · 대상 법원: ${collectionBanner.targetCourts.join(", ")}`
+          : ""}
+        {" · "}
+        {formatCoverage(collectionBanner)}
+        {collectionWarning ? " · 수집이 차단되었거나 오래 멈췄습니다 — 가격이 최신이 아닐 수 있습니다." : ""}
+      </p>
 
       {databaseEmpty ? null : <ItemFilterForm query={query} usageTypes={usageTypes} />}
 
@@ -138,7 +174,11 @@ export default async function ItemListPage({
                       감정가 대비 최저가 비율과 면적당 가격을 추가한다. 목록 쿼리의
                       WHERE/ORDER BY는 건드리지 않는다 — 표시만 추가한다. */}
                   <th className="num">저감률</th>
-                  <th className="num">면적당 가격</th>
+                  {/* ux-overhaul-phase1 design.md Risks: "새 열은 만들지 않는다" — 면적
+                      병기(spec: "면적 평 병기")가 새로 필요해졌지만 새 <th>를 추가하지
+                      않고, 기존 "면적당 가격" 열 안에 면적(㎡·평)과 면적당 가격을 함께
+                      쌓아 보여준다. */}
+                  <th className="num">면적</th>
                   <th>매각기일</th>
                   <th className="num">유찰횟수</th>
                   <th>진행상태</th>
@@ -153,6 +193,9 @@ export default async function ItemListPage({
                   const discountRatio = computeDiscountRatio(item);
                   const discountStage = classifyDiscountStage(discountRatio);
                   const pricePerArea = computePricePerArea(item);
+                  const noteFlags = detectNoteFlags(item);
+                  const mismatch = detectFailedBidRateMismatch(item);
+                  const dDay = computeDDay(item.auctionDate, now);
 
                   return (
                     <tr key={item.id}>
@@ -161,6 +204,14 @@ export default async function ItemListPage({
                         {isRecentlyChanged(item.lastChangedAt, now) ? (
                           <span className="badge-recent">최근변동</span>
                         ) : null}
+                        {/* 비고 플래그(design.md D4, spec: "비고 플래그") — 배지는 원문을
+                            대체하지 않는 신호일 뿐이다. 원문은 상세 페이지에서 항상 볼 수
+                            있다(item detail page). */}
+                        {noteFlags.map((flag) => (
+                          <span key={flag} className="badge-note">
+                            {NOTE_FLAG_LABELS[flag]}
+                          </span>
+                        ))}
                       </td>
                       <td>{formatText(item.usageType)}</td>
                       <td className="num">{formatWon(item.appraisalPrice)}</td>
@@ -179,9 +230,31 @@ export default async function ItemListPage({
                           </span>
                         )}
                       </td>
-                      <td className="num">{formatPricePerArea(pricePerArea)}</td>
-                      <td>{formatDate(item.auctionDate)}</td>
-                      <td className="num">{formatCount(item.failedBidCount)}</td>
+                      {/* 면적(㎡·평)과 면적당 가격을 한 칸에 쌓는다(design.md Risks: 새 열을
+                          만들지 않는다) — 역전된 면적도 formatAreaRange가 그대로 병기한다
+                          (design.md D1). */}
+                      <td className="num area-cell">
+                        <div>{formatAreaRange(item)}</div>
+                        <div className="muted">{formatPricePerArea(pricePerArea)}</div>
+                      </td>
+                      <td>
+                        {formatDate(item.auctionDate)}
+                        {dDay.status === "unknown" ? null : (
+                          <span className={`badge-dday badge-dday-${dDay.status}`}>
+                            {formatDDay(dDay)}
+                          </span>
+                        )}
+                      </td>
+                      <td className="num">
+                        {formatCount(item.failedBidCount)}
+                        {/* 유찰-저감률 불일치(design.md D3) — 어느 쪽이 맞는지 판단하지
+                            않고 모순 사실만 알린다. */}
+                        {mismatch?.mismatched ? (
+                          <span className="badge-mismatch" title={formatMismatchDescription(mismatch)}>
+                            불일치
+                          </span>
+                        ) : null}
+                      </td>
                       <td>{formatText(item.status)}</td>
                       <td>
                         {/* item.bookmarked는 listItems가 스칼라 서브쿼리로 채운다

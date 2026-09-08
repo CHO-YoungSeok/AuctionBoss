@@ -17,7 +17,11 @@
  * 공유 함수를 그대로 가져다 쓴다. 화면(`src/app/_lib/item-extensions.ts`)도 같은
  * 함수를 쓰므로 계산이 두 곳에서 갈라질 수 없다.
  */
-import { computePricePerArea, type AuctionItem } from "@/lib/domain";
+import {
+  computePricePerArea,
+  type AuctionItem,
+  type PricePerAreaBasisField,
+} from "@/lib/domain";
 
 /** 계산에 필요한 부분집합. */
 export type DerivedFiguresFields = Pick<
@@ -39,6 +43,12 @@ export interface PricePerAreaComputed {
   computed: true;
   /** 원/㎡. */
   wonPerArea: number;
+  /** 계산에 실제로 쓴 면적값(㎡, design.md D2). */
+  basisArea: number;
+  /** 계산에 실제로 쓴 필드 — "minArea"|"maxArea". */
+  basisField: PricePerAreaBasisField;
+  /** `minArea`/`maxArea`가 둘 다 있고 서로 달라 기준이 결과에 영향을 준 경우 true. */
+  basisAmbiguous: boolean;
 }
 export interface PricePerAreaUnavailable {
   computed: false;
@@ -96,11 +106,17 @@ function roundPercent(value: number): number | null {
  * 접근이 없고, 같은 입력에는 항상 같은 출력을 돌려준다.
  */
 export function computeDerivedFigures(item: DerivedFiguresFields): DerivedFigures {
-  const wonPerArea = computePricePerArea(item);
+  const priceResult = computePricePerArea(item);
   const pricePerArea: PricePerAreaDerived =
-    wonPerArea === null
+    priceResult === null
       ? { computed: false, reason: PRICE_PER_AREA_UNAVAILABLE_REASON }
-      : { computed: true, wonPerArea };
+      : {
+          computed: true,
+          wonPerArea: priceResult.pricePerArea,
+          basisArea: priceResult.basisArea,
+          basisField: priceResult.basisField,
+          basisAmbiguous: priceResult.basisAmbiguous,
+        };
 
   const roundDefs: Array<{ round: 1 | 2 | 3 | 4; price: number | null | undefined }> = [
     { round: 1, price: item.minBidPriceRound1 },

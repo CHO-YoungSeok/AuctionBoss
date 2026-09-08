@@ -112,8 +112,14 @@ function formatRoundFigureLine(round: RoundFigure): string {
 function renderDerivedFiguresBlock(item: AuctionItem): string {
   const { pricePerArea, roundTrend } = computeDerivedFigures(item);
 
+  // 기준 면적을 항상 밝힌다(design.md D2, tasks.md 1.3) — minArea/maxArea가 역전된
+  // 물건(실데이터 48%)에서 이 계산이 어느 값을 나눴는지 모델이 알아야, 숫자가 이상해
+  // 보일 때 "면적 정보 자체가 불확실하다"고 스스로 판단할 수 있다. "A"/"B"는 어느 쪽이
+  // 최소·최대인지 확정하지 않은 중립적 이름이다(item-extensions.ts formatAreaRange와
+  // 같은 규칙).
+  const basisLabel = (field: "minArea" | "maxArea") => (field === "minArea" ? "A" : "B");
   const pricePerAreaLine = pricePerArea.computed
-    ? `- 면적당 최저매각가격: ${formatWonPlain(pricePerArea.wonPerArea)}/㎡`
+    ? `- 면적당 최저매각가격: ${formatWonPlain(pricePerArea.wonPerArea)}/㎡ (면적 ${basisLabel(pricePerArea.basisField)} ${pricePerArea.basisArea}㎡ 기준${pricePerArea.basisAmbiguous ? ", 다른 면적 값도 존재함 — 기준 확정 아님" : ""})`
     : `- 면적당 최저매각가격: 계산 불가 — ${pricePerArea.reason}`;
 
   const roundTrendLines = roundTrend.computed

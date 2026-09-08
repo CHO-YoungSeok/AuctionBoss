@@ -12,11 +12,36 @@
  * `workers/**`는 `src/app/**`를 import하지 않는다(분석기가 웹 앱과 독립적이어야 한다는
  * 원칙) — 그래서 공유가 필요해진 이 함수는 어느 쪽에도 속하지 않는 `src/lib/domain`이
  * 정직한 자리다.
+ *
+ * ux-overhaul-phase1 design.md D2: 실데이터의 48%는 `minArea > maxArea`(역전)라
+ * 의미가 확정되지 않았는데(같은 파일 `formatAreaRange`의 D1 참고), 이 함수는 그 절반에서
+ * `minArea`를 우선 쓴다 — 즉 역전된 물건에서는 "더 큰" 값으로 나눠 면적당 가격이 실제보다
+ * 최대 143배 작게 나올 수 있다. 어느 면적이 맞는지 이번에 정하지 않는다(Open Questions).
+ * 대신 반환값에 `basisArea`/`basisField`를 담아 **어느 면적으로 나눴는지**를 호출자가 항상
+ * 알 수 있게 한다 — 화면과 분석 프롬프트 양쪽이 그 기준을 밝혀야 한다.
  */
 import type { AuctionItem } from "./types";
 
 /** `AuctionItem`에서 면적당 가격 계산에 쓰는 부분집합. */
 export type PricePerAreaFields = Pick<AuctionItem, "minBidPrice" | "minArea" | "maxArea">;
+
+/** 면적당 가격을 계산할 때 실제로 나눈 면적이 어느 필드였는지. */
+export type PricePerAreaBasisField = "minArea" | "maxArea";
+
+export interface PricePerAreaResult {
+  /** 원/㎡. */
+  pricePerArea: number;
+  /** 계산에 실제로 쓴 면적값(㎡). */
+  basisArea: number;
+  /** 계산에 실제로 쓴 필드. */
+  basisField: PricePerAreaBasisField;
+  /**
+   * `minArea`와 `maxArea`가 둘 다 있고 서로 다른 값일 때만 true. 이 경우에만 "어느
+   * 기준인지"가 결과에 영향을 주므로(design.md D2), 호출자가 기준 표기를 생략할지
+   * 판단하는 데 쓴다(tasks.md 1.4: "최소·최대가 같으면 기준 표기를 생략해도 된다").
+   */
+  basisAmbiguous: boolean;
+}
 
 /**
  * 최저매각가격 ÷ 면적(원/㎡)을 계산한다. 실패하는 모든 경우를 가드해서 `NaN`/`Infinity`가
@@ -29,23 +54,30 @@ export type PricePerAreaFields = Pick<AuctionItem, "minBidPrice" | "minArea" | "
  *
  * 면적 선택은 `minArea` 우선, 없으면 `maxArea` — "이 물건이 차지할 수 있는 가장 작은
  * 면적" 기준으로 나누는 편이 입찰자에게 더 보수적인(면적당 가격이 더 높게 나오는, 즉
- * 손해를 과소평가하지 않는) 수치를 준다는 판단이다.
+ * 손해를 과소평가하지 않는) 수치를 준다는 판단이다. 이 우선순위는 이번 change에서
+ * 바꾸지 않는다(design.md D2 Open Questions) — 대신 어느 쪽을 썼는지 반환값에 밝힌다.
  */
 export function computePricePerArea({
   minBidPrice,
   minArea,
   maxArea,
-}: PricePerAreaFields): number | null {
+}: PricePerAreaFields): PricePerAreaResult | null {
   if (typeof minBidPrice !== "number" || !Number.isFinite(minBidPrice)) return null;
 
-  const area =
-    typeof minArea === "number" && Number.isFinite(minArea) && minArea > 0
-      ? minArea
-      : typeof maxArea === "number" && Number.isFinite(maxArea) && maxArea > 0
-        ? maxArea
-        : null;
-  if (area === null) return null;
+  const minValid =
+    typeof minArea === "number" && Number.isFinite(minArea) && minArea > 0 ? minArea : null;
+  const maxValid =
+    typeof maxArea === "number" && Number.isFinite(maxArea) && maxArea > 0 ? maxArea : null;
 
-  const result = minBidPrice / area;
-  return Number.isFinite(result) ? result : null;
+  const basisField: PricePerAreaBasisField | null =
+    minValid !== null ? "minArea" : maxValid !== null ? "maxArea" : null;
+  if (basisField === null) return null;
+  const basisArea = basisField === "minArea" ? minValid! : maxValid!;
+
+  const pricePerArea = minBidPrice / basisArea;
+  if (!Number.isFinite(pricePerArea)) return null;
+
+  const basisAmbiguous = minValid !== null && maxValid !== null && minValid !== maxValid;
+
+  return { pricePerArea, basisArea, basisField, basisAmbiguous };
 }

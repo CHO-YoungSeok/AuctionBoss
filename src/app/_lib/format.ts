@@ -85,3 +85,27 @@ export function formatText(value: string | null | undefined): string {
   if (value === null || value === undefined || value.trim() === "") return EMPTY;
   return value;
 }
+
+const AUCTION_TIME_HHMM = /^(\d{2})(\d{2})$/;
+
+/**
+ * 매각기일 시각(`auctionTime`, 예: `"1000"`)을 사람이 읽는 `"10:00"`으로 바꾼다
+ * (ux-overhaul-phase1 spec: "매각기일 시각 표시", tasks.md 5.3).
+ *
+ * 도메인 필드(`AuctionItem.auctionTime`) 주석은 "원문 형식을 그대로 보존한다, 콜론으로
+ * 재포맷하지 않는다"고 적었는데 — 그건 **저장 계층**의 규칙이다(원문 손실 없이 보관해야
+ * 나중에 언제든 재해석할 수 있다는 원칙). 표시 계층은 다르다: 소스가 준 원문이 사람이
+ * 읽기 어려운 형식이면 화면에서는 읽을 수 있게 바꿔야 한다(spec 요구사항, MUST). 실데이터
+ * 389건 전부가 `"1000"`이라 지금까지는 화면에 그대로 노출되고 있었다.
+ *
+ * 네 자리 숫자(`HHMM`)가 아니면(형식이 예상과 다르면) 원문을 그대로 보여준다 — 짐작해서
+ * 바꾸지 않는다.
+ */
+export function formatAuctionTime(value: string | null | undefined): string {
+  if (value === null || value === undefined || value.trim() === "") return EMPTY;
+  const trimmed = value.trim();
+  const match = AUCTION_TIME_HHMM.exec(trimmed);
+  if (!match) return trimmed;
+  const [, hh, mm] = match;
+  return `${hh}:${mm}`;
+}
