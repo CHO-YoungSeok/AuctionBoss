@@ -477,6 +477,18 @@ tbody tr:hover {
   font-weight: 600;
 }
 
+/* 한 바퀴 소요 시간·로테이션 위치(task 4.2) — 법원을 추가할 때의 신선도 대가를
+   숨기지 않고 눈에 띄게 보여주는 것이 목적이라(design.md D3) 일반 요약과 다른
+   배경으로 구분한다. */
+.status-rotation {
+  background: #fff8ec;
+  border-color: #f0dfae;
+}
+
+.status-rotation-error {
+  color: #a15c00;
+}
+
 .run-list {
   list-style: none;
 }
@@ -541,4 +553,114 @@ tbody tr:hover {
 .outcome-badge.outcome-neutral {
   color: #5f6672;
   background: #eceff3;
+}
+
+/* 관심 토글 버튼(목록 행·상세 페이지 공용, add-bookmarks-and-feed task 4.1/4.2). 폼
+   자체는 레이아웃에 영향을 주지 않아야 해서(특히 목록 행 안에서) inline-block으로 둔다. */
+.bookmark-btn {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  color: #3d434d;
+  background: #ffffff;
+  border: 1px solid #cfd5dd;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.bookmark-btn:hover {
+  background: #f2f4f7;
+}
+
+/* 이미 담긴 상태는 눈에 띄게 강조한다 — 목록을 훑을 때 담긴 물건을 바로 구별해야 한다
+   (spec: "목록에서 관심 표시"). */
+.bookmark-btn-active {
+  color: #a15c00;
+  background: #fff4e5;
+  border-color: #f0cf9a;
+}
+
+.bookmark-btn-active:hover {
+  background: #ffecc7;
+}
+
+.bookmark-toggle-row {
+  margin-top: 0.5rem;
+}
+
+/* 변동 피드(`/feed`, add-bookmarks-and-feed task 4.4). */
+.feed-list {
+  list-style: none;
+  background: #ffffff;
+  border: 1px solid #dfe3e8;
+  border-radius: 6px;
+}
+
+.feed-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #eceff3;
+}
+
+.feed-row:last-child {
+  border-bottom: none;
+}
+
+/* 미확인 항목을 배경색으로도 구별한다 — 배지 하나만으로는 목록을 훑을 때 놓치기 쉽다
+   (spec: "미확인 변동 구별"). */
+.feed-row-unread {
+  background: #f4f8ff;
+}
+
+.badge-unread {
+  display: inline-block;
+  flex: 0 0 auto;
+  padding: 0.05rem 0.4rem;
+  color: #ffffff;
+  background: #1a4fd6;
+  border-radius: 3px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.feed-time {
+  flex: 0 0 9.5rem;
+  color: #5f6672;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.feed-item-link {
+  flex: 1 1 14rem;
+}
+
+.feed-field {
+  flex: 0 0 6rem;
+  color: #3d434d;
+  font-weight: 600;
+}
+
+/* "전체 읽음 처리" 버튼(design.md D3 — 명시적 동작으로만 읽음 처리된다). */
+.mark-read-form {
+  margin-bottom: 1rem;
+}
+
+.mark-read-form button[type="submit"] {
+  padding: 0.4rem 1rem;
+  color: #ffffff;
+  background: #1a4fd6;
+  border: 1px solid #1a4fd6;
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mark-read-form button[type="submit"]:hover {
+  background: #173fab;
 }

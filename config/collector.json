@@ -5,7 +5,9 @@
         "name": "서울중앙지방법원",
         "courtCode": "B000210"
       }
-    ]
+    ],
+    "maxCourtsPerRun": 1,
+    "maxRequestsPerRun": 13
   },
   "intervalMs": 600000,
   "analysis": {

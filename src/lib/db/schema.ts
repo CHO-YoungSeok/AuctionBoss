@@ -128,4 +128,37 @@ CREATE TABLE IF NOT EXISTS worker_runs (
 
 -- 워커별 최신순 조회(상태 화면·목록 API·보관 정리)에 쓰인다(design.md D1/D6).
 CREATE INDEX IF NOT EXISTS idx_worker_runs_worker_started_at ON worker_runs (worker, started_at DESC);
+
+-- 관심 물건(add-bookmarks-and-feed, design.md D1). 물건당 최대 1행이므로 item_id가 곧
+-- 기본키다(별도 id 컬럼 불필요). ON DELETE CASCADE — 물건이 삭제되면(현재는 그런 경로가
+-- 없지만) 관심 등록도 함께 사라진다. ⚠️ 단일 사용자 전제(design.md D4): 사용자 구분이 없어
+-- 이 테이블은 전역이다 — 나중에 다중 사용자가 필요해지면 user_id를 추가해야 한다.
+CREATE TABLE IF NOT EXISTS bookmarks (
+  item_id    INTEGER PRIMARY KEY REFERENCES items (id) ON DELETE CASCADE,
+  created_at TEXT    NOT NULL
+);
+
+-- 변동 피드의 "마지막으로 읽은 시각" (add-bookmarks-and-feed, design.md D1/D3). 행이 정확히
+-- 하나뿐인 테이블이다 — 물건별 읽음이 아니라 전역 시각 하나로 미확인 여부를 도출한다
+-- (changed_at > last_read_at). CHECK (id = 1)과 고정 id upsert(bookmarks.ts)로 단일 행을
+-- 강제한다. ⚠️ 단일 사용자 전제(design.md D4) — 다중 사용자가 필요해지면 사용자별 행이
+-- 되도록 바꿔야 한다.
+CREATE TABLE IF NOT EXISTS feed_reads (
+  id           INTEGER PRIMARY KEY CHECK (id = 1),
+  last_read_at TEXT
+);
+
+-- 소규모 운영 상태 키-값 저장 (scale-collection-scheduling design.md D2). 지금은 법원
+-- 로테이션의 "다음 시작 법원 코드" 하나만 담지만, 앞으로 비슷한 소규모 운영 상태(예:
+-- 법원별 마지막 성공 시각)가 늘어날 수 있어 전용 테이블 대신 키-값으로 둔다. 키 목록·
+-- 의미는 src/lib/db/collector-state.ts의 COLLECTOR_STATE_KEYS에 상수로 문서화한다.
+--
+-- worker_runs에서 도출하지 않는 이유: worker_runs는 관측 로그라 보관 상한(기본 1000행)에
+-- 걸려 오래된 기록이 지워진다 — 로테이션처럼 계속 필요한 운영 상태를 로그에서
+-- 재구성하면, 로그가 지워지는 순간 상태도 함께 사라진다.
+CREATE TABLE IF NOT EXISTS collector_state (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `;

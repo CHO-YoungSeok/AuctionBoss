@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { createCollectorStateRepository } from "../collector-state";
 import { DEFAULT_DB_PATH, openDatabase, resolveDbPath } from "../client";
 import { createRepository } from "../repository";
 
@@ -665,5 +666,242 @@ describe("resolveDbPath", () => {
   it("명시한 경로가 환경 변수보다 우선한다", () => {
     process.env.AUCTIONBOSS_DB = "env.db";
     expect(resolveDbPath("explicit.db")).toBe(path.resolve(process.cwd(), "explicit.db"));
+  });
+});
+
+describe("openDatabase — bookmarks/feed_reads 마이그레이션 (add-bookmarks-and-feed task 1.2)", () => {
+  /**
+   * 마이그레이션 경로 확인(6): `bookmarks`/`feed_reads` 테이블이 추가되기 **직전** 스키마
+   * (이 change 이전의 최신 스키마 — items 확장 컬럼까지는 있지만 관심 물건 관련 테이블은
+   * 없다)로 물건·이력·분석을 채운 DB 파일을 새 코드로 열었을 때, 오류 없이 새 테이블만
+   * 추가되고 기존 데이터가 그대로 보존되는지 확인한다. `bookmarks`/`feed_reads`는 완전히
+   * 새 테이블이라(기존 테이블 컬럼 추가가 아니다) `CREATE TABLE IF NOT EXISTS`만으로 충분하고
+   * `client.ts`에 별도 `migrate*` 함수가 필요 없다(item_changes/worker_runs 테이블이 처음
+   * 추가됐을 때와 같은 경로).
+   */
+  it("bookmarks/feed_reads 추가 전 스키마로 만든 기존 DB 파일에 새 테이블이 그대로 적용되고 기존 데이터가 보존된다", () => {
+    const PRE_BOOKMARKS_SCHEMA_SQL = `
+      CREATE TABLE IF NOT EXISTS items (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        court             TEXT    NOT NULL,
+        case_no           TEXT    NOT NULL,
+        item_no           TEXT    NOT NULL,
+        address           TEXT,
+        usage_type        TEXT,
+        appraisal_price   INTEGER,
+        min_bid_price     INTEGER,
+        auction_date      TEXT,
+        failed_bid_count  INTEGER,
+        status            TEXT,
+        first_seen_at     TEXT    NOT NULL,
+        last_seen_at      TEXT    NOT NULL,
+        UNIQUE (court, case_no, item_no)
+      );
+      CREATE INDEX IF NOT EXISTS idx_items_auction_date ON items (auction_date);
+      CREATE INDEX IF NOT EXISTS idx_items_usage_type ON items (usage_type);
+      CREATE INDEX IF NOT EXISTS idx_items_min_bid_price ON items (min_bid_price);
+      CREATE TABLE IF NOT EXISTS analyses (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id        INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+        body           TEXT    NOT NULL,
+        model          TEXT,
+        prompt_version TEXT    NOT NULL,
+        analyzed_at    TEXT    NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_analyses_item_id ON analyses (item_id, analyzed_at DESC);
+      CREATE TABLE IF NOT EXISTS item_changes (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id    INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+        field      TEXT    NOT NULL,
+        old_value  TEXT,
+        new_value  TEXT,
+        changed_at TEXT    NOT NULL,
+        kind       TEXT    NOT NULL DEFAULT 'change'
+      );
+      CREATE INDEX IF NOT EXISTS idx_item_changes_item_id ON item_changes (item_id, changed_at DESC);
+      CREATE TABLE IF NOT EXISTS worker_runs (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        worker        TEXT    NOT NULL,
+        started_at    TEXT    NOT NULL,
+        finished_at   TEXT,
+        outcome       TEXT    NOT NULL,
+        error_kind    TEXT,
+        error_message TEXT,
+        detail        TEXT,
+        items_changed INTEGER,
+        created_at    TEXT    NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_worker_runs_worker_started_at ON worker_runs (worker, started_at DESC);
+    `;
+
+    const dbPath = path.join(workDir, "pre-bookmarks.db");
+    const legacy = new Database(dbPath);
+    legacy.exec(PRE_BOOKMARKS_SCHEMA_SQL);
+    legacy
+      .prepare(
+        `INSERT INTO items (id, court, case_no, item_no, usage_type, min_bid_price,
+                            first_seen_at, last_seen_at)
+         VALUES (1, '서울중앙지방법원', '2025타경1', '1', '아파트', 400000000,
+                 '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+      )
+      .run();
+    legacy
+      .prepare(
+        `INSERT INTO item_changes (item_id, field, old_value, new_value, changed_at, kind)
+         VALUES (1, 'minBidPrice', NULL, '400000000', '2026-01-01T00:00:00.000Z', 'baseline')`,
+      )
+      .run();
+    legacy
+      .prepare(
+        `INSERT INTO analyses (item_id, body, model, prompt_version, analyzed_at)
+         VALUES (1, '분석 본문', 'claude', 'v1', '2026-01-02T00:00:00.000Z')`,
+      )
+      .run();
+    const legacyTables = legacy
+      .prepare<[], { name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all()
+      .map((row) => row.name);
+    legacy.close();
+
+    // 사전 조건: 옛 DB에는 bookmarks/feed_reads가 없다.
+    expect(legacyTables).not.toContain("bookmarks");
+    expect(legacyTables).not.toContain("feed_reads");
+
+    // 새 코드로 다시 열기 = 마이그레이션. 던지지 않아야 한다.
+    const upgraded = openDatabase(dbPath);
+    try {
+      const names = upgraded
+        .prepare<[], { name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .all()
+        .map((row) => row.name);
+      expect(names).toContain("bookmarks");
+      expect(names).toContain("feed_reads");
+
+      // 기존 물건·이력·분석 데이터가 전부 그대로 살아 있다.
+      const repo = createRepository(upgraded);
+      const result = repo.listItems({ pageSize: 10 });
+      expect(result.total).toBe(1);
+      expect(result.items[0]?.caseNo).toBe("2025타경1");
+      expect(repo.listItemChanges(result.items[0]!.id)).toHaveLength(1);
+      expect(repo.countAnalyses(result.items[0]!.id)).toBe(1);
+
+      // 새 테이블에 정상적으로 쓰고 읽을 수 있다.
+      upgraded
+        .prepare(`INSERT INTO bookmarks (item_id, created_at) VALUES (1, '2026-01-03T00:00:00.000Z')`)
+        .run();
+      expect(upgraded.prepare("SELECT * FROM bookmarks").all()).toHaveLength(1);
+    } finally {
+      upgraded.close();
+    }
+  });
+});
+
+describe("openDatabase — collector_state 마이그레이션 (scale-collection-scheduling task 1.2)", () => {
+  /**
+   * 마이그레이션 경로 확인(7): `collector_state` 테이블이 추가되기 **직전** 스키마
+   * (이 change 이전의 최신 스키마 — bookmarks/feed_reads까지는 있지만 collector_state는
+   * 없다)로 물건 데이터를 채운 DB 파일을 새 코드로 열었을 때, 오류 없이 새 테이블만
+   * 추가되고 기존 데이터가 그대로 보존되는지 확인한다. 완전히 새 테이블이라(기존 테이블
+   * 컬럼 추가가 아니다) `CREATE TABLE IF NOT EXISTS`만으로 충분하고 `client.ts`에 별도
+   * `migrate*` 함수가 필요 없다.
+   */
+  it("collector_state 추가 전 스키마로 만든 기존 DB 파일에 새 테이블이 그대로 적용되고 기존 데이터가 보존된다", () => {
+    const PRE_COLLECTOR_STATE_SCHEMA_SQL = `
+      CREATE TABLE IF NOT EXISTS items (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        court             TEXT    NOT NULL,
+        case_no           TEXT    NOT NULL,
+        item_no           TEXT    NOT NULL,
+        address           TEXT,
+        usage_type        TEXT,
+        appraisal_price   INTEGER,
+        min_bid_price     INTEGER,
+        auction_date      TEXT,
+        failed_bid_count  INTEGER,
+        status            TEXT,
+        first_seen_at     TEXT    NOT NULL,
+        last_seen_at      TEXT    NOT NULL,
+        UNIQUE (court, case_no, item_no)
+      );
+      CREATE INDEX IF NOT EXISTS idx_items_auction_date ON items (auction_date);
+      CREATE INDEX IF NOT EXISTS idx_items_usage_type ON items (usage_type);
+      CREATE INDEX IF NOT EXISTS idx_items_min_bid_price ON items (min_bid_price);
+      CREATE TABLE IF NOT EXISTS analyses (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id        INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+        body           TEXT    NOT NULL,
+        model          TEXT,
+        prompt_version TEXT    NOT NULL,
+        analyzed_at    TEXT    NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_analyses_item_id ON analyses (item_id, analyzed_at DESC);
+      CREATE TABLE IF NOT EXISTS item_changes (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id    INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+        field      TEXT    NOT NULL,
+        old_value  TEXT,
+        new_value  TEXT,
+        changed_at TEXT    NOT NULL,
+        kind       TEXT    NOT NULL DEFAULT 'change'
+      );
+      CREATE INDEX IF NOT EXISTS idx_item_changes_item_id ON item_changes (item_id, changed_at DESC);
+      CREATE TABLE IF NOT EXISTS worker_runs (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        worker        TEXT    NOT NULL,
+        started_at    TEXT    NOT NULL,
+        finished_at   TEXT,
+        outcome       TEXT    NOT NULL,
+        error_kind    TEXT,
+        error_message TEXT,
+        detail        TEXT,
+        items_changed INTEGER,
+        created_at    TEXT    NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_worker_runs_worker_started_at ON worker_runs (worker, started_at DESC);
+    `;
+
+    const dbPath = path.join(workDir, "pre-collector-state.db");
+    const legacy = new Database(dbPath);
+    legacy.exec(PRE_COLLECTOR_STATE_SCHEMA_SQL);
+    legacy
+      .prepare(
+        `INSERT INTO items (id, court, case_no, item_no, usage_type, min_bid_price,
+                            first_seen_at, last_seen_at)
+         VALUES (1, '서울중앙지방법원', '2025타경1', '1', '아파트', 400000000,
+                 '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+      )
+      .run();
+    const legacyTables = legacy
+      .prepare<[], { name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all()
+      .map((row) => row.name);
+    legacy.close();
+
+    // 사전 조건: 옛 DB에는 collector_state가 없다.
+    expect(legacyTables).not.toContain("collector_state");
+
+    // 새 코드로 다시 열기 = 마이그레이션. 던지지 않아야 한다.
+    const upgraded = openDatabase(dbPath);
+    try {
+      const names = upgraded
+        .prepare<[], { name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .all()
+        .map((row) => row.name);
+      expect(names).toContain("collector_state");
+
+      // 기존 물건 데이터가 그대로 남아 있다.
+      const repo = createRepository(upgraded);
+      const result = repo.listItems({ pageSize: 10 });
+      expect(result.total).toBe(1);
+      expect(result.items[0]?.caseNo).toBe("2025타경1");
+
+      // 새 테이블에 정상적으로 쓰고 읽을 수 있다.
+      const stateRepo = createCollectorStateRepository(upgraded);
+      expect(stateRepo.getCollectorState("some-key")).toBeNull();
+      stateRepo.setCollectorState("some-key", "B000210");
+      expect(stateRepo.getCollectorState("some-key")).toBe("B000210");
+    } finally {
+      upgraded.close();
+    }
   });
 });

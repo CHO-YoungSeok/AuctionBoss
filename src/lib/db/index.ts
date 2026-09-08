@@ -2,6 +2,31 @@ export { DEFAULT_DB_PATH, closeDb, getDb, openDatabase, resolveDbPath, type Db }
 export { SCHEMA_SQL } from "./schema";
 export { ItemNotFoundError, WorkerRunNotFoundError } from "./errors";
 export {
+  addBookmark,
+  createBookmarksRepository,
+  getBookmarksRepository,
+  getUnreadCount,
+  isBookmarked,
+  listBookmarkedItems,
+  listFeed,
+  markFeedRead,
+  removeBookmark,
+  type BookmarksRepository,
+  type FeedQuery,
+  type ListBookmarkedItemsQuery,
+  type ListBookmarkedItemsResult,
+  type ListFeedResult,
+} from "./bookmarks";
+export {
+  COLLECTOR_STATE_KEYS,
+  createCollectorStateRepository,
+  getCollectorState,
+  getCollectorStateRepository,
+  setCollectorState,
+  type CollectorStateKey,
+  type CollectorStateRepository,
+} from "./collector-state";
+export {
   createWorkerRunsRepository,
   finishRun,
   getWorkerRunsRepository,

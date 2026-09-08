@@ -32,7 +32,11 @@ afterEach(() => {
  */
 function makeConfig(overrides: Partial<CollectorConfig> = {}): CollectorConfig {
   return {
-    scope: { courts: [{ name: "서울중앙지방법원", courtCode: "B000210" }] },
+    scope: {
+      courts: [{ name: "서울중앙지방법원", courtCode: "B000210" }],
+      maxCourtsPerRun: 1,
+      maxRequestsPerRun: 13,
+    },
     intervalMs: 10 * 60 * 1000, // collector 10분
     analysis: {
       maxItemsPerRun: 5,

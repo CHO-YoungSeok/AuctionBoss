@@ -19,8 +19,14 @@ const courtRefSchema = z.object({
   courtCode: z.string(),
 });
 
+// scale-collection-scheduling design.md D1/D5: 다른 설정 필드와 동일하게, 없거나 잘못된
+// 값이면 기본값으로 조용히 넘어가지 않고 즉시 throw한다. "기본 1"(maxCourtsPerRun)과
+// "기본 13"(maxRequestsPerRun, 서울중앙 1곳 기준 실측 요청 수)은 배포되는
+// config/collector.json 파일 자체의 값이지, 로더가 채우는 기본값이 아니다.
 const collectScopeSchema = z.object({
   courts: z.array(courtRefSchema).min(1, "수집 대상 법원이 최소 1곳은 있어야 합니다"),
+  maxCourtsPerRun: z.number().int().positive(),
+  maxRequestsPerRun: z.number().int().positive(),
 });
 
 const analysisConfigSchema = z.object({

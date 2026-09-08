@@ -11,7 +11,7 @@
  */
 import Link from "next/link";
 
-import { getRepository } from "@/lib/db";
+import { getRepository, getUnreadCount } from "@/lib/db";
 import {
   DEFAULT_SORT_DIRECTION,
   DEFAULT_SORT_KEY,
@@ -20,6 +20,7 @@ import {
   parseItemQueryLenient,
 } from "@/lib/domain";
 
+import { BookmarkToggleForm } from "./_components/bookmark-toggle-form";
 import { ItemFilterForm } from "./_components/item-filter-form";
 import { isRecentlyChanged } from "./_lib/change-history";
 import {
@@ -53,6 +54,14 @@ export default async function ItemListPage({
   const { items, total, page, pageSize } = repository.listItems(query);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  // 관심 토글 폼(각 행)이 제출 후 돌아갈 경로 — 지금 보고 있는 이 목록 URL 그대로다
+  // (design.md D5, spec: "등록 후 화면 복귀"). `itemListHref`가 정규화된 `query` 하나에서
+  // 만들어 주므로 필터·정렬·페이지가 빠지지 않는다.
+  const currentListHref = itemListHref(query);
+  // 피드로 가는 링크에 미확인 개수를 노출한다(task 4.5) — 접근 경로가 없으면 아무도
+  // 보지 않는다는 design.md의 지적과 같은 이유.
+  const unreadCount = getUnreadCount();
+
   const filtersActive = hasActiveFilters(query);
   // "DB 자체가 비었다"와 "필터에 걸리는 물건이 없다"는 사용자에게 전혀 다른 상황이라
   // 안내 문구도, 다음에 할 행동(수집을 기다린다 / 조건을 고친다)도 달라야 한다.
@@ -81,6 +90,16 @@ export default async function ItemListPage({
         <p className="muted">
           <Link href="/status">워커 상태 보기 →</Link>
         </p>
+        {/* 관심 물건·변동 피드로 가는 경로(add-bookmarks-and-feed task 4.5). 미확인
+            개수를 여기서 바로 보여준다 — 피드를 열어야만 몇 건인지 아는 것보다, 목록에서
+            먼저 보이는 편이 실제로 쓰인다. */}
+        <p className="muted">
+          <Link href="/bookmarks">관심 물건 보기 →</Link>
+          {" · "}
+          <Link href="/feed">
+            변동 피드 보기{unreadCount > 0 ? ` (미확인 ${unreadCount.toLocaleString("ko-KR")}건)` : ""} →
+          </Link>
+        </p>
       </header>
 
       {databaseEmpty ? null : <ItemFilterForm query={query} usageTypes={usageTypes} />}
@@ -107,6 +126,7 @@ export default async function ItemListPage({
                   <th>매각기일</th>
                   <th className="num">유찰횟수</th>
                   <th>진행상태</th>
+                  <th>관심</th>
                 </tr>
               </thead>
               <tbody>
@@ -124,6 +144,15 @@ export default async function ItemListPage({
                     <td>{formatDate(item.auctionDate)}</td>
                     <td className="num">{formatCount(item.failedBidCount)}</td>
                     <td>{formatText(item.status)}</td>
+                    <td>
+                      {/* item.bookmarked는 listItems가 스칼라 서브쿼리로 채운다
+                          (repository.ts design.md D6) — 필터·정렬·total과 무관하다. */}
+                      <BookmarkToggleForm
+                        itemId={item.id}
+                        bookmarked={item.bookmarked ?? false}
+                        returnTo={currentListHref}
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>

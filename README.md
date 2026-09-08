@@ -140,7 +140,9 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
   "scope": {
     "courts": [
       { "name": "서울중앙지방법원", "courtCode": "B000210" }
-    ]
+    ],
+    "maxCourtsPerRun": 1,
+    "maxRequestsPerRun": 13
   },
   "intervalMs": 600000,
   "analysis": {
@@ -158,9 +160,11 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 
 | 필드 | 기본값 | 의미와 바꿨을 때의 효과 |
 | --- | --- | --- |
-| `scope.courts[]` | 서울중앙지방법원 1곳 | 수집 대상 법원 목록. 최소 1곳 필요(빈 배열이면 시작 시 `CollectorConfigError`). 법원을 늘리면 **법원 수만큼 요청이 배로 늘어난다** — 로봇탐지 위험이 그만큼 커진다(§8). |
+| `scope.courts[]` | 서울중앙지방법원 1곳 | 수집 대상 법원 목록. 최소 1곳 필요(빈 배열이면 시작 시 `CollectorConfigError`). **법원 수 자체는 요청량과 직결되지 않는다** — 회차당 실제로 도는 법원 수는 아래 `maxCourtsPerRun`이 정한다(로테이션, §4.1a). 법원이 늘면 대신 한 바퀴(전체 법원을 한 번씩 도는 데 걸리는 시간)가 길어진다. |
 | `scope.courts[].name` | `"서울중앙지방법원"` | 법원 이름. DB `items.court`에 그대로 저장되는 값이다. |
 | `scope.courts[].courtCode` | `"B000210"` | 사이트의 `cortOfcCd`. 빈 문자열이면 어댑터가 `name`으로 `src/lib/sources/courtauction/courts.ts`의 60개 코드표에서 찾는다. 다른 법원 코드는 그 파일 참조. |
+| `scope.maxCourtsPerRun` | `1` | 회차당 처리할 법원 수 상한(§4.1a). 법원이 이 값보다 많으면 회차마다 일부만 돌고 다음 회차가 이어서 처리한다(원형 로테이션). 법원 1곳이면 이 값과 무관하게 매 회차 그 법원만 돈다(이 설정 도입 전과 동일, 회귀 보장). |
+| `scope.maxRequestsPerRun` | `13` | 회차당 요청 수 **안전장치**(§4.1a, §8). `maxCourtsPerRun`을 대신하는 값이 아니라 보조 장치다 — 이미 시작한 법원의 수집은 절대 끊지 않되, 이 값을 넘으면 그 회차에서 **다음** 법원을 새로 시작하지 않는다(법원을 중간에 끊으면 "물건이 줄었다"로 오해될 수 있어서다). 기본값 13은 서울중앙지방법원 1곳·매각기일 60일 범위 기준 실측 요청 수(§7.3, §8)에 맞춘 것이지, 여러 법원에서 안전하다고 검증된 값이 아니다. |
 | `intervalMs` | `600000` (10분) | collector 수집 주기. **늘리는 것이 안전한 방향이다** — §8 참고. 이전 회차가 아직 안 끝났으면 이번 tick은 건너뛴다(중첩 실행 없음). |
 | `analysis.maxItemsPerRun` | `5` | analyzer 한 회차에 분석할 최대 **신규** 물건 수(아직 분석 결과가 하나도 없는 물건). Claude 호출 비용의 상한이다. 올리면 회차당 비용과 소요 시간이 비례해 늘어난다(호출은 순차 실행). |
 | `analysis.maxReanalysisPerRun` | `2` | analyzer 한 회차에 재분석할 최대 물건 수(§6 참고). `maxItemsPerRun`과는 **독립된 별도 한도**다 — 회차당 총 Claude 호출 수 상한은 두 값의 **합**(`maxItemsPerRun + maxReanalysisPerRun`, 기본 5+2=7)이지, 하나의 한도를 나눠 쓰는 게 아니다. |
@@ -172,6 +176,46 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 설정이 없거나 JSON이 깨졌거나 스키마에 안 맞으면 **기본값으로 조용히 넘어가지 않고 즉시 종료한다**
 (수집 범위가 의도와 다르게 도는 것이 더 나쁘다는 판단). 로딩은 프로세스 수명 동안 캐시되므로
 설정을 고쳤으면 워커를 재시작해야 한다.
+
+### 4.1a 법원 추가하기 · 로테이션 · 신선도 트레이드오프
+
+(`openspec/changes/scale-collection-scheduling/design.md`)
+
+**법원을 추가하는 법:**
+
+1. `config/collector.json`의 `scope.courts` 배열에 `{ "name": "...", "courtCode": "..." }`
+   항목을 추가한다. `courtCode`(사이트의 `cortOfcCd`)는
+   `src/lib/sources/courtauction/courts.ts`의 60개 코드표에서 찾는다 — 빈 문자열로 둬도
+   되지만(어댑터가 `name`으로 그 표를 찾아준다), 코드표에 없는 이름이면 수집이 그 법원에서
+   실패한다.
+2. `scope.maxCourtsPerRun`은 보통 그대로(기본 1) 둔다 — 법원이 늘어도 회차당 상한은 자동으로
+   나머지 법원을 다음 회차로 넘긴다. 회차당 더 많은 법원을 한 번에 처리하고 싶을 때만(그만큼
+   회차당 요청도 늘어난다) 이 값을 올린다.
+3. 설정은 프로세스 수명 동안 캐시되므로 collector 워커를 재시작해야 반영된다(§3, §4.1).
+
+**로테이션이 도는 방식(design.md D2/D3):** 법원 목록을 원형으로 보고, 저장된 위치(법원의
+`courtCode` — 목록 순번이 아니다, `collector_state` 테이블)부터 `maxCourtsPerRun`개를 그 회차가
+처리한 뒤 다음 시작 위치를 저장한다. 저장된 코드가 목록에 없으면(법원을 지웠거나 재정렬한
+직후) 처음부터 다시 돈다 — 엉뚱한 법원을 계속 건너뛰는 대신 스스로 복구된다. 법원이 1곳뿐이면
+이 값과 무관하게 매 회차 그 법원만 도므로 **이 기능 도입 전과 완전히 동일하게 동작한다.**
+
+**⚠️ 트레이드오프 — 법원을 늘리면 개별 법원의 신선도가 나빠진다.** 회차당 예산은 요청 수가
+아니라 **법원 수**로 잡혀 있다(`maxCourtsPerRun`) — 한 법원의 페이지 수는 요청을 보내보기
+전에는 모르므로, 요청 수로 예산을 잘랐다가는 법원이 페이지 중간에서 잘려 "물건이 줄었다"로
+오인될 수 있기 때문이다. 그 결과 **법원 한 곳이 다시 수집되기까지 걸리는 시간(한 바퀴)**이
+`ceil(법원 수 / maxCourtsPerRun) × intervalMs`로 늘어난다. 예를 들어 기본값(`intervalMs`
+10분, `maxCourtsPerRun` 1)에서 법원이 1곳이면 한 바퀴가 10분이지만, 법원을 10곳으로 늘리면
+한 바퀴가 100분(1시간 40분)으로 늘어난다 — 즉 어떤 법원의 특정 물건이 수집 시점 기준 최대
+100분 묵은 정보일 수 있다는 뜻이다. 이 값(한 바퀴 소요 시간)과 현재 로테이션이 어느 법원을
+가리키고 있는지는 `/status` 화면에 항상 표시된다(§7.1) — **법원을 늘리는 대가를 숨기지 않고
+바로 눈에 보이게 하는 것이 이 기능의 설계 목적이다.**
+
+**⚠️ 여러 법원에서 안전한 요청 예산은 아직 실측되지 않았다.** `maxRequestsPerRun`(기본 13)의
+기본값은 서울중앙지방법원 1곳 기준 실측(§7.3, §8)에서 나온 수치이지, 법원을 여러 곳 돌렸을 때도
+안전하다고 검증된 값이 아니다 — §8의 "요청량이 임계에 가깝다"는 결론이 이 change 이후에도
+그대로 유지된다. `pagesRequested`(§7.3)가 회차마다 실측값으로 남으므로, 법원을 늘린 뒤에는
+`GET /api/worker-runs`로 **며칠치 회차 기록을 관측**해 실제 요청 수·차단 여부를 보고 예산을
+조정해야 한다 — 추측이 아니라 그 기록이 쌓여야 정할 수 있다.
 
 ### 4.2 환경 변수
 
@@ -215,6 +259,11 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 임의로 바꾸면 안 된다 — 나머지(`/api/items/[id]`, `.../changes`, `.../usage-types`,
 `GET /api/worker-runs`, `.../summary`)는 웹 UI(목록/상세, `/status`) 전용이라 analyzer와
 무관하다.
+
+add-bookmarks-and-feed change가 관심 물건·변동 피드용 엔드포인트 여섯 개를 더 추가했다
+(`/api/bookmarks`, `/api/bookmarks/[itemId]`, `/api/bookmarks/toggle`, `/api/feed`,
+`/api/feed/read`, `/api/feed/mark-read` — 이 절 뒤쪽에 별도로 설명한다). analyzer/collector는
+이 엔드포인트들을 쓰지 않는다 — 전부 웹 UI(`/`, `/items/[id]`, `/bookmarks`, `/feed`) 전용이다.
 
 ### `GET /api/items` — 물건 목록
 
@@ -561,6 +610,92 @@ collector는 이 API를 쓰지 않고 저장소 함수(`startRun`)를 직접 호
 }
 ```
 
+### 관심 물건·변동 피드 API (add-bookmarks-and-feed)
+
+사용법·화면 설명은 §6.3을 먼저 읽을 것. 여기는 API 계약만 정리한다. 전부 인증이 없다 —
+**§7.4의 "쓰기 API에 인증이 없다" 목록에 아래 쓰기 엔드포인트가 전부 포함돼 있다.**
+
+#### `GET /api/bookmarks` — 관심 물건 목록
+
+| 쿼리 파라미터 | 타입 | 기본값 | 설명 |
+| --- | --- | --- | --- |
+| `page` | 정수 ≥ 1 | `1` | 페이지 번호 |
+| `pageSize` | 정수 1~200 | `20` | 페이지 크기. 200 초과는 400 |
+
+```jsonc
+// 200 OK — 담긴 물건이 없으면 items: []  (오류 아님)
+{ "items": [ /* GET /api/items와 같은 물건 객체(bookmarked: true) */ ], "total": 1, "page": 1, "pageSize": 20 }
+```
+
+#### `POST /api/bookmarks` — 관심 등록
+
+```jsonc
+// 요청 본문
+{ "itemId": 1 }  // 정수 ≥ 1, 필수
+```
+
+- 성공: **201** + `{ "item": { ... } }`(등록된 물건, `bookmarked: true`)
+- 이미 담긴 물건을 다시 등록해도 **오류가 아니다**(중복 행이 생기지 않는다, 성공으로 처리)
+- 존재하지 않는 `itemId`: **404**, 아무것도 저장하지 않는다
+- 본문 형식 오류: **400**
+
+#### `DELETE /api/bookmarks/[itemId]` — 관심 해제
+
+- 성공: **200** + `{ "itemId": 1, "bookmarked": false }`
+- 담기지 않은(하지만 존재하는) 물건을 해제해도 **오류가 아니다**(idempotent)
+- `itemId`가 숫자가 아니거나 존재하지 않는 물건: **404**
+
+#### `GET /api/feed` — 변동 피드
+
+관심 물건에 생긴 **실제 변경**(`item_changes.kind = 'change'`, 기준점 제외)만 최신순으로
+돌려준다 — §6.1의 `kind` 구분을 그대로 물려받는다.
+
+| 쿼리 파라미터 | 타입 | 기본값 | 설명 |
+| --- | --- | --- | --- |
+| `page` | 정수 ≥ 1 | `1` | 페이지 번호 |
+| `pageSize` | 정수 1~200 | `20` | 페이지 크기. 200 초과는 400 |
+| `sinceBookmarkedAt` | `true` \| `false` | `false` | `true`면 각 물건을 관심 등록한 시각 이후의 변동만 포함한다. 기본(`false`)은 등록 이전 변동도 포함한다 — 방금 담은 물건의 최근 하락을 못 보면 담은 의미가 없다는 것이 의도적인 기본값이다. |
+
+```jsonc
+// 200 OK
+{
+  "entries": [
+    {
+      "id": 9, "itemId": 1, "itemAddress": "서울특별시 관악구 신림동 1-1",
+      "field": "minBidPrice", "oldValue": "400000000", "newValue": "320000000",
+      "changedAt": "2026-01-02T00:00:00.000Z",
+      "bookmarkedAt": "2026-01-01T00:00:00.000Z"  // 이 물건을 관심 등록한 시각
+    }
+  ],
+  "total": 1, "page": 1, "pageSize": 20,
+  "unreadCount": 1   // 저장된 값이 아니라 매 호출마다 도출된다(§6.3) — 이 호출 자체는 읽음 처리를 하지 않는다
+}
+```
+
+#### `POST /api/feed/read` — 읽음 처리 (JSON API)
+
+```jsonc
+// 200 OK
+{ "lastReadAt": "2026-09-08T13:15:51.000Z", "unreadCount": 0 }
+```
+
+본문이 없어도 된다(현재 시각으로 처리). **`GET /api/feed`를 아무리 호출해도 이 엔드포인트를
+직접 호출하지 않는 한 읽음 처리는 절대 일어나지 않는다**(§6.3, design.md D3).
+
+#### `POST /api/bookmarks/toggle`, `POST /api/feed/mark-read` — 화면 전용 폼 엔드포인트
+
+`/`, `/items/[id]`, `/bookmarks`의 관심 토글 버튼과 `/feed`의 "전체 읽음 처리" 버튼이 쓰는
+`<form method="post">` 전용 엔드포인트다. 이 프로젝트는 클라이언트 JS를 쓰지 않으므로(필터
+폼도 `method="get"`이다), 위 JSON API와 별도로 두었다 — HTML 폼은 JSON 응답이 아니라
+리다이렉트가 필요하기 때문이다. `form-urlencoded` 본문을 받고 처리 후 `returnTo`(같은
+오리진의 상대 경로만 허용, `src/app/_lib/safe-redirect.ts`)로 **303** 리다이렉트한다.
+직접 호출할 일은 없지만(화면 전용), 존재를 밝혀 둔다 — 이 두 엔드포인트도 인증이 없다.
+
+| 엔드포인트 | 본문 | 동작 |
+| --- | --- | --- |
+| `POST /api/bookmarks/toggle` | `itemId`, `bookmarked`(제출 시점의 현재 상태), `returnTo` | `bookmarked=true`면 해제, 아니면 등록 후 `returnTo`로 리다이렉트 |
+| `POST /api/feed/mark-read` | `returnTo` | 피드 전체를 읽음 처리하고 `returnTo`로 리다이렉트 |
+
 ## 6. 변경 이력과 재분석
 
 ### 6.1 변경 이력
@@ -666,6 +801,50 @@ analyzer는 처음에는 "분석 결과가 하나도 없는 물건"만 분석했
 지출 결정으로 취급해야 한다. 급하게 소진하고 싶다면 `AUCTIONBOSS_ANALYZE_REANALYZE_MAX`를
 일시적으로 올려서 회차당 처리량을 늘릴 수 있다(그만큼 회차당 비용도 늘어난다).
 
+### 6.3 관심 물건과 변동 피드 (add-bookmarks-and-feed)
+
+10분마다 수집해 §6.1의 변경 이력을 남기는 이유는 결국 "내가 보는 물건에 무슨 일이
+생겼는지" 알기 위함이다. 이 기능이 그 마지막 연결이다 — 물건을 관심 목록에 담아두면,
+그 물건들에 생긴 **실제 변경만** 모아서 최신순으로 볼 수 있다.
+
+**사용법:**
+
+- 물건 목록(`/`)의 각 행과 물건 상세(`/items/[id]`)에 관심 토글 버튼(☆ 관심 등록 / ★ 관심
+  해제)이 있다. 클라이언트 JS 없는 평범한 `<form method="post">`라, 목록에서 누르면 지금
+  보던 필터·정렬·페이지가 그대로 유지된 채 같은 화면으로 돌아온다(§5 "관심 물건·변동 피드
+  API"의 `POST /api/bookmarks/toggle` 참고) — 물건 하나를 담았다고 필터가 초기화되면
+  목록에서 이 기능을 쓸 수 없기 때문이다.
+- `/bookmarks` — 담아둔 물건만 모아 보는 목록. 아직 하나도 안 담았으면 오류 대신 안내
+  문구가 뜬다.
+- `/feed` — 관심 물건에 생긴 변동을 최신순으로 보여준다. 각 항목에 물건(소재지로 표시,
+  클릭하면 상세로), 어떤 필드가, 이전 값에서 새 값으로, 언제 바뀌었는지가 나온다. 최초
+  저장 시점의 **기준점은 변동으로 취급하지 않는다** — 방금 담은 물건이라도 기준점 때문에
+  가짜 변동이 뜨지 않는다(`item_changes.kind = 'change'`만 읽는다, §6.1).
+- 관심을 해제하면 그 물건의 변동은 `/feed`에서도, `/bookmarks`에서도 즉시 사라진다.
+
+**미확인 표시와 읽음 처리:** `/feed`는 마지막으로 읽음 처리한 시각 이후의 변동을 미확인으로
+구별해 배지로 보여주고, 미확인 개수를 화면 상단(그리고 `/`, `/items/[id]`의 링크)에
+노출한다. **`/feed`를 열어보기만 해서는 절대 읽음 처리가 되지 않는다** — 화면에 있는
+"전체 읽음 처리" 버튼을 눌러야만 그 시점까지의 변동이 확인 처리된다. 훑어보려고 페이지를
+연 순간 미확인 표시가 사라지면 무엇이 새로 왔는지 놓치기 때문이다. 미확인 개수는 저장된
+값이 아니라 `변경 시각 > 마지막 읽음 시각`으로 매번 다시 계산한다(한 번도 읽지 않았으면
+전체가 미확인) — 저장하면 갱신을 놓쳤을 때 조용히 틀린 숫자가 표시될 수 있다.
+
+**⚠️ 단일 사용자 전제.** 관심 목록(`bookmarks` 테이블)과 마지막 읽음 시각(`feed_reads`
+테이블, 행이 하나뿐이다)은 **사용자 구분 없이 전역으로 관리된다.** 이 서비스가 개인/내부
+전용이라는 이 프로젝트의 기존 전제(§8, §11)를 그대로 물려받은 것이다. 실무적으로 두 가지를
+뜻한다:
+
+- 이 서버에 접근할 수 있는 사람(또는 브라우저) 누구든 같은 관심 목록·같은 읽음 상태를
+  본다 — 사람마다 다른 관심 목록을 가질 수 없다.
+- 여러 기기·여러 탭에서 동시에 `/feed`를 쓰면, 한쪽에서 읽음 처리한 시각이 다른 쪽의
+  "여기까지 읽었다" 기준도 함께 덮어쓴다.
+
+나중에 다중 사용자가 필요해지면 **`bookmarks`와 `feed_reads` 두 테이블에 `user_id`
+컬럼을 추가하고, `src/lib/db/bookmarks.ts`의 모든 조회·쓰기에 그 조건을 더해야 한다** —
+지금 이 파일에는 그 조건이 아예 없다(파일 상단 주석에도 같은 경고가 있다). 이 항목은
+§11 "알려진 한계"에도 올라 있다.
+
 ## 7. 워커 상태 관측 (observability)
 
 수집·분석 워커가 실제로 돌고 있는지, 무엇을 했는지, 왜 멈췄는지를 로그가 아니라 조회
@@ -684,8 +863,14 @@ archive로 이동하지 않은 진행 중 change). 워커는 회차(run, 실행 
 - 최근 24시간 성공률 · 차단 횟수 · 누적 변경 건수 · 전체 회차 수(`summarizeRuns()`를
   화면이 직접 호출한 결과 — `GET /api/worker-runs/summary` API를 거치지 않는다. 서버
   컴포넌트라 저장소를 바로 호출할 수 있기 때문)
-- 최근 회차 20건 목록(시작 시각, 결과 배지, 소요시간, 상세 — `RECENT_RUNS_LIMIT`).
-  전체 이력은 `GET /api/worker-runs`(페이지네이션)로 봐야 한다.
+- **(collector 카드만) 한 바퀴 소요 시간 · 대상 법원 수 · 현재 로테이션 위치**
+  (scale-collection-scheduling design.md D3, §4.1a) — 법원을 몇 곳으로 설정했든 전체를
+  한 번씩 도는 데 걸리는 예상 시간과, 다음 회차가 어느 법원부터 시작할지를 보여준다.
+  법원을 추가할 때 신선도가 얼마나 나빠지는지 여기서 바로 확인할 수 있다.
+- 최근 회차 20건 목록(시작 시각, 결과 배지, 소요시간, 상세 — `RECENT_RUNS_LIMIT`). 상세
+  열은 collector 회차라면 그 회차가 **실제로 처리한 법원**(`detail.targetCourts`)을
+  대괄호로 먼저 보여주고 이어서 결과 수치를 보여준다 — 로테이션 도입 이후 회차마다 도는
+  법원이 다를 수 있어서다. 전체 이력은 `GET /api/worker-runs`(페이지네이션)로 봐야 한다.
 
 표시 판단(상태 → 라벨/심각도, 소요시간 포맷, `null` 성공률을 "0%"와 구별해서 보여주는
 것 등)은 전부 `src/app/_lib/status-display.ts`의 순수 함수로 분리돼 있고 페이지는 그
@@ -745,14 +930,33 @@ collector 회차 기록의 `detail.pagesRequested`는 그 회차가 소스에 �
 이제 `pagesRequested`가 회차마다 실측값으로 남으므로 `GET /api/worker-runs`로 실제 요청
 수 추이를 쌓아 보고 판단할 수 있다(§11 "알려진 한계" 2번 참고).
 
-### 7.4 ⚠️ 쓰기 API에 인증이 없다
+### 7.4 ⚠️ 쓰기 API에 인증이 없다 — 전체 목록
 
-`POST /api/worker-runs`와 `PATCH /api/worker-runs/[id]`(§5)는 인증 없이 누구나 호출할 수
-있다. 현 단계가 로컬/개인 전용 실행이라는 전제에서만 허용된 것이며, **이 서버가 외부에
-노출되면 누구나 임의의 회차 기록을 주입할 수 있다.** `/status` 화면과
+**이 프로젝트의 인증 없는 쓰기 엔드포인트를 전부 여기 한곳에 모은다.** 현 단계가
+로컬/개인 전용 실행이라는 전제(§1, §8, §11)에서만 허용된 것이며, **이 서버가 외부에
+노출되는 순간 아래 엔드포인트는 전부 누구나 호출할 수 있는 쓰기 창구가 된다.**
+
+| 엔드포인트 | 무엇을 조작할 수 있는가 | 도입된 change |
+| --- | --- | --- |
+| `POST /api/worker-runs` | 임의의 워커 회차를 새로 만들 수 있다 | (2회차) add-collection-observability |
+| `PATCH /api/worker-runs/[id]` | 임의의 회차 결과(성공/실패/차단)를 조작할 수 있다 | (2회차) add-collection-observability |
+| `POST /api/bookmarks` | 임의의 물건을 관심 목록에 등록할 수 있다 | (4회차) add-bookmarks-and-feed |
+| `DELETE /api/bookmarks/[itemId]` | 임의의 물건을 관심 목록에서 해제할 수 있다 | (4회차) add-bookmarks-and-feed |
+| `POST /api/bookmarks/toggle` | 위 등록/해제를 폼으로 조작할 수 있다(화면 전용, §5) | (4회차) add-bookmarks-and-feed |
+| `POST /api/feed/read` | 변동 피드를 읽음 처리(미확인 개수를 0으로)할 수 있다 | (4회차) add-bookmarks-and-feed |
+| `POST /api/feed/mark-read` | 위 읽음 처리를 폼으로 조작할 수 있다(화면 전용, §5) | (4회차) add-bookmarks-and-feed |
+
+**`POST /api/worker-runs`/`PATCH /api/worker-runs/[id]`가 노출되면**: `/status` 화면과
 `GET /api/worker-runs/summary` 집계는 전부 이 기록으로 계산되므로, 주입된 "성공" 기록이
-실제로는 멈추거나 차단된 워커를 정상으로 둔갑시켜 진짜 장애를 감출 수 있다. 인증을
-도입할 때 반드시 포함해야 할 엔드포인트로 지금부터 명시해 둔다(§11 "알려진 한계" 참고).
+실제로는 멈추거나 차단된 워커를 정상으로 둔갑시켜 진짜 장애를 감출 수 있다.
+
+**관심 물건·피드 엔드포인트가 노출되면**: 단일 사용자 전제(§6.3)에서 관심 목록·읽음
+시각은 전역이므로, 임의의 제3자가 다른 사람이 지켜보던 관심 목록을 마음대로 비우거나
+채우고, 읽음 상태를 조작해 미확인 변동을 실제로는 안 읽은 채로 0으로 만들 수 있다 —
+데이터 손실은 아니지만(물건 자체는 지워지지 않는다) 이 기능이 보여주려는 정보(무엇을
+지켜보고 있었는지, 무엇을 아직 못 봤는지)를 제3자가 조용히 지울 수 있다는 뜻이다.
+
+인증을 도입할 때 위 표의 엔드포인트를 **전부** 포함해야 한다(§11 "알려진 한계" 참고).
 
 ## 8. ⚠️ 수집 관련 주의사항
 
@@ -775,6 +979,13 @@ collector 회차 기록의 `detail.pagesRequested`는 그 회차가 소스에 �
   → **10분 주기 상시 운용이 지속 가능한지는 아직 검증되지 않았다.** 실운영 전에 관측이 필요하고,
   차단이 반복되면 1차 대응은 (a) `intervalMs`를 늘리거나 (b) `AUCTIONBOSS_COLLECT_BID_WINDOW_DAYS`를
   줄여 행 수를 낮추는 것이다.
+  - **여러 법원으로 늘렸을 때는 이 임계에 훨씬 가까워진다.** `scope.courts`에 법원을 여러 곳
+    등록해도 회차당 예산은 **법원 수**로 잘려 있어서(`scope.maxCourtsPerRun`, §4.1a) 회차당
+    요청 수 자체는 크게 안 늘지만, `scope.maxRequestsPerRun`(기본 13)은 여전히 **서울중앙
+    1곳 기준 실측값**일 뿐 다른 법원·여러 법원 조합에서 안전하다고 검증된 수치가 아니다.
+    법원을 늘렸으면 `GET /api/worker-runs`로 며칠간 `pagesRequested`(§7.3)와 차단(`blocked`)
+    발생 여부를 관측한 뒤 `maxRequestsPerRun`을 조정할 것 — 안전한 예산은 아직 추측일 뿐
+    실측되지 않았다.
 - **브라우저 User-Agent가 필수다.** curl 기본 UA로 보내면 별도 WAF가 JSON 대신 HTML 차단 페이지를
   HTTP 200으로 돌려준다. 어댑터는 고정 UA를 쓰고, 페이지 사이에 기본 5초를 쉬며, 동시 요청을 하지 않는다.
   이 값들을 낮추는 방향으로 조정하지 말 것.
@@ -785,19 +996,20 @@ collector 회차 기록의 `detail.pagesRequested`는 그 회차가 소스에 �
 ## 9. 개발
 
 ```bash
-npm test        # vitest run — 400 tests / 21 files
+npm test        # vitest run — 실행 시점마다 정확한 개수는 다를 수 있다. 이 문서 작성 시점(scale-
+                 # collection-scheduling 반영 후) 실측: 498 tests / 29 files. 최신 수치는 직접 돌려 확인할 것.
 npm run typecheck   # tsc --noEmit
 npm run lint        # eslint (설정: eslint.config.mjs, next/core-web-vitals + next/typescript)
 ```
 
-- 테스트 위치 (`vitest.config.mts`가 `src/**/*.test.ts`, `src/**/__tests__/**/*.test.ts`, `workers/**/*.test.ts`를 수집. 실측: `npx vitest run` 400 tests / 21 files, `npx vitest list --filesOnly` 아래 21개):
-  - `src/lib/db/__tests__/client.test.ts`, `repository.test.ts`, `worker-runs.test.ts`
-  - `src/lib/domain/__tests__/config.test.ts`, `item-query.test.ts`, `types.test.ts`(`WATCHED_FIELDS`가 4개에서 늘지 않는 것을 고정하는 회귀 테스트 — design.md D2)
+- 테스트 위치 (`vitest.config.mts`가 `src/**/*.test.ts`, `src/**/__tests__/**/*.test.ts`, `workers/**/*.test.ts`를 수집. 개수는 위 참고 — 아래는 대표 파일 목록이며 전체 목록은 아님):
+  - `src/lib/db/__tests__/client.test.ts`, `repository.test.ts`, `worker-runs.test.ts`, `collector-state.test.ts`(§4.1a 로테이션 위치 저장소)
+  - `src/lib/domain/__tests__/config.test.ts`, `item-query.test.ts`, `types.test.ts`(`WATCHED_FIELDS`가 4개에서 늘지 않는 것을 고정하는 회귀 테스트 — design.md D2), `rotation.test.ts`(§4.1a 원형 로테이션 선택·한 바퀴 소요 시간 순수 함수)
   - `src/lib/sources/courtauction/__tests__/adapter.test.ts` (+ `fixtures.ts`)
   - `src/app/_lib/__tests__/change-history.test.ts`, `analysis-history.test.ts`, `item-extensions.test.ts`(확장 필드 표시·포맷 순수 함수), `item-query-url.test.ts`, `status-display.test.ts`
   - `src/app/api/items/__tests__/route.test.ts`, `src/app/api/items/[id]/changes/__tests__/route.test.ts`, `src/app/api/items/usage-types/__tests__/route.test.ts`
   - `src/app/api/worker-runs/__tests__/route.test.ts`, `src/app/api/worker-runs/[id]/__tests__/route.test.ts`, `src/app/api/worker-runs/summary/__tests__/route.test.ts`
-  - `workers/__tests__/analyzer.test.ts`, `analyzer.integration.test.ts`(재분석 두 단계 선정을 실제 저장소·API 라우트로 구동하는 회귀 테스트), `collector.test.ts`
+  - `workers/__tests__/analyzer.test.ts`, `analyzer.integration.test.ts`(재분석 두 단계 선정을 실제 저장소·API 라우트로 구동하는 회귀 테스트), `collector.test.ts`(§4.1a 로테이션 연동 포함)
 - 테스트는 **네트워크를 타지 않고 실제 DB 파일도 만들지 않는다.** `fetch`, `claude` 실행 함수,
   DB 경로가 전부 주입 지점으로 열려 있어 인메모리 DB와 가짜 fetch로 돈다.
 - `npm run build`는 타입 체크와 린트를 함께 수행하므로, 커밋 전 최소 확인은 `npm test && npm run build`다.
@@ -840,9 +1052,11 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 |   +- collector.json              # 수집 범위/주기/분석 건수/관측 설정 (§4.1)
 +- src/
 |   +- app/                        # Next.js App Router
-|   |   +- page.tsx                # 물건 목록 (/)
-|   |   +- items/[id]/page.tsx     # 물건 상세 + AI 분석(최신/이전) + 변경 이력 (/items/:id)
+|   |   +- page.tsx                # 물건 목록 (/) — 관심 토글 열 포함 (§6.3)
+|   |   +- items/[id]/page.tsx     # 물건 상세 + AI 분석(최신/이전) + 변경 이력 + 관심 토글 (/items/:id)
 |   |   +- status/page.tsx         # 워커 상태 화면 (/status, §7.1)
+|   |   +- bookmarks/page.tsx      # 관심 물건 목록 (/bookmarks, §6.3)
+|   |   +- feed/page.tsx           # 변동 피드 (/feed, §6.3)
 |   |   +- api/items/route.ts      # GET /api/items (page, pageSize, analyzed, needsAnalysis,
 |   |   |                          #   promptVersion, usage, minPrice, maxPrice, minFailed, q, sort, dir)
 |   |   +- api/items/[id]/route.ts # GET /api/items/:id
@@ -852,23 +1066,36 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 |   |   +- api/worker-runs/route.ts          # GET/POST /api/worker-runs
 |   |   +- api/worker-runs/[id]/route.ts     # PATCH /api/worker-runs/:id
 |   |   +- api/worker-runs/summary/route.ts  # GET /api/worker-runs/summary
-|   |   +- _components/item-filter-form.tsx # 목록 필터·정렬 폼(순수 <form method="get">)
+|   |   +- api/bookmarks/route.ts            # GET/POST /api/bookmarks (§5, §6.3)
+|   |   +- api/bookmarks/[itemId]/route.ts   # DELETE /api/bookmarks/:itemId
+|   |   +- api/bookmarks/toggle/route.ts     # POST /api/bookmarks/toggle (화면 전용 폼, §5)
+|   |   +- api/feed/route.ts                 # GET /api/feed
+|   |   +- api/feed/read/route.ts            # POST /api/feed/read
+|   |   +- api/feed/mark-read/route.ts       # POST /api/feed/mark-read (화면 전용 폼, §5)
+|   |   +- _components/item-filter-form.tsx  # 목록 필터·정렬 폼(순수 <form method="get">)
+|   |   +- _components/bookmark-toggle-form.tsx # 관심 토글 폼(목록 행·상세 공용, §6.3)
 |   |   +- _lib/format.ts          # 금액/날짜 표시 포맷터
-|   |   +- _lib/change-history.ts  # 변경 이력 표시 판단(기준점 구별, 가격 변화폭 등)
+|   |   +- _lib/change-history.ts  # 변경 이력 표시 판단(기준점 구별, 가격 변화폭 등) — formatFieldChange를 feed-display.ts와 공유
+|   |   +- _lib/feed-display.ts    # /feed 표시 판단(미확인 여부, 변동 요약 문구, §6.3)
 |   |   +- _lib/analysis-history.ts # 분석 이력 표시 판단(최신/이전 분리)
 |   |   +- _lib/item-query-url.ts  # ItemQuery -> 목록 페이지 URL 직렬화
+|   |   +- _lib/safe-redirect.ts   # 관심/피드 폼의 returnTo 검증(오픈 리다이렉트 방지, §6.3)
+|   |   +- _lib/feed-query.ts      # GET /api/bookmarks, /api/feed 쿼리 파라미터 검증
 |   |   +- _lib/status-display.ts  # /status 표시 판단(상태->라벨/심각도, 소요시간 포맷 등, §7.1)
 |   |   +- _lib/worker-run-query.ts # GET /api/worker-runs(/summary) 쿼리 파라미터 검증
 |   +- lib/
 |       +- domain/                 # 정규화 도메인 모델 + config 로더
-|       |   +- types.ts            # AuctionItem, Analysis, ItemChange, CollectorConfig, WorkerRun ...
+|       |   +- types.ts            # AuctionItem, Analysis, ItemChange, FeedEntry, CollectorConfig, WorkerRun ...
 |       |   +- config.ts           # config/collector.json 로딩 + zod 검증
+|       |   +- rotation.ts         # 법원 로테이션 순수 함수(selectRotationCourts) + computeLapDurationMs (§4.1a)
 |       |   +- item-query.ts       # GET /api/items 쿼리 파라미터 파싱(ItemQuery, strict/lenient)
 |       +- db/                     # SQLite 접근 (여기 밖으로 snake_case 컬럼명이 안 나간다)
 |       |   +- client.ts           # 연결/WAL/싱글턴, AUCTIONBOSS_DB 해석
-|       |   +- schema.ts           # items / analyses / item_changes / worker_runs 테이블 DDL
+|       |   +- schema.ts           # items / analyses / item_changes / worker_runs / collector_state / bookmarks / feed_reads 테이블 DDL
 |       |   +- repository.ts       # upsertItems, listItems, insertAnalysis, listItemChanges ...
 |       |   +- worker-runs.ts      # startRun, finishRun, listWorkerRuns, summarizeRuns, getWorkerStatus (§7)
+|       |   +- collector-state.ts  # 로테이션 다음 위치 등 소규모 운영 상태 키-값 저장소 (§4.1a)
+|       |   +- bookmarks.ts        # addBookmark, removeBookmark, listBookmarkedItems, listFeed, getUnreadCount, markFeedRead (§6.3, 단일 사용자 전제)
 |       +- sources/                # 수집 소스 어댑터 경계
 |           +- types.ts            # AuctionSource 인터페이스
 |           +- errors.ts           # RobotDetectedError, WafBlockedError ...
@@ -897,6 +1124,11 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 2. **10분 주기 상시 운용이 미검증이다.** §8 참고. 다만 §7.3의 `pagesRequested`가 회차마다
    실측값으로 남기 시작했으므로, 이제 로그가 아니라 `GET /api/worker-runs`로 실제 요청 수
    추이를 관측할 수 있다 — 장시간 무인 운용 데이터 자체는 아직 없다.
+   - **법원을 여러 곳으로 늘렸을 때 안전한 요청 예산도 아직 미검증이다**(§4.1a, §8).
+     법원 수 단위 예산(`maxCourtsPerRun`)과 요청 수 안전장치(`maxRequestsPerRun`)를 둬서
+     구조적으로는 법원이 늘어도 회차가 무한정 커지지 않게 만들었지만(scale-collection-
+     scheduling), `maxRequestsPerRun`의 기본값 자체는 여전히 법원 1곳 기준 실측치다. 실제로
+     몇 곳까지 늘려도 안전한지는 회차 기록이 며칠 쌓여야 정할 수 있다.
 3. **비공식 엔드포인트라 예고 없이 바뀔 수 있다.** zod 검증으로 즉시 감지·로그하지만, 바뀌면 수집은 멈춘다.
    대안인 **상용 데이터 API 어댑터는 아직 구현되어 있지 않다**(`AuctionSource` 인터페이스만 열려 있는 상태).
 4. **프롬프트가 여전히 물건 JSON 한 덩어리만 보고 쓰는 요약이다(v2에서 확장 필드 활용은
@@ -914,9 +1146,9 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
    `analyzed`(분석 여부)는 URL로는 받아 유지하지만 폼에 입력칸이 없고, `needsAnalysis`는
    analyzer 전용이라 애초에 사람이 쓸 UI가 없다.
 7. **인증/권한이 없다.** 서버를 띄우면 접근 가능한 누구나 전체를 볼 수 있다. 로컬/내부망
-   전제다. **특히 `POST /api/worker-runs`/`PATCH /api/worker-runs/[id]`(§5, §7.4)는 인증
-   없는 쓰기 API라 외부에 노출되면 누구나 임의의 회차 기록을 주입해 `/status` 화면과
-   집계를 속일 수 있다** — 인증 도입 시 반드시 포함해야 할 엔드포인트다.
+   전제다. **인증 없는 쓰기 엔드포인트 전체 목록은 §7.4에 한곳에 모아 뒀다** — 워커 회차
+   기록(§7.4)뿐 아니라 관심 물건 등록/해제·읽음 처리(§6.3, add-bookmarks-and-feed)까지
+   전부 인증이 없다. 인증 도입 시 그 표의 엔드포인트를 전부 포함해야 한다.
 8. **가짜 변경(노이즈)을 걸러내는 규칙이 없다.** 소스가 같은 물건을 다른 값으로 표기하는
    사례가 이미 관측됐다(`유찰횟수`와 `최저매각가격`이 어긋나는 행 — `openspec/changes/archive/
    2026-09-07-auction-pipeline-mvp/design.md`). 그런 노이즈도 지금은 감시 필드의 "실제
@@ -929,3 +1161,7 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 9. **"최근 변동" 기준 7일이 검증된 값은 아니다.** 매각기일 주기(보통 1개월 이상)를 감안하면
    더 길어야 할 수 있다. `src/app/_lib/change-history.ts`의 `RECENT_CHANGE_DAYS` 상수 하나만
    바꾸면 되므로 조정 자체는 쉽다.
+10. **관심 목록·읽음 시각이 사용자 구분 없이 전역이다(§6.3).** 여러 사람이 같은 서버를
+    쓰면 관심 목록도, "여기까지 읽었다"는 기준도 전부 공유된다. 다중 사용자를 지원하려면
+    `bookmarks`/`feed_reads` 두 테이블에 `user_id`를 추가하고 `src/lib/db/bookmarks.ts`의
+    모든 조회·쓰기에 그 조건을 더해야 한다 — 지금은 이 조건이 아예 없다.

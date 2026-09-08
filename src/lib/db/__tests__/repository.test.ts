@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { AuctionItemInput } from "@/lib/domain";
 import { openDatabase, type Db } from "../client";
+import { createBookmarksRepository } from "../bookmarks";
 import { ItemNotFoundError } from "../errors";
 import {
   createRepository,
@@ -645,6 +646,62 @@ describe("listItems — lastChangedAt (design.md D6)", () => {
     const result = repo.listItems({ sort: "auctionDate", direction: "asc", pageSize: 10 });
     expect(result.total).toBe(2);
     expect(result.items.map((item) => item.itemNo)).toEqual(["2", "1"]); // 정렬 순서는 그대로
+  });
+});
+
+/**
+ * 관심 여부(design.md D6, add-bookmarks-and-feed task 2.1/2.2) — `lastChangedAt`과 같은
+ * 방식(스칼라 서브쿼리 컬럼)으로 추가됐다. 이 change에서 가장 회귀 위험이 큰 지점이라
+ * "필터·정렬·total이 그대로다"를 별도로 고정한다.
+ */
+describe("listItems — bookmarked (design.md D6, add-bookmarks-and-feed)", () => {
+  it("관심 등록된 물건은 bookmarked=true, 아니면 false다", () => {
+    repo.upsertItems([makeItem({ itemNo: "1" }), makeItem({ itemNo: "2" })]);
+    const bookmarks = createBookmarksRepository(db);
+    const item1 = repo.listItems({ pageSize: 10 }).items.find((item) => item.itemNo === "1")!;
+    bookmarks.addBookmark(item1.id);
+
+    const { items } = repo.listItems({ pageSize: 10 });
+    expect(items.find((item) => item.itemNo === "1")?.bookmarked).toBe(true);
+    expect(items.find((item) => item.itemNo === "2")?.bookmarked).toBe(false);
+  });
+
+  it("getItemById도 bookmarked를 채운다", () => {
+    repo.upsertItems([makeItem()]);
+    const bookmarks = createBookmarksRepository(db);
+    const item = repo.listItems({ pageSize: 10 }).items[0]!;
+    expect(repo.getItemById(item.id)?.bookmarked).toBe(false);
+
+    bookmarks.addBookmark(item.id);
+    expect(repo.getItemById(item.id)?.bookmarked).toBe(true);
+  });
+
+  it("[회귀] 이 컬럼이 있어도 필터·정렬·total은 그대로다 — 관심 여부와 무관하다", () => {
+    repo.upsertItems([
+      makeItem({ itemNo: "1", auctionDate: "2026-03-03" }),
+      makeItem({ itemNo: "2", auctionDate: "2026-01-01" }),
+    ]);
+    const bookmarks = createBookmarksRepository(db);
+    const item1 = repo.listItems({ pageSize: 10 }).items.find((item) => item.itemNo === "1")!;
+    bookmarks.addBookmark(item1.id);
+
+    const bookmarkedResult = repo.listItems({ sort: "auctionDate", direction: "asc", pageSize: 10 });
+    // 관심 등록 전과 total·정렬 순서가 동일해야 한다.
+    const unbookmarked = createRepository(openDatabase(":memory:"));
+    unbookmarked.upsertItems([
+      makeItem({ itemNo: "1", auctionDate: "2026-03-03" }),
+      makeItem({ itemNo: "2", auctionDate: "2026-01-01" }),
+    ]);
+    const baselineResult = unbookmarked.listItems({
+      sort: "auctionDate",
+      direction: "asc",
+      pageSize: 10,
+    });
+
+    expect(bookmarkedResult.total).toBe(baselineResult.total);
+    expect(bookmarkedResult.items.map((item) => item.itemNo)).toEqual(
+      baselineResult.items.map((item) => item.itemNo),
+    );
   });
 });
 

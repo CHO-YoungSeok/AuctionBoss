@@ -13,6 +13,7 @@
 import type {
   AnalyzerRunDetail,
   CollectorRunDetail,
+  CourtRef,
   RunOutcome,
   SkipReason,
   WorkerKind,
@@ -132,7 +133,12 @@ export function formatRunDuration(
   return formatMs(durationMs);
 }
 
-function formatMs(ms: number): string {
+/**
+ * ms를 사람이 읽는 시간 단위(초/분/시간)로 바꾼다. `formatRunDuration`(회차 소요 시간)과
+ * 한 바퀴 소요 시간(task 4.2, design.md D3) 양쪽에서 같은 포맷을 쓴다 — 법원을 늘렸을 때
+ * "한 바퀴가 몇 시간으로 늘었는지"가 회차 소요 시간과 같은 단위 감각으로 읽혀야 한다.
+ */
+export function formatMs(ms: number): string {
   const totalSeconds = Math.round(ms / 1000);
   if (totalSeconds < 60) return `${totalSeconds}초`;
 
@@ -145,6 +151,35 @@ function formatMs(ms: number): string {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return minutes > 0 ? `${hours}시간 ${minutes}분` : `${hours}시간`;
+}
+
+/**
+ * 로테이션 현재 위치 표시(task 4.2, design.md D3) — 다음 회차가 시작할 법원과 전체
+ * 법원 목록 중 몇 번째인지를 보여준다.
+ *
+ * `nextCourtCode`를 목록에서 못 찾으면(법원이 삭제됐거나 아직 한 번도 안 돈 첫 실행)
+ * `selectRotationCourts`(design.md D2)와 같은 자가 복구 규칙 — 처음(0번째)부터 —
+ * 을 그대로 따른다. 화면 판단이 로테이션 실행 로직과 다른 규칙을 쓰면 "화면에 보이는
+ * 다음 법원"과 "실제로 다음에 도는 법원"이 어긋날 수 있다.
+ */
+export interface RotationPositionDisplay {
+  /** 다음 회차가 시작할 법원 이름. 법원이 0곳이면(설정상 불가능) "-". */
+  nextCourtName: string;
+  /** 1-based 위치. 법원이 0곳이면 0. */
+  position: number;
+  total: number;
+}
+
+export function describeRotationPosition(
+  courts: readonly CourtRef[],
+  nextCourtCode: string | null,
+): RotationPositionDisplay {
+  const total = courts.length;
+  if (total === 0) return { nextCourtName: "-", position: 0, total: 0 };
+
+  const idx = nextCourtCode === null ? -1 : courts.findIndex((c) => c.courtCode === nextCourtCode);
+  const safeIdx = idx === -1 ? 0 : idx;
+  return { nextCourtName: courts[safeIdx]!.name, position: safeIdx + 1, total };
 }
 
 function isCollectorDetail(
@@ -169,19 +204,32 @@ function isAnalyzerDetail(
  *   가짜 변경 신호이므로 반드시 보이게 한다(archived add-price-change-history 참고)
  * - `success`인 analyzer 회차는 신규/재분석/성공/실패 건수
  * - 그 외(`running` 등)는 "-"
+ *
+ * collector 회차는(성공이든 실패·차단이든, task 4.3/design.md D3) `detail.targetCourts`가
+ * 있으면 맨 앞에 대상 법원을 덧붙인다 — 로테이션 도입 이후 회차마다 법원이 다를 수 있어
+ * "이 회차가 어떤 법원을 돌았는지"가 결과 자체만큼 중요한 정보가 됐다. 차단·실패 회차도
+ * 포함하는 이유: 차단은 로테이션 위치가 그 법원에 그대로 남으므로(design.md D4), 어떤
+ * 법원에서 막혔는지가 특히 운영자에게 중요하다.
  */
 export function describeRunDetail(run: WorkerRun): string {
+  const targetCourts = isCollectorDetail(run.worker, run.detail)
+    ? run.detail.targetCourts
+    : null;
+  const courtsPrefix =
+    targetCourts && targetCourts.length > 0 ? `[${targetCourts.join(", ")}] ` : "";
+
   if (run.outcome === "skipped") return describeSkipReason(run.errorKind);
 
   if (run.outcome === "failed" || run.outcome === "blocked") {
     const kind = run.errorKind ?? "알 수 없는 오류";
-    return run.errorMessage ? `${kind}: ${run.errorMessage}` : kind;
+    const base = run.errorMessage ? `${kind}: ${run.errorMessage}` : kind;
+    return `${courtsPrefix}${base}`;
   }
 
   if (run.outcome === "success") {
     if (isCollectorDetail(run.worker, run.detail)) {
       const d = run.detail;
-      return `신규 ${d.inserted} · 갱신 ${d.updated} · 변경 ${d.changed}`;
+      return `${courtsPrefix}신규 ${d.inserted} · 갱신 ${d.updated} · 변경 ${d.changed}`;
     }
     if (isAnalyzerDetail(run.worker, run.detail)) {
       const d = run.detail;

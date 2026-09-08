@@ -16,14 +16,23 @@ vi.mock("@/lib/db", () => ({
   startRun: vi.fn(),
   finishRun: vi.fn(),
   recordSkippedRun: vi.fn(),
+  getCollectorState: vi.fn(() => null),
+  setCollectorState: vi.fn(),
+  COLLECTOR_STATE_KEYS: { ROTATION_NEXT_COURT_CODE: "collector.rotation.nextCourtCode" },
   getRepository: vi.fn(() => ({
     upsertItems: vi.fn(() => ({ inserted: 0, updated: 0, changed: 0 })),
   })),
   closeDb: vi.fn(),
 }));
 
-import { finishRun, recordSkippedRun, startRun } from "@/lib/db";
-import type { AuctionItemInput, CollectScope } from "@/lib/domain";
+import {
+  finishRun,
+  getCollectorState,
+  recordSkippedRun,
+  setCollectorState,
+  startRun,
+} from "@/lib/db";
+import type { AuctionItemInput, CollectorScopeConfig } from "@/lib/domain";
 import {
   ResponseSchemaError,
   RobotDetectedError,
@@ -39,9 +48,17 @@ import { startCollector, type CollectorOptions } from "../collector";
 const startRunMock = vi.mocked(startRun);
 const finishRunMock = vi.mocked(finishRun);
 const recordSkippedRunMock = vi.mocked(recordSkippedRun);
+const getCollectorStateMock = vi.mocked(getCollectorState);
+const setCollectorStateMock = vi.mocked(setCollectorState);
 
-const scope: CollectScope = {
+// maxCourtsPerRun/maxRequestsPerRun은 실제 config/collector.json 기본값과 같게 둔다
+// (법원 1곳, 상한 1곳) — 이 파일의 테스트는 대부분 "로테이션 도입 전과 동일한 동작"을
+// 고정하는 회귀 테스트다(scale-collection-scheduling task 2.4). maxRequestsPerRun은 이
+// 파일의 단일 법원 시나리오에서 절대 걸리지 않을 만큼 넉넉하게 둔다.
+const scope: CollectorScopeConfig = {
   courts: [{ name: "서울중앙지방법원", courtCode: "B000210" }],
+  maxCourtsPerRun: 1,
+  maxRequestsPerRun: 999,
 };
 
 const silentLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} };
@@ -346,5 +363,176 @@ describe("startCollector — 기록 실패가 수집을 막지 않는다(4.2, �
     await handle.stop();
 
     expect(finishRunMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 로테이션 연동 (scale-collection-scheduling task 3.1-3.5).
+ *
+ * 위의 기존 테스트들(4.1-4.3, add-collection-observability)은 전부 법원 1곳짜리
+ * scope를 쓰기 때문에 로테이션이 실제로 여러 법원 사이를 도는지, 차단 시 위치가
+ * 전진하지 않는지, 같은 회차에서 다음 법원으로 안 넘어가는지, 요청 수 안전장치가
+ * 진행 중인 법원을 안 끊는지는 이 파일 어디에서도 검증되지 않았다 — 이 change가
+ * 가장 위험하다고 명시한(design.md D4, tasks.md 3.3/3.4) 부분이라 여기서 채운다.
+ */
+const courts3: CollectorScopeConfig["courts"] = [
+  { name: "서울중앙지방법원", courtCode: "B000210" },
+  { name: "서울동부지방법원", courtCode: "B000211" },
+  { name: "서울서부지방법원", courtCode: "B000215" },
+];
+
+describe("startCollector — 로테이션 연동(scale-collection-scheduling 3.1-3.5)", () => {
+  it("여러 회차에 걸쳐 법원이 순환하고, 회차 종료 시 다음 위치가 저장된다(3.1/3.2)", async () => {
+    const scope3: CollectorScopeConfig = {
+      courts: courts3,
+      maxCourtsPerRun: 1,
+      maxRequestsPerRun: 999,
+    };
+    const calledCourtCodes: string[] = [];
+    const source: AuctionSource = {
+      fetchActiveItems: async ({ courts }) => {
+        calledCourtCodes.push(courts[0]!.courtCode);
+        return { items: [], pagesRequested: 1 };
+      },
+    };
+    startRunMock.mockReturnValue(1);
+
+    const handle = startCollector(baseOptions({ source, scope: scope3 }));
+
+    // 회차1: 저장된 위치 없음(첫 실행) → 목록의 첫 법원부터.
+    getCollectorStateMock.mockReturnValueOnce(null);
+    await handle.tick();
+    expect(setCollectorStateMock).toHaveBeenLastCalledWith(
+      "collector.rotation.nextCourtCode",
+      "B000211",
+    );
+
+    // 회차2: 저장된 위치가 두 번째 법원 → 세 번째로 넘어간다.
+    getCollectorStateMock.mockReturnValueOnce("B000211");
+    await handle.tick();
+    expect(setCollectorStateMock).toHaveBeenLastCalledWith(
+      "collector.rotation.nextCourtCode",
+      "B000215",
+    );
+
+    // 회차3: 저장된 위치가 세 번째 법원 → 원형으로 다시 처음.
+    getCollectorStateMock.mockReturnValueOnce("B000215");
+    await handle.tick();
+    expect(setCollectorStateMock).toHaveBeenLastCalledWith(
+      "collector.rotation.nextCourtCode",
+      "B000210",
+    );
+
+    await handle.stop();
+
+    // 회차별로 실제 요청이 간 법원이 순서대로 하나씩이었다 — targetCourts가 실제
+    // 처리 법원만 담는다는 것(3.2)을 소스 호출 순서로도 재확인.
+    expect(calledCourtCodes).toEqual(["B000210", "B000211", "B000215"]);
+  });
+
+  it("차단되면 로테이션 위치를 전진시키지 않고, 같은 회차에서 다음 법원으로 넘어가지 않는다(3.3/3.4)", async () => {
+    const scope3: CollectorScopeConfig = {
+      courts: courts3,
+      maxCourtsPerRun: 3, // 상한을 넉넉히 둬도(3곳 전부 대상이어도) 차단되면 첫 법원에서 멈춰야 한다.
+      maxRequestsPerRun: 999,
+    };
+    const calledCourtCodes: string[] = [];
+    const source: AuctionSource = {
+      fetchActiveItems: async ({ courts }) => {
+        calledCourtCodes.push(courts[0]!.courtCode);
+        throw new RobotDetectedError("차단", null);
+      },
+    };
+    startRunMock.mockReturnValue(1);
+    // 로테이션 위치가 이미 두 번째 법원을 가리키고 있다고 가정 — 차단 후에도 이
+    // 값이 그대로 유지되는지가 3.3의 핵심.
+    getCollectorStateMock.mockReturnValue("B000211");
+
+    const handle = startCollector(
+      baseOptions({ source, scope: scope3, blockBackoffMs: 60_000 }),
+    );
+    await handle.tick();
+    await handle.stop();
+
+    // (3.4) 차단된 법원 하나에만 요청이 갔다 — 같은 회차에서 다음 법원으로 넘어가지 않았다.
+    expect(calledCourtCodes).toEqual(["B000211"]);
+    // (3.3) 저장되는 다음 위치가 차단된 법원 자신이다 — 전진하지 않았다.
+    expect(setCollectorStateMock).toHaveBeenLastCalledWith(
+      "collector.rotation.nextCourtCode",
+      "B000211",
+    );
+  });
+
+  it("백오프가 끝나면 차단됐던 법원부터 재개한다(3.3) — 다른 법원으로 건너뛰지 않는다", async () => {
+    const scope3: CollectorScopeConfig = {
+      courts: courts3,
+      maxCourtsPerRun: 1,
+      maxRequestsPerRun: 999,
+    };
+    const calledCourtCodes: string[] = [];
+    const source: AuctionSource = {
+      fetchActiveItems: async ({ courts }) => {
+        calledCourtCodes.push(courts[0]!.courtCode);
+        throw new RobotDetectedError("차단", null);
+      },
+    };
+    startRunMock.mockReturnValue(1);
+    // 저장된 위치는 계속 "B000211"이다 — 실제 setCollectorState 호출과는 별개로,
+    // 이 회차가 시작될 때마다 워커가 이 값을 읽어 그 법원부터 시작하는지만 본다
+    // (setCollectorState↔getCollectorState를 실제로 잇는 것은 collector-state.ts의
+    // 몫이고 그건 별도 테스트에서 이미 고정했다).
+    getCollectorStateMock.mockReturnValue("B000211");
+
+    const handle = startCollector(
+      baseOptions({ source, scope: scope3, blockBackoffMs: 1 }),
+    );
+    await handle.tick(); // 1차 차단
+    await new Promise((resolve) => setTimeout(resolve, 5)); // 백오프(1ms) 경과 대기
+    await handle.tick(); // 백오프 종료 후 재시도
+    await handle.stop();
+
+    expect(calledCourtCodes).toEqual(["B000211", "B000211"]);
+  });
+
+  it("maxRequestsPerRun을 넘으면 다음 법원을 시작하지 않되, 이미 시작한 법원은 끊지 않는다(3.5)", async () => {
+    const scope3: CollectorScopeConfig = {
+      courts: courts3,
+      maxCourtsPerRun: 3, // 이번 회차 대상은 3곳 전부.
+      maxRequestsPerRun: 2, // 하지만 첫 법원 하나만으로 이미 상한에 도달한다.
+    };
+    const calledCourtCodes: string[] = [];
+    const source: AuctionSource = {
+      fetchActiveItems: async ({ courts }) => {
+        calledCourtCodes.push(courts[0]!.courtCode);
+        // 첫 법원 하나가 이미 상한(2)만큼 요청을 쓴다 — 중간에 끊기지 않고 끝까지
+        // 완료되는지가 이 테스트의 핵심(법원을 중간에 끊으면 "물건이 줄었다"로
+        // 오해된다, design.md D1).
+        return { items: [], pagesRequested: 2 };
+      },
+    };
+    startRunMock.mockReturnValue(1);
+    getCollectorStateMock.mockReturnValue(null);
+
+    const handle = startCollector(baseOptions({ source, scope: scope3 }));
+    await handle.tick();
+    await handle.stop();
+
+    // 첫 법원만 실제로 요청됐다 — 두 번째 법원은 아예 시작되지 않았다.
+    expect(calledCourtCodes).toEqual(["B000210"]);
+    expect(finishRunMock).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        outcome: "success",
+        detail: expect.objectContaining({
+          targetCourts: ["서울중앙지방법원"],
+          pagesRequested: 2,
+        }),
+      }),
+    );
+    // 다음 회차는 시작하지 못한(두 번째) 법원부터 이어서 시도한다 — 건너뛰지 않는다.
+    expect(setCollectorStateMock).toHaveBeenLastCalledWith(
+      "collector.rotation.nextCourtCode",
+      "B000211",
+    );
   });
 });

@@ -168,6 +168,14 @@ export interface AuctionItem extends AuctionItemInput {
    * 항상 null을 채운다.
    */
   lastChangedAt?: IsoDateTime | null;
+  /**
+   * 관심 목록에 담겼는지(add-bookmarks-and-feed, design.md D6). `listItems`/`getItemById`가
+   * 스칼라 서브쿼리로 채우는 값이다 — `lastChangedAt`과 같은 이유로 목록 쿼리의
+   * 필터·정렬·total에는 관여하지 않는다. optional인 이유도 `lastChangedAt`과 같다: 이 값을
+   * 계산하지 않는 다른 생성 경로(이 필드를 모르는 기존 워커·테스트 코드의 객체 리터럴)가
+   * 매번 명시적으로 채워 넣게 강제하지 않기 위함이다.
+   */
+  bookmarked?: boolean;
 }
 
 /**
@@ -279,9 +287,34 @@ export interface ObservabilityConfig {
   staleAfterIntervals: number;
 }
 
+/**
+ * `config/collector.json`의 `scope` 절 (scale-collection-scheduling design.md D1/D2/D3).
+ * `CollectScope`(어댑터 `fetchActiveItems(scope)`의 인자 타입)를 그대로 확장해 법원
+ * 목록은 공유하되, 회차 예산 설정 두 개를 추가로 지닌다. 이 예산 필드들은 어댑터가
+ * 알 필요가 없으므로(로테이션·예산은 워커의 스케줄링 관심사) `CollectScope` 자체에는
+ * 넣지 않는다 — 어댑터에 넘기는 실제 `CollectScope` 값은 여전히 courts만 가진다.
+ */
+export interface CollectorScopeConfig extends CollectScope {
+  /**
+   * 회차당 처리할 법원 수 상한(design.md D1, 기본값 1). 예산의 단위는 요청 수가 아니라
+   * 법원 수다 — 법원의 페이지 수는 요청을 보내보기 전에는 모르므로, 요청 수로 자르면
+   * 법원이 절반만 수집된 채로 남을 수 있다(그러면 "이 법원 물건이 줄었다"로 오해된다).
+   * 법원 1곳뿐이면 이 값이 1이든 몇이든 매 회차 그 법원만 수집한다(design.md D5).
+   */
+  maxCourtsPerRun: number;
+  /**
+   * 회차당 요청 수 안전장치(design.md D1). 이미 시작한 법원의 수집은 끊지 않되, 이 값을
+   * 넘으면 이번 회차에서 **다음** 법원을 새로 시작하지 않는다. `maxCourtsPerRun`(법원 수
+   * 예산)을 대신하는 값이 아니라 그 보조 안전장치다 — 안전한 실측값은 아직 없고
+   * (`design.md` Open Questions), 기본값은 현재 검증된 서울중앙 1곳 기준(약 13요청)을
+   * 넘지 않게 잡는다.
+   */
+  maxRequestsPerRun: number;
+}
+
 /** `config/collector.json` 전체. */
 export interface CollectorConfig {
-  scope: CollectScope;
+  scope: CollectorScopeConfig;
   /** 수집 주기(ms) */
   intervalMs: number;
   analysis: AnalysisConfig;
@@ -374,4 +407,34 @@ export interface WorkerStatus {
   lastSuccessAt: IsoDateTime | null;
   /** 가장 최근 회차(결과와 무관, `running`/`skipped` 포함). 기록이 전혀 없으면 null. */
   lastRun: WorkerRun | null;
+}
+
+// ---------------------------------------------------------------------------
+// 관심 물건 · 변동 피드 (add-bookmarks-and-feed, design.md D1~D4)
+// ---------------------------------------------------------------------------
+
+/**
+ * 변동 피드 한 건. `item_changes`를 관심 물건(`bookmarks`)으로 걸러 읽은 것일 뿐 별도로
+ * 저장되지 않는다(design.md D2) — `kind`가 항상 `"change"`인 행만 나온다(기준점은 피드에
+ * 나오지 않는다, MUST NOT).
+ *
+ * 물건 식별을 위한 최소 표시 정보(`itemAddress`)를 함께 담는다 — 피드 화면이 "어떤 물건"인지
+ * 보여주려고 물건을 따로 조회하지 않아도 되게 하기 위함이다. 물건 상세로 가는 링크는
+ * `itemId`로 만든다.
+ */
+export interface FeedEntry {
+  /** `item_changes.id` — 이 피드 항목의 근거가 된 이력 행. */
+  id: number;
+  itemId: number;
+  /** 표시용 소재지. 물건이 소재지 없이 저장됐으면 null. */
+  itemAddress: string | null;
+  field: WatchedField;
+  oldValue: string | null;
+  newValue: string | null;
+  changedAt: IsoDateTime;
+  /**
+   * 이 물건이 관심 목록에 담긴 시각(`bookmarks.created_at`). "관심 등록 후 변동만" 필터
+   * (`sinceBookmarkedAt`, design.md D2)의 기준이다.
+   */
+  bookmarkedAt: IsoDateTime;
 }

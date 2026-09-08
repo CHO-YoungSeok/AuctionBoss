@@ -6,8 +6,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { getRepository } from "@/lib/db";
+import { getRepository, getUnreadCount } from "@/lib/db";
 
+import { BookmarkToggleForm } from "../../_components/bookmark-toggle-form";
 import { splitAnalysisHistory } from "../../_lib/analysis-history";
 import { formatChangeDisplay, hasRealChange, isRealChange } from "../../_lib/change-history";
 import {
@@ -110,6 +111,10 @@ export default async function ItemDetailPage({
   const usageCodesText = formatUsageCodes(item);
   const structuredAddressText = formatStructuredAddress(item);
 
+  // 관심 물건·변동 피드로 가는 경로에 미확인 개수를 보여준다(task 4.5) — 목록 페이지와
+  // 같은 이유.
+  const unreadCount = getUnreadCount();
+
   return (
     <main className="page">
       <p className="breadcrumb">
@@ -117,12 +122,27 @@ export default async function ItemDetailPage({
         {" · "}
         {/* add-collection-observability task 5.4: 수집·분석 워커 상태로 가는 경로. */}
         <Link href="/status">워커 상태</Link>
+        {" · "}
+        <Link href="/bookmarks">관심 물건</Link>
+        {" · "}
+        <Link href="/feed">
+          변동 피드{unreadCount > 0 ? ` (미확인 ${unreadCount.toLocaleString("ko-KR")}건)` : ""}
+        </Link>
       </p>
 
       <header className="page-header">
         <h1>{formatText(item.address)}</h1>
         <p className="muted">
           {formatText(item.court)} · {formatText(item.caseNo)} (물건번호 {formatText(item.itemNo)})
+        </p>
+        {/* 상세에서도 관심 담기/빼기와 현재 담긴 상태를 보여준다(spec: "상세에서 관심
+            토글"). item.bookmarked는 getItemById가 채운다(repository.ts design.md D6). */}
+        <p className="bookmark-toggle-row">
+          <BookmarkToggleForm
+            itemId={item.id}
+            bookmarked={item.bookmarked ?? false}
+            returnTo={`/items/${item.id}`}
+          />
         </p>
       </header>
 

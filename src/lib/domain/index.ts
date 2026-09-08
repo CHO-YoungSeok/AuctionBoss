@@ -8,7 +8,9 @@ export type {
   CollectorRunDetail,
   CollectScope,
   CollectorConfig,
+  CollectorScopeConfig,
   CourtRef,
+  FeedEntry,
   IsoDate,
   IsoDateTime,
   ItemChange,
@@ -42,6 +44,12 @@ export {
 } from "./config";
 
 export { computePricePerArea, type PricePerAreaFields } from "./price";
+
+export {
+  computeLapDurationMs,
+  selectRotationCourts,
+  type RotationSelection,
+} from "./rotation";
 
 export {
   DEFAULT_PAGE_SIZE,

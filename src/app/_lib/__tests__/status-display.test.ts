@@ -4,13 +4,15 @@
  */
 import { describe, expect, it } from "vitest";
 
-import type { AnalyzerRunDetail, CollectorRunDetail, WorkerRun } from "@/lib/domain";
+import type { AnalyzerRunDetail, CollectorRunDetail, CourtRef, WorkerRun } from "@/lib/domain";
 
 import {
   describeOutcome,
+  describeRotationPosition,
   describeRunDetail,
   describeSkipReason,
   describeWorkerState,
+  formatMs,
   formatRunDuration,
   formatSuccessRate,
 } from "../status-display";
@@ -182,5 +184,85 @@ describe("describeRunDetail", () => {
   it("detail이 없는 성공 회차는 '-'를 보여준다(방어적 처리)", () => {
     const run = makeRun({ outcome: "success", detail: null });
     expect(describeRunDetail(run)).toBe("-");
+  });
+
+  it("collector 성공 회차는 대상 법원(targetCourts)을 맨 앞에 보여준다(4.3) — 로테이션 도입 후 회차마다 법원이 다를 수 있다", () => {
+    const detail: CollectorRunDetail = {
+      targetCourts: ["서울동부지방법원"],
+      pagesRequested: 3,
+      itemsFetched: 10,
+      inserted: 1,
+      updated: 5,
+      changed: 2,
+    };
+    const run = makeRun({ outcome: "success", worker: "collector", detail });
+    const result = describeRunDetail(run);
+    expect(result).toContain("서울동부지방법원");
+    // 대상 법원이 결과 수치보다 앞에 나와야 "이 회차가 무엇을 돌았는지"가 먼저 읽힌다.
+    expect(result.indexOf("서울동부지방법원")).toBeLessThan(result.indexOf("신규"));
+  });
+
+  it("collector 차단 회차도 대상 법원을 보여준다 — 어디서 막혔는지가 운영자에게 중요하다(design.md D4)", () => {
+    const detail: CollectorRunDetail = {
+      targetCourts: ["서울서부지방법원"],
+      pagesRequested: 1,
+      itemsFetched: 0,
+      inserted: 0,
+      updated: 0,
+      changed: 0,
+    };
+    const run = makeRun({
+      outcome: "blocked",
+      worker: "collector",
+      errorKind: "RobotDetectedError",
+      detail,
+    });
+    const result = describeRunDetail(run);
+    expect(result).toContain("서울서부지방법원");
+    expect(result).toContain("RobotDetectedError");
+  });
+
+  it("analyzer 회차는 targetCourts 개념이 없으므로 대상 법원 접두사가 붙지 않는다", () => {
+    const detail: AnalyzerRunDetail = { newCount: 1, reanalysisCount: 0, succeeded: 1, failed: 0 };
+    const run = makeRun({ outcome: "success", worker: "analyzer", detail });
+    expect(describeRunDetail(run)).toBe("신규분석 1 · 재분석 0 · 성공 1 · 실패 0");
+  });
+});
+
+describe("formatMs", () => {
+  it("60초 미만은 초 단위(formatRunDuration과 같은 포맷을 한 바퀴 소요 시간에도 재사용, 4.2)", () => {
+    expect(formatMs(45_000)).toBe("45초");
+  });
+
+  it("시간 단위까지 표시한다 — 법원이 많아져 한 바퀴가 몇 시간으로 늘어난 경우", () => {
+    expect(formatMs(3 * 60 * 60 * 1000)).toBe("3시간");
+  });
+});
+
+describe("describeRotationPosition(4.2)", () => {
+  const courts: CourtRef[] = [
+    { name: "서울중앙지방법원", courtCode: "B000210" },
+    { name: "서울동부지방법원", courtCode: "B000211" },
+    { name: "서울서부지방법원", courtCode: "B000215" },
+  ];
+
+  it("저장된 다음 법원 코드가 목록 중간이면 그 위치와 이름을 보여준다", () => {
+    const result = describeRotationPosition(courts, "B000211");
+    expect(result).toEqual({ nextCourtName: "서울동부지방법원", position: 2, total: 3 });
+  });
+
+  it("저장된 코드가 null이면(첫 실행) 처음 법원을 가리킨다", () => {
+    const result = describeRotationPosition(courts, null);
+    expect(result).toEqual({ nextCourtName: "서울중앙지방법원", position: 1, total: 3 });
+  });
+
+  it("저장된 코드가 목록에 없으면(법원 삭제) 처음 법원으로 자가 복구한다 — selectRotationCourts와 같은 규칙", () => {
+    const result = describeRotationPosition(courts, "B999999");
+    expect(result).toEqual({ nextCourtName: "서울중앙지방법원", position: 1, total: 3 });
+  });
+
+  it("법원이 0곳이면(설정상 불가능하지만 방어적) '-'을 보여준다", () => {
+    const result = describeRotationPosition([], null);
+    expect(result).toEqual({ nextCourtName: "-", position: 0, total: 0 });
   });
 });

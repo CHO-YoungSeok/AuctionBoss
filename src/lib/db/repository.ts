@@ -127,9 +127,12 @@ interface ItemChangeRow {
   kind: ItemChangeKind;
 }
 
-/** `listItems`의 서브쿼리 컬럼까지 포함한 행. 기본 `ItemRow`를 확장한다(design.md D6). */
+/** `listItems`의 서브쿼리 컬럼까지 포함한 행. 기본 `ItemRow`를 확장한다(design.md D6).
+ * `bookmarked`는 add-bookmarks-and-feed가 같은 방식(스칼라 서브쿼리)으로 추가했다. */
 interface ItemListRow extends ItemRow {
   last_changed_at: string | null;
+  /** SQLite의 `EXISTS(...)`는 0/1 정수로 나온다. */
+  bookmarked: number;
 }
 
 /**
@@ -139,7 +142,11 @@ interface ItemListRow extends ItemRow {
  * 그대로 노출해 단일 물건 조회에서만 `lastChangedAt`이 항상 null로 보이는 버그였다).
  * 인자를 생략하는 호출은 여전히 null이 기본값이다(이 값을 모르는 다른 생성 경로 대비).
  */
-function toAuctionItem(row: ItemRow, lastChangedAt: string | null = null): AuctionItem {
+function toAuctionItem(
+  row: ItemRow,
+  lastChangedAt: string | null = null,
+  bookmarked: number | boolean = false,
+): AuctionItem {
   return {
     id: row.id,
     court: row.court,
@@ -155,6 +162,7 @@ function toAuctionItem(row: ItemRow, lastChangedAt: string | null = null): Aucti
     firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at,
     lastChangedAt,
+    bookmarked: Boolean(bookmarked),
     minArea: row.min_area,
     maxArea: row.max_area,
     buildingDescription: row.building_description,
@@ -394,6 +402,17 @@ const LAST_CHANGED_AT_EXPR = `(
   SELECT MAX(item_changes.changed_at)
   FROM item_changes
   WHERE item_changes.item_id = items.id AND item_changes.kind = 'change'
+)`;
+
+/**
+ * `listItems`/`getItemById`가 목록·상세 행에 붙이는 "관심 목록에 담겼는가" 스칼라 서브쿼리
+ * (add-bookmarks-and-feed, design.md D6 — `lastChangedAt`을 추가할 때와 같은 방식).
+ * `WHERE`·`ORDER BY`·`total`에는 관여하지 않으므로 기존 필터·정렬 로직과 그 테스트를
+ * 건드리지 않는다. "관심 물건만 보기" 필터는 이번 범위 밖이다(design.md D6) — 전용 페이지
+ * (`/bookmarks`)가 그 역할을 한다.
+ */
+const BOOKMARKED_EXPR = `(
+  EXISTS (SELECT 1 FROM bookmarks WHERE bookmarks.item_id = items.id)
 )`;
 
 /**
@@ -683,10 +702,11 @@ export function createRepository(db: Db): AuctionRepository {
     `SELECT * FROM items WHERE id = @id`,
   );
 
-  // getItemById 전용(finding 5) — listItems와 같은 lastChangedAt 서브쿼리를 쓴다
-  // (LAST_CHANGED_AT_EXPR 상수 하나를 공유해 두 곳이 어긋나지 않게 한다).
+  // getItemById 전용(finding 5) — listItems와 같은 lastChangedAt/bookmarked 서브쿼리를 쓴다
+  // (LAST_CHANGED_AT_EXPR/BOOKMARKED_EXPR 상수를 공유해 두 곳이 어긋나지 않게 한다).
   const selectItemByIdWithLastChanged = db.prepare<{ id: number }, ItemListRow>(
-    `SELECT items.*, ${LAST_CHANGED_AT_EXPR} AS last_changed_at FROM items WHERE items.id = @id`,
+    `SELECT items.*, ${LAST_CHANGED_AT_EXPR} AS last_changed_at, ${BOOKMARKED_EXPR} AS bookmarked
+     FROM items WHERE items.id = @id`,
   );
 
   const insertItemChange = db.prepare(`
@@ -911,12 +931,12 @@ export function createRepository(db: Db): AuctionRepository {
         db
           .prepare<BindParams, { total: number }>(`SELECT COUNT(*) AS total FROM items ${filter.where}`)
           .get(filter.params)?.total ?? 0;
-      // "최근 변경 시각"은 스칼라 서브쿼리 컬럼으로만 추가한다(design.md D6) — WHERE/ORDER
-      // BY/total(위)에는 관여하지 않아 기존 필터·정렬 로직을 건드리지 않는다. 기준점 행은
-      // 실제 변경이 아니므로 LAST_CHANGED_AT_EXPR이 이미 제외한다.
+      // "최근 변경 시각"·"관심 여부"는 스칼라 서브쿼리 컬럼으로만 추가한다(design.md D6) —
+      // WHERE/ORDER BY/total(위)에는 관여하지 않아 기존 필터·정렬 로직을 건드리지 않는다.
+      // 기준점 행은 실제 변경이 아니므로 LAST_CHANGED_AT_EXPR이 이미 제외한다.
       const rows = db
         .prepare<BindParams, ItemListRow>(
-          `SELECT items.*, ${LAST_CHANGED_AT_EXPR} AS last_changed_at
+          `SELECT items.*, ${LAST_CHANGED_AT_EXPR} AS last_changed_at, ${BOOKMARKED_EXPR} AS bookmarked
            FROM items ${filter.where} ${orderBy} LIMIT @limit OFFSET @offset`,
         )
         .all({
@@ -926,7 +946,7 @@ export function createRepository(db: Db): AuctionRepository {
         });
 
       return {
-        items: rows.map((row) => toAuctionItem(row, row.last_changed_at)),
+        items: rows.map((row) => toAuctionItem(row, row.last_changed_at, row.bookmarked)),
         total,
         page,
         pageSize,
@@ -934,11 +954,12 @@ export function createRepository(db: Db): AuctionRepository {
     },
 
     getItemById(id) {
-      // listItems와 같은 lastChangedAt 서브쿼리를 쓴다(finding 5) — 이전에는 이 메서드만
-      // `selectItemById`(서브쿼리 없음)를 써서 항상 null을 돌려줬고, `GET /api/items/[id]`가
-      // 그 값을 그대로 노출해 단일 물건 조회에서만 lastChangedAt이 항상 null로 보였다.
+      // listItems와 같은 lastChangedAt/bookmarked 서브쿼리를 쓴다(finding 5, add-bookmarks-
+      // and-feed) — 이전에는 이 메서드만 `selectItemById`(서브쿼리 없음)를 써서 항상 null을
+      // 돌려줬고, `GET /api/items/[id]`가 그 값을 그대로 노출해 단일 물건 조회에서만
+      // lastChangedAt이 항상 null로 보였다 — bookmarked도 같은 이유로 이 조회를 거쳐야 한다.
       const row = selectItemByIdWithLastChanged.get({ id });
-      return row ? toAuctionItem(row, row.last_changed_at) : null;
+      return row ? toAuctionItem(row, row.last_changed_at, row.bookmarked) : null;
     },
 
     listUsageTypes() {

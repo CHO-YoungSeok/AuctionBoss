@@ -139,6 +139,35 @@ function formatChangeFieldValue(field: WatchedField, value: string | null): stri
   }
 }
 
+export interface FieldChangeDisplay {
+  text: string;
+  direction: PriceDirection | null;
+}
+
+/**
+ * `field`의 old→new 값을 표시 문자열로 만든다. 가격(`minBidPrice`)은 `formatPriceChange`로
+ * 증감액·증감률까지 계산하고, 그 외 필드는 필드별 포맷터(`formatChangeFieldValue`)로 각
+ * 값을 개별 포맷한 뒤 "이전 → 새 값"으로 잇는다.
+ *
+ * `formatChangeDisplay`(물건 상세의 변경 이력)와 `formatFeedEntryDisplay`(피드,
+ * `feed-display.ts`)가 이 함수 하나를 공유한다 — 같은 `field`/`oldValue`/`newValue`를 받는
+ * 두 화면이 표시 규칙을 각자 베끼면 한쪽만 고쳐 어긋나는 것이 D2가 경계한 이중화 문제와
+ * 같은 위험이다.
+ */
+export function formatFieldChange(
+  field: WatchedField,
+  oldValue: string | null,
+  newValue: string | null,
+): FieldChangeDisplay {
+  if (field === "minBidPrice") {
+    const { text, direction } = formatPriceChange(oldValue, newValue);
+    return { text, direction };
+  }
+  const oldText = formatChangeFieldValue(field, oldValue);
+  const newText = formatChangeFieldValue(field, newValue);
+  return { text: `${oldText} → ${newText}`, direction: null };
+}
+
 export interface ChangeDisplay {
   id: number;
   field: WatchedField;
@@ -156,18 +185,6 @@ export interface ChangeDisplay {
  */
 export function formatChangeDisplay(change: ItemChange): ChangeDisplay {
   const label = WATCHED_FIELD_LABELS[change.field];
-  if (change.field === "minBidPrice") {
-    const { text, direction } = formatPriceChange(change.oldValue, change.newValue);
-    return { id: change.id, field: change.field, label, text, direction, changedAt: change.changedAt };
-  }
-  const oldText = formatChangeFieldValue(change.field, change.oldValue);
-  const newText = formatChangeFieldValue(change.field, change.newValue);
-  return {
-    id: change.id,
-    field: change.field,
-    label,
-    text: `${oldText} → ${newText}`,
-    direction: null,
-    changedAt: change.changedAt,
-  };
+  const { text, direction } = formatFieldChange(change.field, change.oldValue, change.newValue);
+  return { id: change.id, field: change.field, label, text, direction, changedAt: change.changedAt };
 }

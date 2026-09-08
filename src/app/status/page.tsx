@@ -12,15 +12,30 @@
  */
 import Link from "next/link";
 
-import { getWorkerStatus, listWorkerRuns, summarizeRuns } from "@/lib/db";
-import { WORKER_KINDS, type WorkerKind, type WorkerRun } from "@/lib/domain";
+import {
+  COLLECTOR_STATE_KEYS,
+  getCollectorState,
+  getUnreadCount,
+  getWorkerStatus,
+  listWorkerRuns,
+  summarizeRuns,
+} from "@/lib/db";
+import {
+  computeLapDurationMs,
+  loadCollectorConfig,
+  WORKER_KINDS,
+  type WorkerKind,
+  type WorkerRun,
+} from "@/lib/domain";
 
 import { formatDateTime } from "../_lib/format";
 import {
   WORKER_LABELS,
   describeOutcome,
+  describeRotationPosition,
   describeRunDetail,
   describeWorkerState,
+  formatMs,
   formatRunDuration,
   formatSuccessRate,
 } from "../_lib/status-display";
@@ -48,6 +63,58 @@ function RunRow({ run, now }: { run: WorkerRun; now: Date }) {
       <span className="run-duration">{formatRunDuration(run.startedAt, run.finishedAt, now)}</span>
       <span className="run-detail">{describeRunDetail(run)}</span>
     </li>
+  );
+}
+
+/**
+ * 로테이션 정보(한 바퀴 소요 시간·다음 위치, task 4.2/design.md D3) — collector 워커
+ * 카드에만 붙는다. 법원을 추가할 때 신선도가 나빠지는 대가를 화면에서 바로 보이게
+ * 하는 것이 목적이다(design.md D3/Risks) — 숨기지 않는 것이 최선의 대응이라는 판단.
+ *
+ * `loadCollectorConfig()`는 설정이 잘못되면 던진다(design.md D5, 의도된 fail-fast).
+ * 워커 프로세스라면 그대로 죽는 게 맞지만, 이 화면은 그 워커가 죽었는지 아닌지를
+ * 보러 오는 화면이다 — 설정 오류 때문에 상태 화면 전체가 깨지면 정작 봐야 할 다른
+ * 정보(성공률·차단 여부 등)까지 가려진다. 그래서 여기서만 잡아 표시로 대체한다.
+ */
+function RotationInfo() {
+  let config;
+  try {
+    config = loadCollectorConfig();
+  } catch (error) {
+    return (
+      <p className="muted status-rotation-error">
+        수집 설정을 불러올 수 없어 로테이션 정보를 표시할 수 없습니다: {String(error)}
+      </p>
+    );
+  }
+
+  const lapMs = computeLapDurationMs(
+    config.scope.courts.length,
+    config.scope.maxCourtsPerRun,
+    config.intervalMs,
+  );
+  const nextCourtCode = getCollectorState(COLLECTOR_STATE_KEYS.ROTATION_NEXT_COURT_CODE);
+  const rotation = describeRotationPosition(config.scope.courts, nextCourtCode);
+
+  return (
+    <dl className="status-summary status-rotation">
+      <div className="status-summary-item">
+        <dt>한 바퀴 소요 시간</dt>
+        <dd>{formatMs(lapMs)}</dd>
+      </div>
+      <div className="status-summary-item">
+        <dt>대상 법원 수</dt>
+        <dd>
+          {config.scope.courts.length}곳 (회차당 {config.scope.maxCourtsPerRun}곳)
+        </dd>
+      </div>
+      <div className="status-summary-item">
+        <dt>다음 로테이션 위치</dt>
+        <dd>
+          {rotation.nextCourtName} ({rotation.position}/{rotation.total})
+        </dd>
+      </div>
+    </dl>
   );
 }
 
@@ -94,6 +161,10 @@ function WorkerStatusCard({ worker, now }: { worker: WorkerKind; now: Date }) {
         </div>
       </dl>
 
+      {/* 로테이션(법원 순환)은 collector 워커에만 있는 개념이다(design.md D1~D3) —
+          analyzer 카드에는 붙이지 않는다. */}
+      {worker === "collector" ? <RotationInfo /> : null}
+
       <h3>최근 회차</h3>
       {runs.length === 0 ? (
         <p className="empty">아직 실행 기록이 없습니다.</p>
@@ -113,10 +184,20 @@ export default function StatusPage() {
   // 카드마다 다시 계산하면 렌더 중 시각이 흔들려 "경과 시간" 표시가 이해하기 어려워진다.
   const now = new Date();
 
+  // 관심 물건·변동 피드로 가는 경로에 미확인 개수를 보여준다(add-bookmarks-and-feed
+  // task 4.5) — 목록/상세 페이지와 같은 이유.
+  const unreadCount = getUnreadCount();
+
   return (
     <main className="page">
       <p className="breadcrumb">
         <Link href="/">← 물건 목록</Link>
+        {" · "}
+        <Link href="/bookmarks">관심 물건</Link>
+        {" · "}
+        <Link href="/feed">
+          변동 피드{unreadCount > 0 ? ` (미확인 ${unreadCount.toLocaleString("ko-KR")}건)` : ""}
+        </Link>
       </p>
 
       <header className="page-header">
