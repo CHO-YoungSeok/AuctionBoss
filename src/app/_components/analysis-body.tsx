@@ -13,7 +13,7 @@
  */
 import { Fragment } from "react";
 
-import { parseAnalysisBody, type AnalysisInline } from "./analysis-body";
+import { parseAnalysisBody, type AnalysisInline } from "./analysis-body-parse";
 
 function renderInline(token: AnalysisInline, key: number) {
   if (token.type === "bold") return <strong key={key}>{token.value}</strong>;
