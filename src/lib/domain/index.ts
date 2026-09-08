@@ -43,7 +43,12 @@ export {
   resolveConfigPath,
 } from "./config";
 
-export { computePricePerArea, type PricePerAreaFields } from "./price";
+export {
+  computePricePerArea,
+  type PricePerAreaBasisField,
+  type PricePerAreaFields,
+  type PricePerAreaResult,
+} from "./price";
 
 export { PROMPT_VERSION } from "./analysis";
 

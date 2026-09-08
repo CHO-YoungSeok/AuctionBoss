@@ -65,6 +65,16 @@ export type LatestAnalysisFields = Pick<Analysis, "analyzedAt" | "promptVersion"
  * @param currentPromptVersion 비교 기준이 되는 현재 프롬프트 버전
  *   (`src/lib/domain/analysis.ts`의 `PROMPT_VERSION`, 워커가 실제로 쓰는 값과 동일).
  */
+/**
+ * 분석 화면에 상설로 고지하는 소스 한계 문구(ux-overhaul-phase1 design.md, tasks.md 7.3,
+ * spec: "소스 한계 고지"). 이 프로젝트의 데이터 소스(법원경매정보)는 권리관계·임차인·
+ * 등기 정보를 제공하지 않는다 — README가 이미 "사람이 반드시 알아야 하는 상한선"이라고
+ * 적어 둔 사실인데, 화면 어디에도 그 사실이 없었다. 분석 본문만 읽은 사용자가 그것을
+ * 권리분석까지 포함한 결과로 오해해서는 안 된다(spec, MUST NOT).
+ */
+export const SOURCE_LIMITATION_NOTICE =
+  "이 분석은 법원경매정보가 제공하는 물건 정보만을 근거로 합니다. 권리관계·임차인·등기 정보는 이 데이터 소스에 포함되어 있지 않으므로, 이 분석에도 반영되어 있지 않습니다. 입찰 전 반드시 별도로 권리분석을 확인하세요.";
+
 export function determineAnalysisFreshness(
   latestAnalysis: LatestAnalysisFields | null,
   changes: readonly Pick<ItemChange, "kind" | "changedAt">[],

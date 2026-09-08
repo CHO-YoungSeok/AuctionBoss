@@ -12,35 +12,81 @@
  * - 코드값(용도 대/중/소분류, 진행상태/물건상태 코드, 좌표)은 절대 해석하지 않는다. 이
  *   파일은 그 필드들에 라벨을 붙이는 함수를 두지 않는다 — 붙일 라벨이 없다는 뜻이다.
  */
-import type { AuctionItem } from "@/lib/domain";
+import {
+  computePricePerArea,
+  type AuctionItem,
+  type PricePerAreaBasisField,
+  type PricePerAreaFields,
+  type PricePerAreaResult,
+} from "@/lib/domain";
 
 import { EMPTY, formatWon } from "./format";
 
 const integerFormatter = new Intl.NumberFormat("ko-KR");
 
 // ---------------------------------------------------------------------------
-// 면적 · 건물 구조
+// 면적 · 건물 구조 (ux-overhaul-phase1 design.md D1)
 // ---------------------------------------------------------------------------
 
 /** `AuctionItem`에서 면적 표시에 쓰는 부분집합. */
 export type AreaFields = Pick<AuctionItem, "minArea" | "maxArea">;
 
+/** 1평 = 3.3058㎡(공식 환산 계수). */
+const SQM_PER_PYEONG = 3.3058;
+
 /**
- * 면적을 사람이 읽는 문자열로 만든다. `minArea`/`maxArea`가 같으면(REAL_ROW의 실제 관측
- * 값이 그렇듯 대부분 같다) 한 번만 보여주고, 다르면 범위로 보여준다. 둘 다 없으면 EMPTY.
+ * ㎡ → 평 환산(task 2.1). 원본 면적이 정수로 절삭 저장되므로(NOTES.md) 환산값도 소수
+ * 1자리까지만 쓴다 — 2자리 이상을 쓰면 원본에 없는 정밀도를 꾸며내는 것이 된다.
+ *
+ * 0·음수·비유한값은 모두 null(변환 불가) — 이 도메인에서 면적 0은 이미 데이터 계층이
+ * null로 접어 두는 값이라(design.md D3) 여기 들어올 일이 없어야 하지만, 순수 함수로서
+ * 방어적으로 다시 확인한다.
+ */
+export function toPyeong(sqm: number): number | null {
+  if (typeof sqm !== "number" || !Number.isFinite(sqm) || sqm <= 0) return null;
+  return Math.round((sqm / SQM_PER_PYEONG) * 10) / 10;
+}
+
+/** 면적 하나(㎡, 이미 유효성 검증된 양수)를 `"84㎡ (25.4평)"` 형태로 병기한다(task 2.2). */
+function formatAreaWithPyeong(sqm: number): string {
+  const pyeong = toPyeong(sqm);
+  return pyeong === null ? `${sqm}㎡` : `${sqm}㎡ (${pyeong}평)`;
+}
+
+/**
+ * 면적을 사람이 읽는 문자열로 만든다.
+ *
+ * design.md D1: 실데이터의 48%는 `minArea > maxArea`(역전)다 — 원인 불명, 두 필드가
+ * 대지권/전유면적인지 토지/건물인지조차 소스 재조사 없이는 알 수 없다. 이 경우
+ * `"11414㎡ ~ 80㎡"`처럼 범위로 이으면 **존재하지 않는 범위**를 사실처럼 보여주게 된다.
+ * 그렇다고 값을 정렬해 `"80㎡ ~ 11414㎡"`로 뒤집지도 않는다 — "최소가 80"이라는 없는
+ * 사실을 만들게 된다. 대신 소스가 부른 그대로 "면적 A"(minArea)·"면적 B"(maxArea)로
+ * 병기하고 의미가 미확정임을 밝힌다 — 좌표·용도코드에 이미 적용한 원칙(design.md D4,
+ * 이전 change)과 같다.
+ *
+ * `minArea`/`maxArea`가 같으면(REAL_ROW의 실제 관측값 대부분이 그렇듯) 한 번만 보여주고,
+ * 정상 범위(`min <= max`, 둘이 다름)면 두 값을 `~`로 잇는다(task 1.2, 실데이터 52%).
+ * 한쪽만 있으면 그 값만, 둘 다 없으면 EMPTY. 모든 경우에 평이 함께 표시된다(task 2.2).
  */
 export function formatAreaRange({ minArea, maxArea }: AreaFields): string {
-  const min = typeof minArea === "number" && Number.isFinite(minArea) ? minArea : null;
-  const max = typeof maxArea === "number" && Number.isFinite(maxArea) ? maxArea : null;
+  const min = typeof minArea === "number" && Number.isFinite(minArea) && minArea > 0 ? minArea : null;
+  const max = typeof maxArea === "number" && Number.isFinite(maxArea) && maxArea > 0 ? maxArea : null;
+
   if (min === null && max === null) return EMPTY;
-  if (min !== null && max !== null) {
-    return min === max ? `${min}㎡` : `${min}㎡ ~ ${max}㎡`;
+  if (min === null || max === null) return formatAreaWithPyeong((min ?? max)!);
+  if (min === max) return formatAreaWithPyeong(min);
+
+  if (min > max) {
+    // 역전(design.md D1) — 범위로 잇지 않는다. "A"/"B"는 어느 쪽이 진짜 최소·최대인지
+    // 확정하지 않는 중립적 이름이다(minArea=A, maxArea=B, 소스가 준 필드 순서 그대로).
+    return `면적 A ${formatAreaWithPyeong(min)} · 면적 B ${formatAreaWithPyeong(max)} (의미 미확정)`;
   }
-  return `${(min ?? max)!}㎡`;
+
+  return `${formatAreaWithPyeong(min)} ~ ${formatAreaWithPyeong(max)}`;
 }
 
 // ---------------------------------------------------------------------------
-// 면적당 가격 (task 4.4)
+// 면적당 가격 (task 4.4, ux-overhaul-phase1 design.md D2)
 //
 // 계산 자체(`computePricePerArea`)는 `src/lib/domain/price.ts`에 있다 — 분석 워커
 // (`workers/lib/derived.ts`, enrich-item-fields 실데이터 검증 이후 추가)도 똑같은 계산이
@@ -49,12 +95,21 @@ export function formatAreaRange({ minArea, maxArea }: AreaFields): string {
 // 공유 함수를 그대로 재노출한다 — 정의를 두 번 하지 않기 위함이다.
 // ---------------------------------------------------------------------------
 
-export { computePricePerArea, type PricePerAreaFields } from "@/lib/domain";
+export { computePricePerArea, type PricePerAreaBasisField, type PricePerAreaFields, type PricePerAreaResult };
 
-/** `computePricePerArea`의 결과를 화면 문자열로 만든다. 원 단위 반올림 후 천 단위 구분. */
-export function formatPricePerArea(value: number | null): string {
-  if (value === null) return EMPTY;
-  return `${integerFormatter.format(Math.round(value))}원/㎡`;
+/**
+ * `computePricePerArea`의 결과를 화면 문자열로 만든다. 원 단위 반올림 후 천 단위 구분.
+ *
+ * design.md D2: `basisAmbiguous`가 true(=minArea·maxArea가 둘 다 있고 서로 다름)일 때만
+ * 기준 면적을 괄호로 밝힌다 — `1,296,089원/㎡ (면적 A 179㎡ 기준)`. 둘이 같거나 한쪽만
+ * 있으면 기준이 결과에 영향을 주지 않으므로 표기를 생략한다(tasks.md 1.4).
+ */
+export function formatPricePerArea(result: PricePerAreaResult | null): string {
+  if (result === null) return EMPTY;
+  const price = `${integerFormatter.format(Math.round(result.pricePerArea))}원/㎡`;
+  if (!result.basisAmbiguous) return price;
+  const label = result.basisField === "minArea" ? "A" : "B";
+  return `${price} (면적 ${label} ${integerFormatter.format(result.basisArea)}㎡ 기준)`;
 }
 
 // ---------------------------------------------------------------------------

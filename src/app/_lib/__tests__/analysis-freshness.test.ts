@@ -5,6 +5,7 @@ import type { ItemChange } from "@/lib/domain";
 import {
   ANALYSIS_FRESHNESS_DESCRIPTIONS,
   ANALYSIS_FRESHNESS_LABELS,
+  SOURCE_LIMITATION_NOTICE,
   determineAnalysisFreshness,
   type AnalysisFreshness,
 } from "../analysis-freshness";
@@ -96,5 +97,15 @@ describe("determineAnalysisFreshness", () => {
 
   it("stale 설명 문구는 '현재 값 기준이 아닐 수 있다'는 경고를 담는다", () => {
     expect(ANALYSIS_FRESHNESS_DESCRIPTIONS.stale).toMatch(/다를 수 있습니다|기준이 아닐 수/);
+  });
+});
+
+describe("SOURCE_LIMITATION_NOTICE", () => {
+  // spec: "소스 한계 고지" — 권리관계·임차인·등기 정보가 이 소스에 없다는 사실이 항상
+  // 이 문구에 담겨 있어야 한다. 문구를 바꿔도 이 세 키워드는 남아야 한다.
+  it("권리관계·임차인·등기 정보가 이 소스에 없다는 사실을 담는다", () => {
+    expect(SOURCE_LIMITATION_NOTICE).toContain("권리관계");
+    expect(SOURCE_LIMITATION_NOTICE).toContain("임차인");
+    expect(SOURCE_LIMITATION_NOTICE).toContain("등기");
   });
 });
