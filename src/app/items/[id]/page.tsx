@@ -31,6 +31,7 @@ import {
   formatText,
   formatWon,
 } from "../../_lib/format";
+import { buildCourtVerifyLink } from "../../_lib/court-verify";
 import {
   computePricePerArea,
   formatAreaRange,
@@ -40,12 +41,6 @@ import {
   formatUsageCodes,
   listRoundPrices,
 } from "../../_lib/item-extensions";
-
-/** 법원경매정보 홈. 물건별 GET URL이 존재하지 않으므로(design.md Context — 상세 화면
- * XML에 location.search/hash/URLSearchParams가 0건) 항상 이 홈으로만 보낸다. `w2xPath=`로
- * 상세 화면을 강제로 여는 링크는 만들지 않는다 — 물건 지정 파라미터가 없어 데이터 없는
- * 빈 화면이나 오류로 이어질 위험이 홈보다 크다(tasks.md 4.2). */
-const COURT_AUCTION_HOME_URL = "https://www.courtauction.go.kr/pgj/index.on";
 
 export const dynamic = "force-dynamic";
 
@@ -138,6 +133,11 @@ export default async function ItemDetailPage({
   // NEEDS_ANALYSIS_PREDICATE)과 같은 두 조건(변경/프롬프트 버전)을 재사용한다. 화면과
   // 워커가 다른 판정을 내지 않도록 판정 로직을 새로 만들지 않는다.
   const analysisFreshness = determineAnalysisFreshness(analysis, changes, PROMPT_VERSION);
+
+  // 원본 확인(design.md D2, tasks.md 4.1~4.2) — homeUrl은 court-verify.ts의 계약대로 물건과
+  // 무관하게 항상 같은 고정 URL이다. 딥링크(w2xPath/csNo 등 물건 지정 파라미터)를 만들지
+  // 않는다.
+  const courtVerifyLink = buildCourtVerifyLink(item);
 
   // 관심 물건·변동 피드로 가는 경로에 미확인 개수를 보여준다(task 4.5) — 목록 페이지와
   // 같은 이유.
@@ -323,14 +323,13 @@ export default async function ItemDetailPage({
         (design.md Context) 홈 링크만 준다 — 그 자리에서 검색에 필요한 값(법원명·사건번호)을
         `<input readonly>`로 제공해 클릭 한 번으로 전체 선택이 되게 한다(클립보드 복사는
         JS가 필요하지만, readonly input의 전체 선택은 아니다 — 프로젝트의 "클라이언트 JS
-        없음" 규칙을 지킨다). `w2xPath=`로 상세 화면을 강제로 여는 링크는 절대 만들지
-        않는다 — 물건 지정 파라미터가 없어 데이터 없는 빈 화면이나 오류로 이어질 위험이
-        홈보다 크다.
+        없음" 규칙을 지킨다). `courtVerifyLink.homeUrl`은 물건과 무관한 고정값이다
+        (court-verify.ts) — `w2xPath=`로 상세 화면을 강제로 여는 링크는 절대 만들지 않는다.
       */}
       <section className="card">
         <h2>법원경매정보에서 확인</h2>
         <p className="muted">
-          <a href={COURT_AUCTION_HOME_URL} target="_blank" rel="noreferrer noopener">
+          <a href={courtVerifyLink.homeUrl} target="_blank" rel="noreferrer noopener">
             법원경매정보 홈으로 이동 →
           </a>
         </p>
@@ -344,7 +343,7 @@ export default async function ItemDetailPage({
                 id="court-verify-court"
                 type="text"
                 readOnly
-                value={item.court}
+                value={courtVerifyLink.court}
                 className="court-verify-input"
               />
             </dd>
@@ -358,7 +357,7 @@ export default async function ItemDetailPage({
                 id="court-verify-case-no"
                 type="text"
                 readOnly
-                value={item.caseNo}
+                value={courtVerifyLink.caseNo}
                 className="court-verify-input"
               />
             </dd>

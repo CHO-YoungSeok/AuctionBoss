@@ -63,9 +63,8 @@ const CURRENT_PROMPT_VERSION = "v1";
  */
 function assertAgreement(itemId: number) {
   const changes = repo.listItemChanges(itemId);
-  const latest = repo
-    .listAnalyses(itemId, { limit: 1 })
-    .find((a) => true); // listAnalyses는 analyzed_at DESC, id DESC — 첫 항목이 최신.
+  // listAnalyses는 analyzed_at DESC, id DESC로 정렬되므로 첫 항목이 최신이다.
+  const latest = repo.listAnalyses(itemId, { limit: 1 })[0];
   const freshness = determineAnalysisFreshness(latest ?? null, changes, CURRENT_PROMPT_VERSION);
 
   const sqlSaysNeedsReanalysis = repo
@@ -122,19 +121,14 @@ describe("determineAnalysisFreshness ↔ NEEDS_ANALYSIS_PREDICATE 실제 저장�
     assertAgreement(item.id);
   });
 
-  it("기준점(baseline)만 최신 분석 이후에 있음 — 둘 다 '변경 아님'으로 최신 유지", () => {
-    // 1차 수집(기준점) → 분석 → 2차 수집이 같은 값이면 upsert가 기준점을 새로 만들지
-    // 않는다. 대신 최초 수집 자체가 분석보다 뒤에 있는 케이스로 "기준점만 분석 이후"를
-    // 재현한다: 물건은 분석 시각 이후 최초로 나타나지만, 그 첫 행은 kind=baseline이다.
-    repo.upsertItems([makeItem({ itemNo: "later" })], { now: "2026-01-05T00:00:00.000Z" });
-    const item = repo.listItems({ pageSize: 10 }).items.find((i) => i.itemNo === "later")!;
-    // 분석 시각을 기준점보다 나중으로 만들 수는 없으므로(분석은 물건이 존재해야 가능),
-    // 대신 실제 변경이 전혀 없는 물건(기준점 하나뿐)에서 분석이 그 뒤에 온 표준 케이스로
-    // 일치성을 확인한다 — repository.test.ts의 "기준점 행은 재분석 대상으로 만들지 않는다"와
-    // 동일 시나리오.
+  it("기준점(baseline) 행뿐이고 실제 변경은 없음 — 기준점은 신호로 안 쳐서 둘 다 최신", () => {
+    // repository.test.ts의 "기준점 행(old_value IS NULL)은 재분석 대상으로 만들지 않는다"와
+    // 동일 시나리오 — 최초 수집(기준점)뿐이고 그 뒤 값이 바뀐 적이 없는 물건.
+    repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" }); // 기준점만 존재
+    const item = repo.listItems({ pageSize: 10 }).items[0]!;
     repo.insertAnalysis(
       { itemId: item.id, body: "x", model: null, promptVersion: CURRENT_PROMPT_VERSION },
-      { now: "2026-01-06T00:00:00.000Z" },
+      { now: "2026-01-02T00:00:00.000Z" }, // 기준점보다 나중
     );
     assertAgreement(item.id);
   });
@@ -158,6 +152,20 @@ describe("determineAnalysisFreshness ↔ NEEDS_ANALYSIS_PREDICATE 실제 저장�
       { now: "2026-01-02T00:00:00.000Z" },
     );
     repo.upsertItems([makeItem({ minBidPrice: 1 })], { now: "2026-01-03T00:00:00.000Z" });
+    assertAgreement(item.id);
+  });
+
+  it("변경 시각과 분석 시각이 정확히 같음(경계 포함) — 이미 반영된 것으로 보고 둘 다 최신", () => {
+    // SQL도 화면도 `>`(초과)로 비교한다 — 같은 시각이면 그 분석이 이미 반영한 것으로 본다.
+    // 화면 쪽만 `>=`로 바뀌면 이 지점에서만 SQL과 갈라진다(경계값이라 다른 테스트로는 안
+    // 잡힌다 — assertAgreement로 실제 저장소 데이터를 통해 확인한다).
+    repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" }); // 기준점
+    repo.upsertItems([makeItem({ minBidPrice: 1 })], { now: "2026-01-02T00:00:00.000Z" }); // 실제 변경
+    const item = repo.listItems({ pageSize: 10 }).items[0]!;
+    repo.insertAnalysis(
+      { itemId: item.id, body: "x", model: null, promptVersion: CURRENT_PROMPT_VERSION },
+      { now: "2026-01-02T00:00:00.000Z" }, // 변경과 정확히 같은 시각
+    );
     assertAgreement(item.id);
   });
 
