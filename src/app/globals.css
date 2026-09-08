@@ -296,6 +296,53 @@ tbody tr:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* 분석 최신성 배지(물건 상세, improve-item-discovery-ux design.md D3). 텍스트 라벨이
+   상태를 구별하는 주된 수단이다(spec: "색에만 의존해서는 안 된다") — 색은 훑어보기를
+   돕는 보조 수단일 뿐이다. */
+.analysis-freshness-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.analysis-freshness-pending {
+  color: #5f6672;
+  background: #eceff3;
+}
+
+.analysis-freshness-fresh {
+  color: #1a7f37;
+  background: #e6f4ea;
+}
+
+/* "갱신 예정"은 표시 중인 분석이 현재 값 기준이 아닐 수 있다는 경고이므로, blocked와
+   같은 강조 색(빨강 계열)을 쓴다. */
+.analysis-freshness-stale {
+  color: #a15c00;
+  background: #fff4e5;
+}
+
+/* 원본 확인 블록의 법원명·사건번호 입력칸(물건 상세, design.md D2). readOnly라
+   `<input>`이지만 값을 고칠 수는 없다 — 클릭 한 번으로 전체 선택이 되는 걸 노린다
+   (클립보드 복사는 JS가 필요하지만 readOnly input의 전체 선택은 아니다). */
+.court-verify-fields {
+  margin-top: 0.75rem;
+}
+
+.court-verify-input {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  color: inherit;
+  background: #fafbfc;
+  border: 1px solid #cfd5dd;
+  border-radius: 4px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
 /* 최저가 하락은 관전자에게 가장 의미 있는 이벤트라 눈에 띄게 강조한다. */
 .change-value.change-drop {
   color: #c0392b;
@@ -304,6 +351,28 @@ tbody tr:hover {
 
 .change-value.change-rise {
   color: #1a4fd6;
+}
+
+/* 목록의 저감률 단계 표시(improve-item-discovery-ux design.md D1). 텍스트 라벨
+   (discount-stage-label)이 단계를 구별하는 주된 수단이고, 아래 색은 훑어보기를 돕는
+   보조 수단일 뿐이다(spec: "색에만 의존해서는 안 된다") — 라벨을 지워도 색만으로
+   4단계가 구별되게 만들지 않는다. */
+.discount-stage-label {
+  color: #5f6672;
+  font-size: 0.85rem;
+}
+
+.discount-stage-firstDrop {
+  color: #a15c00;
+}
+
+.discount-stage-secondDrop {
+  color: #c0392b;
+}
+
+.discount-stage-deepDrop {
+  color: #c0392b;
+  font-weight: 700;
 }
 
 /* 목록에서 최근 변동 물건을 표시하는 배지 (design.md D6). */

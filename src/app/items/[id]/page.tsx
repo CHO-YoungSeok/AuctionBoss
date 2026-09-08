@@ -6,11 +6,23 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { PROMPT_VERSION } from "@/lib/domain";
 import { getRepository, getUnreadCount } from "@/lib/db";
 
 import { BookmarkToggleForm } from "../../_components/bookmark-toggle-form";
+import {
+  ANALYSIS_FRESHNESS_DESCRIPTIONS,
+  ANALYSIS_FRESHNESS_LABELS,
+  determineAnalysisFreshness,
+} from "../../_lib/analysis-freshness";
 import { splitAnalysisHistory } from "../../_lib/analysis-history";
 import { formatChangeDisplay, hasRealChange, isRealChange } from "../../_lib/change-history";
+import {
+  DISCOUNT_STAGE_LABELS,
+  classifyDiscountStage,
+  computeDiscountRatio,
+  formatDiscountRatio,
+} from "../../_lib/discount";
 import {
   EMPTY,
   formatCount,
@@ -28,6 +40,12 @@ import {
   formatUsageCodes,
   listRoundPrices,
 } from "../../_lib/item-extensions";
+
+/** 법원경매정보 홈. 물건별 GET URL이 존재하지 않으므로(design.md Context — 상세 화면
+ * XML에 location.search/hash/URLSearchParams가 0건) 항상 이 홈으로만 보낸다. `w2xPath=`로
+ * 상세 화면을 강제로 여는 링크는 만들지 않는다 — 물건 지정 파라미터가 없어 데이터 없는
+ * 빈 화면이나 오류로 이어질 위험이 홈보다 크다(tasks.md 4.2). */
+const COURT_AUCTION_HOME_URL = "https://www.courtauction.go.kr/pgj/index.on";
 
 export const dynamic = "force-dynamic";
 
@@ -111,6 +129,16 @@ export default async function ItemDetailPage({
   const usageCodesText = formatUsageCodes(item);
   const structuredAddressText = formatStructuredAddress(item);
 
+  // 저감률(design.md D1, tasks.md 1.1) — 계산 불가(감정가 없음·0 등)면 discountStage도
+  // 항상 null이다(classifyDiscountStage 계약).
+  const discountRatio = computeDiscountRatio(item);
+  const discountStage = classifyDiscountStage(discountRatio);
+
+  // 분석 최신성(design.md D3, tasks.md 3.1) — 재분석 대상 선정(repository.ts의
+  // NEEDS_ANALYSIS_PREDICATE)과 같은 두 조건(변경/프롬프트 버전)을 재사용한다. 화면과
+  // 워커가 다른 판정을 내지 않도록 판정 로직을 새로 만들지 않는다.
+  const analysisFreshness = determineAnalysisFreshness(analysis, changes, PROMPT_VERSION);
+
   // 관심 물건·변동 피드로 가는 경로에 미확인 개수를 보여준다(task 4.5) — 목록 페이지와
   // 같은 이유.
   const unreadCount = getUnreadCount();
@@ -146,14 +174,59 @@ export default async function ItemDetailPage({
         </p>
       </header>
 
+      {/*
+        재배치(design.md D4, tasks.md 5.1): 사람이 경매 물건을 볼 때의 순서 —
+        가격 → 물건 개요 → AI 분석 → 변경 이력 → 원본 확인 → 부가 정보.
+        재배치 전에 표시되던 27개 필드(물건 정보 12개 + 확장 정보 15개)는 하나도
+        지우지 않았다 — 카드 소속만 바뀌었을 뿐이다(tasks.md 5.2 회귀 확인 대상).
+        저감률 1개만 이번에 새로 추가된 필드다(design.md D4의 가격 섹션 구성 그대로).
+      */}
       <section className="card">
-        <h2>물건 정보</h2>
+        <h2>가격</h2>
         <dl className="fields">
-          <Field label="소재지" value={formatText(item.address)} />
-          <Field label="용도" value={formatText(item.usageType)} />
           <Field label="감정가" value={formatWon(item.appraisalPrice)} />
           <Field label="최저매각가격" value={formatWon(item.minBidPrice)} />
+          {/* 저감률(design.md D1) — 감정가 0·null이나 최저가 없음이면 discountRatio가
+              null이라 EMPTY("-")로 표시된다. 단계 라벨은 색이 아니라 텍스트로 구별된다
+              (spec: "색에만 의존해서는 안 된다"). */}
+          <Field
+            label="저감률"
+            value={
+              discountRatio === null || discountStage === null
+                ? EMPTY
+                : `${formatDiscountRatio(discountRatio)} (${DISCOUNT_STAGE_LABELS[discountStage]})`
+            }
+          />
+          <Field label="면적당 가격" value={pricePerAreaText} />
+          <Field label="차수별 최저가" value={roundPricesText} />
+        </dl>
+      </section>
+
+      {/*
+        물건 개요(design.md D4) — 용도·면적·소재지·매각기일과, 이 물건을 특정하는 사건
+        정보(사건번호·물건번호·담당 법원·수집 시각, spec: "물건 상세 열람")를 묶는다.
+        값이 없는 항목은 EMPTY("-")로 표시되고(spec: 확장 정보가 없는 물건), 이 카드는
+        확장 필드가 전부 비어 있어도(이 기능 이전 수집분) 오류 없이 그려진다 — 모든 값이
+        item-extensions.ts/format.ts의 순수 함수를 거쳐 항상 문자열이기 때문이다.
+
+        진행상태 원본 코드(statusCode/itemStatusCode)와 좌표(coordinateX/Y/Level)는 의도적으로
+        표시하지 않는다(design.md D4) — 코드표·좌표계가 미확인이라 라벨을 붙이면 추측이
+        사실처럼 보이고, 좌표는 지도 없이 숫자만 보여줘 봐야 사용자에게 의미가 없다.
+      */}
+      <section className="card">
+        <h2>물건 개요</h2>
+        <dl className="fields">
+          <Field label="용도" value={formatText(item.usageType)} />
+          <Field label="면적" value={areaText} />
+          <Field label="소재지" value={formatText(item.address)} />
+          <Field label="소재지 상세" value={structuredAddressText} />
           <Field label="매각기일" value={formatDate(item.auctionDate)} />
+          {/* auctionTime은 원문 형식("1000" = 10:00)을 그대로 보존한다 — 콜론으로
+              재포맷하지 않는다(domain 필드 주석 그대로 화면에도 적용). */}
+          <Field label="매각기일 시각" value={formatText(item.auctionTime)} />
+          <Field label="매각장소" value={formatText(item.auctionPlace)} />
+          <Field label="매각결정기일" value={formatDate(item.auctionDecisionDate)} />
+          <Field label="매각기일 회차" value={formatCount(item.auctionRound)} />
           <Field label="유찰횟수" value={formatCount(item.failedBidCount)} />
           <Field label="진행상태" value={formatText(item.status)} />
           <Field label="사건번호" value={formatText(item.caseNo)} />
@@ -162,75 +235,21 @@ export default async function ItemDetailPage({
           <Field label="최초 수집 시각" value={formatDateTime(item.firstSeenAt)} />
           <Field label="최종 수집 시각" value={formatDateTime(item.lastSeenAt)} />
         </dl>
-      </section>
-
-      {/*
-        확장 정보(enrich-item-fields task 4.1). 32개 필드를 하나의 표로 나열하면 읽을 수
-        없으므로 spec이 요구하는 7개 카테고리(면적·건물구조 / 차수별 최저가 / 용도 분류 /
-        구조화 소재지 / 매각기일 시각·장소·결정기일·회차 / 사건 비고·중복사건 / 담당계·연락처)
-        대로 소제목(h3)을 나눠 묶는다. 값이 없는 항목은 EMPTY("-")로 표시되고(spec: 확장
-        정보가 없는 물건), 이 카드 자체는 확장 필드가 전부 비어 있어도 오류 없이 그려진다 —
-        모든 값이 item-extensions.ts의 순수 함수를 거쳐 항상 문자열이기 때문이다.
-
-        진행상태 원본 코드(statusCode/itemStatusCode)와 좌표(coordinateX/Y/Level)는 의도적으로
-        표시하지 않는다(design.md D4) — 코드표·좌표계가 미확인이라 라벨을 붙이면 추측이
-        사실처럼 보이고, 좌표는 지도 없이 숫자만 보여줘 봐야 사용자에게 의미가 없다.
-      */}
-      <section className="card">
-        <h2>확장 정보</h2>
-
-        <h3>면적 · 건물 구조</h3>
-        <dl className="fields">
-          <Field label="면적" value={areaText} />
-          <Field label="면적당 가격" value={pricePerAreaText} />
-        </dl>
         <MultilineField label="건물 구조" value={formatText(item.buildingDescription)} />
-
-        <h3>차수별 최저매각가격</h3>
-        <dl className="fields">
-          <Field label="차수별 최저가" value={roundPricesText} />
-        </dl>
-
-        {/* 코드표 미확인(design.md D4) — 라벨 없이 원본 코드만 노출한다. */}
-        <h3>용도 분류 (원본 코드, 의미 미확인)</h3>
-        <dl className="fields">
-          <Field label="용도 코드" value={usageCodesText} />
-        </dl>
-
-        <h3>구조화된 소재지</h3>
-        <dl className="fields">
-          <Field label="소재지 상세" value={structuredAddressText} />
-        </dl>
-
-        <h3>매각기일 시각 · 장소 · 결정기일 · 회차</h3>
-        <dl className="fields">
-          {/* auctionTime은 원문 형식("1000" = 10:00)을 그대로 보존한다 — 콜론으로
-              재포맷하지 않는다(domain 필드 주석 그대로 화면에도 적용). */}
-          <Field label="매각기일 시각" value={formatText(item.auctionTime)} />
-          <Field label="매각장소" value={formatText(item.auctionPlace)} />
-          <Field label="매각결정기일" value={formatDate(item.auctionDecisionDate)} />
-          <Field label="매각기일 회차" value={formatCount(item.auctionRound)} />
-        </dl>
-
-        <h3>사건 비고 · 중복사건</h3>
-        <dl className="fields">
-          <Field label="비고" value={formatText(item.note)} />
-          {/* dupSaNo는 `<br/>` 구분자를 원문 그대로 보존한 값이다(NOTES.md §11) — HTML로
-              해석해 줄바꿈으로 렌더링하지 않는다. 실제로 있는 그대로("<br/>" 리터럴)를
-              보여줘야 값을 조작해 보여주는 것이 아니다. */}
-          <Field label="중복 사건번호" value={formatText(item.duplicateCaseNo)} />
-          <Field label="병합 사건번호" value={formatText(item.mergedCaseNo)} />
-        </dl>
-
-        <h3>담당계 · 연락처</h3>
-        <dl className="fields">
-          <Field label="담당계" value={formatText(item.courtDepartment)} />
-          <Field label="연락처" value={formatText(item.courtPhone)} />
-        </dl>
       </section>
 
       <section className="card">
         <h2>AI 분석</h2>
+        {/* 분석 최신성 배지(design.md D3, tasks.md 3.2) — 대기 중/최신/갱신 예정 세 상태를
+            항상 배지+설명 문구로 보여준다. "갱신 예정"은 표시 중인 분석이 현재 값 기준이
+            아닐 수 있다는 경고로 읽히도록 문구를 썼다(analysis-freshness.ts). 색에만
+            의존하지 않는다 — 라벨 텍스트 자체가 상태를 구별한다. */}
+        <p className="muted">
+          <span className={`analysis-freshness-badge analysis-freshness-${analysisFreshness}`}>
+            {ANALYSIS_FRESHNESS_LABELS[analysisFreshness]}
+          </span>{" "}
+          {ANALYSIS_FRESHNESS_DESCRIPTIONS[analysisFreshness]}
+        </p>
         {analysis ? (
           <>
             <p className="muted">
@@ -273,9 +292,7 @@ export default async function ItemDetailPage({
               </details>
             )}
           </>
-        ) : (
-          <p className="empty">분석 대기 중</p>
-        )}
+        ) : null}
       </section>
 
       <section className="card">
@@ -299,6 +316,87 @@ export default async function ItemDetailPage({
         ) : (
           <p className="empty">아직 변동이 없습니다.</p>
         )}
+      </section>
+
+      {/*
+        원본 확인(design.md D2, tasks.md 4.1~4.2). 물건별 GET URL이 존재하지 않으므로
+        (design.md Context) 홈 링크만 준다 — 그 자리에서 검색에 필요한 값(법원명·사건번호)을
+        `<input readonly>`로 제공해 클릭 한 번으로 전체 선택이 되게 한다(클립보드 복사는
+        JS가 필요하지만, readonly input의 전체 선택은 아니다 — 프로젝트의 "클라이언트 JS
+        없음" 규칙을 지킨다). `w2xPath=`로 상세 화면을 강제로 여는 링크는 절대 만들지
+        않는다 — 물건 지정 파라미터가 없어 데이터 없는 빈 화면이나 오류로 이어질 위험이
+        홈보다 크다.
+      */}
+      <section className="card">
+        <h2>법원경매정보에서 확인</h2>
+        <p className="muted">
+          <a href={COURT_AUCTION_HOME_URL} target="_blank" rel="noreferrer noopener">
+            법원경매정보 홈으로 이동 →
+          </a>
+        </p>
+        <dl className="fields court-verify-fields">
+          <div className="field">
+            <dt>
+              <label htmlFor="court-verify-court">법원명</label>
+            </dt>
+            <dd>
+              <input
+                id="court-verify-court"
+                type="text"
+                readOnly
+                value={item.court}
+                className="court-verify-input"
+              />
+            </dd>
+          </div>
+          <div className="field">
+            <dt>
+              <label htmlFor="court-verify-case-no">사건번호</label>
+            </dt>
+            <dd>
+              <input
+                id="court-verify-case-no"
+                type="text"
+                readOnly
+                value={item.caseNo}
+                className="court-verify-input"
+              />
+            </dd>
+          </div>
+        </dl>
+        <p className="muted">
+          위 법원명과 사건번호로 법원경매정보 홈에서 검색하면 이 물건을 찾을 수 있습니다.
+        </p>
+      </section>
+
+      {/*
+        부가 정보(design.md D4) — 담당계·사건 비고·코드값 등, 1차 판단에는 필요 없지만
+        확인해야 할 때 찾아보는 정보. 코드표 미확인(design.md D4)인 용도 코드는 라벨을
+        붙이지 않고 원본 문자열만 노출한다.
+      */}
+      <section className="card">
+        <h2>부가 정보</h2>
+
+        <h3>용도 분류 (원본 코드, 의미 미확인)</h3>
+        <dl className="fields">
+          <Field label="용도 코드" value={usageCodesText} />
+        </dl>
+
+        <h3>사건 비고 · 중복사건</h3>
+        <dl className="fields">
+          <Field label="비고" value={formatText(item.note)} />
+          {/* dupSaNo는 `<br/>` 구분자를 원문 그대로 보존한 값이다(NOTES.md §11) — HTML로
+              해석해 줄바꿈으로 렌더링하지 않는다. 실제로 있는 그대로("<br/>" 리터럴)를
+              보여줘야 값을 조작해 보여주는 것이 아니다. */}
+          <Field label="중복 사건번호" value={formatText(item.duplicateCaseNo)} />
+          <Field label="병합 사건번호" value={formatText(item.mergedCaseNo)} />
+        </dl>
+
+        <h3>담당계 · 연락처</h3>
+        <dl className="fields">
+          <Field label="담당계" value={formatText(item.courtDepartment)} />
+          <Field label="연락처" value={formatText(item.courtPhone)} />
+        </dl>
       </section>
     </main>
   );

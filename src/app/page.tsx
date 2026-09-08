@@ -24,14 +24,23 @@ import { BookmarkToggleForm } from "./_components/bookmark-toggle-form";
 import { ItemFilterForm } from "./_components/item-filter-form";
 import { isRecentlyChanged } from "./_lib/change-history";
 import {
+  DISCOUNT_STAGE_LABELS,
+  classifyDiscountStage,
+  computeDiscountRatio,
+  formatDiscountRatio,
+} from "./_lib/discount";
+import {
   DIRECTION_LABELS,
+  EMPTY,
   SORT_LABELS,
   formatCount,
   formatDate,
   formatText,
   formatWon,
 } from "./_lib/format";
+import { computePricePerArea, formatPricePerArea } from "./_lib/item-extensions";
 import { ITEM_LIST_PATH, itemListHref } from "./_lib/item-query-url";
+import { formatRegionSummary } from "./_lib/region-summary";
 
 // 수집기가 새로 넣은 데이터가 바로 보여야 하므로 정적 프리렌더를 끈다.
 // (이게 없으면 `next build`가 빌드 시점에 DB를 열어 페이지를 미리 렌더한다.)
@@ -119,10 +128,17 @@ export default async function ItemListPage({
             <table>
               <thead>
                 <tr>
+                  {/* 지역 요약(design.md D5) — 구조화 소재지(sido/sigungu/dong)가 있으면
+                      그걸 앞세운 짧은 표기, 없으면 기존 address 그대로(formatRegionSummary). */}
                   <th>소재지</th>
                   <th>용도</th>
                   <th className="num">감정가</th>
                   <th className="num">최저매각가격</th>
+                  {/* 판단 지표(design.md D1) — 분석을 기다리지 않고도 1차 선별이 가능하도록
+                      감정가 대비 최저가 비율과 면적당 가격을 추가한다. 목록 쿼리의
+                      WHERE/ORDER BY는 건드리지 않는다 — 표시만 추가한다. */}
+                  <th className="num">저감률</th>
+                  <th className="num">면적당 가격</th>
                   <th>매각기일</th>
                   <th className="num">유찰횟수</th>
                   <th>진행상태</th>
@@ -130,31 +146,55 @@ export default async function ItemListPage({
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
-                  <tr key={item.id}>
-                    <td>
-                      <Link href={`/items/${item.id}`}>{formatText(item.address)}</Link>
-                      {isRecentlyChanged(item.lastChangedAt, now) ? (
-                        <span className="badge-recent">최근변동</span>
-                      ) : null}
-                    </td>
-                    <td>{formatText(item.usageType)}</td>
-                    <td className="num">{formatWon(item.appraisalPrice)}</td>
-                    <td className="num">{formatWon(item.minBidPrice)}</td>
-                    <td>{formatDate(item.auctionDate)}</td>
-                    <td className="num">{formatCount(item.failedBidCount)}</td>
-                    <td>{formatText(item.status)}</td>
-                    <td>
-                      {/* item.bookmarked는 listItems가 스칼라 서브쿼리로 채운다
-                          (repository.ts design.md D6) — 필터·정렬·total과 무관하다. */}
-                      <BookmarkToggleForm
-                        itemId={item.id}
-                        bookmarked={item.bookmarked ?? false}
-                        returnTo={currentListHref}
-                      />
-                    </td>
-                  </tr>
-                ))}
+                {items.map((item) => {
+                  // 계산 불가한 물건은 "-"로 표시되고 행 전체는 정상 렌더링된다(spec: "지표를
+                  // 계산할 수 없는 물건"). ratio가 null이면 stage도 항상 null이다
+                  // (classifyDiscountStage 계약) — 아래 JSX가 둘 다 확인한다.
+                  const discountRatio = computeDiscountRatio(item);
+                  const discountStage = classifyDiscountStage(discountRatio);
+                  const pricePerArea = computePricePerArea(item);
+
+                  return (
+                    <tr key={item.id}>
+                      <td>
+                        <Link href={`/items/${item.id}`}>{formatRegionSummary(item)}</Link>
+                        {isRecentlyChanged(item.lastChangedAt, now) ? (
+                          <span className="badge-recent">최근변동</span>
+                        ) : null}
+                      </td>
+                      <td>{formatText(item.usageType)}</td>
+                      <td className="num">{formatWon(item.appraisalPrice)}</td>
+                      <td className="num">{formatWon(item.minBidPrice)}</td>
+                      <td className="num">
+                        {discountRatio === null || discountStage === null ? (
+                          EMPTY
+                        ) : (
+                          // 단계는 텍스트 라벨로 구별된다(색에만 의존하지 않는다, spec: "색에만
+                          // 의존해서는 안 된다"). CSS 클래스는 훑어보기를 돕는 보조 수단이다.
+                          <span className={`discount-stage discount-stage-${discountStage}`}>
+                            {formatDiscountRatio(discountRatio)}{" "}
+                            <span className="discount-stage-label">
+                              ({DISCOUNT_STAGE_LABELS[discountStage]})
+                            </span>
+                          </span>
+                        )}
+                      </td>
+                      <td className="num">{formatPricePerArea(pricePerArea)}</td>
+                      <td>{formatDate(item.auctionDate)}</td>
+                      <td className="num">{formatCount(item.failedBidCount)}</td>
+                      <td>{formatText(item.status)}</td>
+                      <td>
+                        {/* item.bookmarked는 listItems가 스칼라 서브쿼리로 채운다
+                            (repository.ts design.md D6) — 필터·정렬·total과 무관하다. */}
+                        <BookmarkToggleForm
+                          itemId={item.id}
+                          bookmarked={item.bookmarked ?? false}
+                          returnTo={currentListHref}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

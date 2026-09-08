@@ -45,6 +45,8 @@ export {
 
 export { computePricePerArea, type PricePerAreaFields } from "./price";
 
+export { PROMPT_VERSION } from "./analysis";
+
 export {
   computeLapDurationMs,
   selectRotationCourts,

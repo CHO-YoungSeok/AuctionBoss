@@ -16,13 +16,13 @@ import { computeDerivedFigures, type RoundFigure } from "./derived";
  * 저장되는 `prompt_version` 값. 템플릿 내용을 바꾸면 이 값과
  * `workers/prompts/analyze-item.md`의 `prompt_version` 주석을 함께 올린다 (design.md D5).
  *
- * v2 → v3: 실데이터 검증에서 v2가 면적당 가격·차수별 저감 추이를 "정보 없음"으로
- * 잘못 답한 사례가 나왔다(값이 전부 non-null이고 프롬프트에도 들어 있었는데도). 원인은
- * 모델에게 JSON에서 필드를 찾아 null 체크 후 나눗셈까지 시킨 것 — v3는 그 산수를
- * `./derived.ts`가 코드로 미리 끝내고, 프롬프트에는 "파생 지표" 블록으로 계산된 값만
- * 명시해 모델은 해석만 하게 한다. 프롬프트 입력 자체가 바뀌었으므로 버전을 올린다.
+ * 상수 자체는 `src/lib/domain/analysis.ts`에 있다(improve-item-discovery-ux 3.1) —
+ * 물건 상세 화면도 재분석 대상 판정과 같은 규칙으로 이 값을 알아야 하는데, workers/**는
+ * src/app/**를 import하지 않으므로(분석기와 웹 앱의 독립성) 화면이 이 파일을 직접
+ * 가져올 수 없다. `computePricePerArea`와 같은 이유로 도메인 계층에 옮기고 여기서는
+ * 재노출만 한다 — 정의를 두 번 하지 않기 위함이다.
  */
-export const PROMPT_VERSION = "v3";
+export { PROMPT_VERSION } from "@/lib/domain";
 
 /** 템플릿에서 물건 JSON이 들어갈 자리. 철자를 바꾸면 템플릿도 같이 고쳐야 한다. */
 export const ITEM_JSON_TOKEN = "{{ITEM_JSON}}";
