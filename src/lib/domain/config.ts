@@ -67,6 +67,19 @@ export type ConfigTypeMatchesSchema = Assert<
   CollectorConfig extends SchemaConfig ? true : false
 >;
 
+/**
+ * hardening-round1 task 2 — 위 두 Assert는 옵셔널 필드가 한쪽에만 추가돼도 통과한다
+ * (workers/lib/api.ts에서 실제로 확인된 맹점 — 상세 설명은 그 파일 참고). 지금
+ * `CollectorConfig`의 필드는 전부 필수(optional 없음)라 이 맹점이 실제로는 드러나지
+ * 않지만, 나중에 옵셔널 설정 필드가 추가되면 같은 문제가 생길 수 있어 미리 막아 둔다.
+ */
+type KeysEqual<A, B> = [keyof A] extends [keyof B]
+  ? [keyof B] extends [keyof A]
+    ? true
+    : false
+  : false;
+export type ConfigSchemaKeysMatchType = Assert<KeysEqual<SchemaConfig, CollectorConfig>>;
+
 /** 설정 파일 경로. 기본값은 `<repo root>/config/collector.json`. */
 export const DEFAULT_CONFIG_PATH = "config/collector.json";
 
