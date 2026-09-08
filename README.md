@@ -262,9 +262,15 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
       "status": "유찰 1회",           // 유찰횟수에서 파생한 값 ("신건" | "유찰 N회")
       "firstSeenAt": "2026-09-06T06:55:48.709Z",
       "lastSeenAt": "2026-09-06T06:55:48.709Z",
-      "lastChangedAt": "2026-09-06T07:05:12.000Z"  // 감시 필드의 가장 최근 "실제" 변경 시각.
+      "lastChangedAt": "2026-09-06T07:05:12.000Z", // 감시 필드의 가장 최근 "실제" 변경 시각.
                                                      // 기준점(최초 저장)은 세지 않는다. 변경이
                                                      // 한 번도 없으면 null(§6 참고).
+      // 아래는 확장 필드 32개 중 일부 발췌 — 전체 목록은 바로 다음 "확장 필드" 문단 참고.
+      // 전부 nullable이고, 이 기능 이전에 수집된 물건은 다음 수집 전까지 전부 null이다.
+      "minArea": 84,                                // ㎡. 0은 "값 없음"으로 이미 null 처리됨(D3)
+      "buildingDescription": "철근콘크리트구조\n84.99㎡",  // 줄바꿈 그대로 보존
+      "minBidPriceRound1": 711000000,
+      "usageCodeLarge": "20000"                     // 코드표 미확인 — 원문 그대로, 해석하지 않음
     }
   ],
   "total": 8,
@@ -272,6 +278,55 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
   "pageSize": 20
 }
 ```
+
+### 확장 필드 (enrich-item-fields, 2026-09-08)
+
+목록/상세 응답의 물건 객체에는 위 기본 필드 외에 **확장 필드 32개**가 함께 들어 있다
+(`src/lib/domain/types.ts`의 `AuctionItem`, 전부 `nullable`). 소스가 이미 내려주고 있었지만
+지금까지는 zod 스키마가 선언하지 않아 파싱 단계에서 버려지던 값들이다 — **추가 수집 요청은
+0건**이다(`NOTES.md` §11). 값이 없으면(소스가 `""`/`"0"`을 보낸 경우 등) `null`이지 `0`이
+아니다 — 가격·면적 도메인에서 `0`은 실제 값이 아니라 "값 없음"이기 때문이다(design.md D3).
+의미를 확인하지 못한 코드값(용도 코드, 진행상태 코드, 좌표)은 해석하지 않고 원문 문자열
+그대로 저장한다(design.md D4) — 화면에도 코드값 그대로 노출하거나 아예 표시하지 않는다.
+
+카테고리별로 묶으면 다음과 같다(소스 필드명·전체 매핑표는 `src/lib/sources/courtauction/NOTES.md`
+§11 참고):
+
+| 카테고리 | 필드 | 비고 |
+| --- | --- | --- |
+| 면적·건물구조 | `minArea`, `maxArea`, `buildingDescription` | `buildingDescription`은 줄바꿈 포함 원문(예: `"철근콘크리트구조\n84.99㎡"`) |
+| 차수별 최저가 | `minBidPriceRound1`~`Round4`, `minBidPriceRateRound1`~`Round2` | 소스가 고정 4개 슬롯으로 준다(1~2차만 저감률도 옴). 값 없는 회차는 그냥 없는 것으로 표시(빈 행 생성 안 함) |
+| 용도 분류 코드 (원문, 미해석) | `usageCodeLarge`, `usageCodeMedium`, `usageCodeSmall` | 코드표를 찾지 못했다(`UNVERIFIED`) — 라벨을 붙이지 않는다 |
+| 구조화된 소재지 | `sido`, `sigungu`, `dong`, `lotNumber`, `buildingName`, `buildingUnit` | 조합 문자열인 `address`만으로는 안 나오는 동/층/호 단위 값 |
+| 좌표 (원문, 미사용) | `coordinateX`, `coordinateY`, `coordinateLevel` | 좌표계(EPSG)를 확인하지 못해 저장만 하고 지도 등에는 쓰지 않는다 |
+| 매각기일 상세 | `auctionTime`, `auctionPlace`, `auctionDecisionDate`, `auctionRound` | `auctionTime`은 콜론 없는 `HHmm` 문자열(예: `"1000"` = 10:00) |
+| 사건 비고·중복/병합사건 | `note`, `duplicateCaseNo`, `mergedCaseNo` | `note`에 `"일괄매각"`이 들어 있으면 목적물이 여럿인 물건이라는 뜻 |
+| 담당계·연락처 | `courtDepartment`, `courtPhone` | |
+| 진행상태 코드 (원문, 미해석) | `statusCode`, `itemStatusCode` | 화면의 "진행상태"(`status`)는 이 코드가 아니라 `failedBidCount`에서 파생한다 — 이 두 코드는 의미를 모른다 |
+
+물건 상세 페이지(`/items/[id]`)의 "확장 정보" 카드가 위 카테고리 그대로의 섹션으로
+나눠 보여주며, 면적당 가격(`minBidPrice ÷ minArea`)처럼 확장 필드로 새로 계산 가능해진
+값도 함께 표시한다(`src/app/_lib/item-extensions.ts`).
+
+**⚠️ 이 소스로 얻을 수 없는 것 — 분석 품질의 하드 한계.** 권리관계·임차인·등기 정보(전입세대,
+확정일자, 근저당·가압류 등 선순위 채권, 말소기준권리)는 **이 소스 API 자체에 존재하지
+않는다**(`NOTES.md` §10.3, 상세 화면정의 XML 전체에 관련 필드가 하나도 없음을 확인한
+`CONFIRMED` 사실 — 추측이 아니다). 경매 판단의 핵심인 권리분석 데이터를 이 프로젝트의
+분석은 애초에 볼 수 없다는 뜻이다. AI 분석 프롬프트(§6.2, `workers/prompts/analyze-item.md`)도
+이 사실을 "이번에 주어지지 않았다"가 아니라 "이 소스에 존재하지 않는다"로 모델에 명시해
+모델이 그 공백을 추론으로 메우지 못하게 한다 — 그래도 **분석 결과를 신뢰의 근거로 쓰기 전에
+사람이 반드시 알아야 하는 상한선**이다. 입찰 전 권리분석·현장조사는 이 서비스가 대신할 수
+없다.
+
+**⚠️ 비용 영향 — `PROMPT_VERSION` v2.** 이 확장 필드들을 분석에 실제로 활용하도록(면적당
+가격, 차수별 저감 추이, 일괄매각 여부) 프롬프트를 v2로 올렸다(`workers/lib/prompt.ts`). §6.2가
+이미 설명하듯, 프롬프트 버전을 올리면 **이미 분석이 끝난 물건 전부**가 재분석 후보가 된다
+(조건 3: 저장된 분석의 `promptVersion`이 현재 버전과 다름). 즉 이 change를 배포하는 순간
+그동안 쌓인 분석 전량이 재분석 대상으로 잡힌다는 뜻이다. 총 비용 자체는 줄지 않지만
+`maxReanalysisPerRun`(기본 2건/회차)과 `reanalysisCooldownHours`(기본 24시간)가 **소진
+속도**를 제한한다 — 물건 수백 건이면 여러 회차·여러 시간에 걸쳐 서서히 빠진다. 급하게
+소진하려면 `AUCTIONBOSS_ANALYZE_REANALYZE_MAX`를 일시적으로 올린다(§4.2, §6.2 "비용 경고"
+문단 참고).
 
 ### `GET /api/items/[id]` — 물건 1건 + 최신 분석
 
@@ -730,16 +785,16 @@ collector 회차 기록의 `detail.pagesRequested`는 그 회차가 소스에 �
 ## 9. 개발
 
 ```bash
-npm test        # vitest run — 365 tests / 19 files
+npm test        # vitest run — 400 tests / 21 files
 npm run typecheck   # tsc --noEmit
 npm run lint        # eslint (설정: eslint.config.mjs, next/core-web-vitals + next/typescript)
 ```
 
-- 테스트 위치 (`vitest.config.mts`가 `src/**/*.test.ts`, `src/**/__tests__/**/*.test.ts`, `workers/**/*.test.ts`를 수집. 실측: `npx vitest run` 365 tests / 19 files, `npx vitest list --filesOnly` 아래 19개):
+- 테스트 위치 (`vitest.config.mts`가 `src/**/*.test.ts`, `src/**/__tests__/**/*.test.ts`, `workers/**/*.test.ts`를 수집. 실측: `npx vitest run` 400 tests / 21 files, `npx vitest list --filesOnly` 아래 21개):
   - `src/lib/db/__tests__/client.test.ts`, `repository.test.ts`, `worker-runs.test.ts`
-  - `src/lib/domain/__tests__/config.test.ts`, `item-query.test.ts`
+  - `src/lib/domain/__tests__/config.test.ts`, `item-query.test.ts`, `types.test.ts`(`WATCHED_FIELDS`가 4개에서 늘지 않는 것을 고정하는 회귀 테스트 — design.md D2)
   - `src/lib/sources/courtauction/__tests__/adapter.test.ts` (+ `fixtures.ts`)
-  - `src/app/_lib/__tests__/change-history.test.ts`, `analysis-history.test.ts`, `item-query-url.test.ts`, `status-display.test.ts`
+  - `src/app/_lib/__tests__/change-history.test.ts`, `analysis-history.test.ts`, `item-extensions.test.ts`(확장 필드 표시·포맷 순수 함수), `item-query-url.test.ts`, `status-display.test.ts`
   - `src/app/api/items/__tests__/route.test.ts`, `src/app/api/items/[id]/changes/__tests__/route.test.ts`, `src/app/api/items/usage-types/__tests__/route.test.ts`
   - `src/app/api/worker-runs/__tests__/route.test.ts`, `src/app/api/worker-runs/[id]/__tests__/route.test.ts`, `src/app/api/worker-runs/summary/__tests__/route.test.ts`
   - `workers/__tests__/analyzer.test.ts`, `analyzer.integration.test.ts`(재분석 두 단계 선정을 실제 저장소·API 라우트로 구동하는 회귀 테스트), `collector.test.ts`
@@ -844,8 +899,14 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
    추이를 관측할 수 있다 — 장시간 무인 운용 데이터 자체는 아직 없다.
 3. **비공식 엔드포인트라 예고 없이 바뀔 수 있다.** zod 검증으로 즉시 감지·로그하지만, 바뀌면 수집은 멈춘다.
    대안인 **상용 데이터 API 어댑터는 아직 구현되어 있지 않다**(`AuctionSource` 인터페이스만 열려 있는 상태).
-4. **프롬프트가 1단계 수준이다.** 시세·등기부·권리관계·임차인 정보 없이 물건 JSON 한 덩어리만 보고 쓴 요약이다.
-   분석 본문은 markdown이지만 화면에서는 렌더링 없이 원문 그대로 표시한다.
+4. **프롬프트가 여전히 물건 JSON 한 덩어리만 보고 쓰는 요약이다(v2에서 확장 필드 활용은
+   늘었다).** 시세 비교·등기부·권리관계·임차인 정보는 여전히 없다 — **권리관계·임차인·등기
+   정보는 애초에 이 소스에 존재하지 않으므로**(§5 "확장 필드" 문단, `NOTES.md` §10.3) 프롬프트를
+   더 다듬어도 이 정보는 얻을 수 없다. 실사용 검증(2026-09-08, `AUCTIONBOSS_ANALYZE_MODEL=sonnet`,
+   물건 1건 실측)에서 모델이 `minArea`·`minBidPriceRound1`·`minBidPriceRateRound1`이 실제로 값을
+   갖고 있는데도 "정보 없음"으로 응답한 사례가 있었다 — 프롬프트가 지시한 계산(면적당 가격, 차수별
+   저감 추이)을 모델이 항상 정확히 따른다고 보장할 수 없다는 뜻이다. 분석 본문은 markdown이지만
+   화면에서는 렌더링 없이 원문 그대로 표시한다.
 5. **워커가 죽으면 수동 재시작이다.** 프로세스 매니저(pm2 등)나 재시작 정책이 없다. 시작/종료 로그로
    감지만 가능하다. 배포 단계에서 도입 예정.
 6. **목록 화면 필터에는 UI가 없는 조건도 있다.** 용도·가격대·유찰횟수·소재지 키워드·정렬은
