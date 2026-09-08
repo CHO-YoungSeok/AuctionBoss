@@ -864,7 +864,16 @@ export function createRepository(db: Db): AuctionRepository {
     SELECT DISTINCT sigungu FROM items WHERE sigungu IS NOT NULL ORDER BY sigungu
   `);
 
-  /** 자연 키를 배치 내 중복 감지용 문자열로 합친다. items UNIQUE (court, case_no, item_no)와 같은 조합. */
+  /**
+   * 자연 키를 배치 내 중복 감지용 문자열로 합친다. items UNIQUE (court, case_no, item_no)와 같은 조합.
+   *
+   * ⚠️ 구분자가 공백이 아니라 **리터럴 NUL 바이트(U+0000)**다 — 필드 값이 우연히 구분자와
+   * 같은 문자를 포함해도 키가 충돌하지 않게 하려는 의도적 선택이다(hardening-round2 task 1).
+   * 이 때문에 GNU `grep`은 이 파일을 바이너리로 취급해 **경고 없이** 매치를 건너뛴다
+   * (`grep naturalKeyOf repository.ts` → 무출력, `file`은 "data"를 보고한다).
+   * 이 파일을 grep할 때는 `grep -a` 또는 ripgrep(`rg`, 기본적으로 텍스트로 다룸)을 쓸 것 —
+   * 결과가 없다고 "함수가 없다"고 단정하지 말 것.
+   */
   function naturalKeyOf(item: Pick<AuctionItemInput, "court" | "caseNo" | "itemNo">): string {
     return `${item.court} ${item.caseNo} ${item.itemNo}`;
   }
