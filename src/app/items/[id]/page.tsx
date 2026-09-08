@@ -9,6 +9,7 @@ import { notFound } from "next/navigation";
 import { PROMPT_VERSION } from "@/lib/domain";
 import { getRepository, getUnreadCount } from "@/lib/db";
 
+import { AnalysisBody } from "../../_components/analysis-body";
 import { BookmarkToggleForm } from "../../_components/bookmark-toggle-form";
 import {
   ANALYSIS_FRESHNESS_DESCRIPTIONS,
@@ -311,8 +312,11 @@ export default async function ItemDetailPage({
               {formatText(analysis.promptVersion)}
               {analysis.model ? ` · 모델 ${analysis.model}` : ""}
             </p>
-            {/* 본문은 markdown이지만 1단계에서는 렌더링 라이브러리 없이 원문을 그대로 보여준다. */}
-            <pre className="analysis-body">{analysis.body}</pre>
+            {/* 본문은 markdown 서식(굵게/인라인 코드)을 실제로 렌더링한다 — 파싱은
+                analysis-body-parse.ts의 순수 함수, 표시는 AnalysisBody 컴포넌트가 맡는다.
+                dangerouslySetInnerHTML을 쓰지 않으므로 `<script>` 등은 항상 텍스트로
+                이스케이프된다(analysis-body.tsx 상단 주석 참고). */}
+            <AnalysisBody body={analysis.body} className="analysis-body" />
 
             {previousAnalyses.length > 0 && (
               // 클라이언트 JS 없이(프로젝트 규칙) 이전 분석을 열람할 수 있어야 하므로
@@ -333,7 +337,7 @@ export default async function ItemDetailPage({
                         {formatText(previous.promptVersion)}
                         {previous.model ? ` · 모델 ${previous.model}` : ""}
                       </p>
-                      <pre className="analysis-body">{previous.body}</pre>
+                      <AnalysisBody body={previous.body} className="analysis-body" />
                     </li>
                   ))}
                 </ul>

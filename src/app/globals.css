@@ -593,11 +593,25 @@ tbody tr:hover {
   background: #fafbfc;
   border: 1px solid #eceff3;
   border-radius: 4px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   line-height: 1.7;
-  white-space: pre-wrap;
   word-break: break-word;
+}
+
+.analysis-body p {
+  margin: 0 0 1em;
+}
+
+.analysis-body p:last-child {
+  margin-bottom: 0;
+}
+
+.analysis-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: #eceff3;
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
 }
 
 /* 상태 화면 (`/status`, add-collection-observability task 5.2).

@@ -19,6 +19,15 @@ const RUN_ID = /^\d+$/;
 
 // zod 스키마와 도메인 타입이 어긋나면 컴파일 시점에 잡는다(workers/lib/api.ts와 같은 방식).
 type Assert<T extends true> = T;
+// hardening-round1 task 2 — 옵셔널 필드가 한쪽에만 추가돼도 위 두 Assert 방향만으로는
+// 못 잡는다는 것을 workers/lib/api.ts에서 실제로 확인했다(상세 설명은 그 파일 참고).
+// CollectorRunDetail/AnalyzerRunDetail은 지금 필드가 전부 필수라 당장은 드러나지
+// 않지만, 나중에 옵셔널 필드가 추가되는 경우를 미리 막아 둔다.
+type KeysEqual<A, B> = [keyof A] extends [keyof B]
+  ? [keyof B] extends [keyof A]
+    ? true
+    : false
+  : false;
 
 const collectorDetailSchema = z.object({
   targetCourts: z.array(z.string()),
@@ -34,6 +43,9 @@ export type CollectorDetailSchemaMatchesType = Assert<
 export type CollectorDetailTypeMatchesSchema = Assert<
   CollectorRunDetail extends z.infer<typeof collectorDetailSchema> ? true : false
 >;
+export type CollectorDetailKeysMatchType = Assert<
+  KeysEqual<z.infer<typeof collectorDetailSchema>, CollectorRunDetail>
+>;
 
 const analyzerDetailSchema = z.object({
   newCount: z.number(),
@@ -46,6 +58,9 @@ export type AnalyzerDetailSchemaMatchesType = Assert<
 >;
 export type AnalyzerDetailTypeMatchesSchema = Assert<
   AnalyzerRunDetail extends z.infer<typeof analyzerDetailSchema> ? true : false
+>;
+export type AnalyzerDetailKeysMatchType = Assert<
+  KeysEqual<z.infer<typeof analyzerDetailSchema>, AnalyzerRunDetail>
 >;
 
 const finishBodySchema = z.object({

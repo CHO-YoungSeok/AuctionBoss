@@ -45,6 +45,12 @@ const auctionItemSchema = z.object({
   firstSeenAt: z.string(),
   lastSeenAt: z.string(),
   lastChangedAt: z.string().nullable().optional(),
+  // hardening-round1 task 2 발견: AuctionItem(도메인 타입)에는 있는데 이 스키마엔 없어서
+  // 조용히 strip되고 있었다 — 아래 KeysEqual 검사가 이 정확한 종류의 누락을 잡아낸다.
+  // analyzer가 bookmarked 값을 쓰지는 않지만, "응답에 실제로 있는 필드가 파싱 후
+  // 사라진다"는 사실 자체가 이 파일 상단에 적힌 원래 결함(32개 필드 strip)과 같은
+  // 클래스라 다른 필드와 동일하게 스키마에 선언한다.
+  bookmarked: z.boolean().optional(),
 
   // 확장 필드 (enrich-item-fields, design.md D1~D4, src/lib/domain/types.ts의
   // AuctionItemInput과 동일한 32개). live-data-and-reports 실측(task 3.1) 중 발견한
@@ -96,6 +102,27 @@ export type ItemSchemaMatchesType = Assert<
 >;
 export type ItemTypeMatchesSchema = Assert<
   AuctionItem extends z.infer<typeof auctionItemSchema> ? true : false
+>;
+
+/**
+ * hardening-round1 task 2 — 위 두 Assert만으로는 불충분하다는 것을 실제로 확인했다.
+ * TypeScript의 구조적 타이핑은 "옵셔널 필드가 한쪽에만 더 있는 것"을 assignability
+ * 위반으로 보지 않는다 — `AuctionItem`에 옵셔널 필드를 하나 추가해도(예: 실제로
+ * `bookmarked`가 그랬다) 위 두 Assert는 계속 통과했다. 이 프로젝트의 확장 필드
+ * 32개가 전부 옵셔널이라, 새 옵셔널 필드가 스키마 없이 추가되는 경우가 정확히
+ * 원래 결함(zod strip)이 재발하는 경로다.
+ *
+ * `keyof`로 필드 "이름의 집합"만 떼어 비교하면 옵셔널 여부와 무관하게 양쪽 필드
+ * 이름이 정확히 같은지 확인할 수 있다 — 한쪽에만 있는 필드는(옵셔널이어도) 그 필드
+ * 이름 자체가 다른 쪽 keyof 집합에 없으므로 `extends`가 깨진다.
+ */
+type KeysEqual<A, B> = [keyof A] extends [keyof B]
+  ? [keyof B] extends [keyof A]
+    ? true
+    : false
+  : false;
+export type ItemSchemaKeysMatchType = Assert<
+  KeysEqual<z.infer<typeof auctionItemSchema>, AuctionItem>
 >;
 
 export const itemsResponseSchema = z.object({

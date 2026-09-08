@@ -848,6 +848,22 @@ describe("listItems — needsAnalysis (design.md D4, 코드 리뷰 finding 2로 
     expect(result.items.map((i) => i.id)).not.toContain(item.id);
   });
 
+  it("경계: 변경 시각이 분석 시각과 정확히 같으면 재분석 대상으로 만들지 않는다(hardening-round1 task 4.1 — 화면 쪽 analysis-freshness.test.ts의 같은 경계 테스트를 SQL 쪽에도 짝으로 둔다)", () => {
+    repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" }); // 기준점
+    const SAME_INSTANT = "2026-01-02T00:00:00.000Z";
+    // 실제 변경과 분석이 정확히 같은 시각에 기록된다 — NEEDS_ANALYSIS_PREDICATE는
+    // `changed_at > analyzed_at`(초과)를 쓰므로 같은 시각은 "이미 반영됨"으로 봐야 한다.
+    repo.upsertItems([makeItem({ minBidPrice: 1 })], { now: SAME_INSTANT });
+    const item = repo.listItems({ pageSize: 10 }).items[0]!;
+    repo.insertAnalysis(
+      { itemId: item.id, body: "x", model: null, promptVersion: "v1" },
+      { now: SAME_INSTANT },
+    );
+
+    const result = repo.listItems({ needsAnalysis: true, promptVersion: "v1", pageSize: 10 });
+    expect(result.items.map((i) => i.id)).not.toContain(item.id);
+  });
+
   it("기준점 행(old_value IS NULL)은 재분석 대상으로 만들지 않는다(design.md D2)", () => {
     repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" }); // 기준점만 존재
     const item = repo.listItems({ pageSize: 10 }).items[0]!;
