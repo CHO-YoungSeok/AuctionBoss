@@ -10,7 +10,23 @@ import { getRepository } from "@/lib/db";
 
 import { splitAnalysisHistory } from "../../_lib/analysis-history";
 import { formatChangeDisplay, hasRealChange, isRealChange } from "../../_lib/change-history";
-import { formatCount, formatDate, formatDateTime, formatText, formatWon } from "../../_lib/format";
+import {
+  EMPTY,
+  formatCount,
+  formatDate,
+  formatDateTime,
+  formatText,
+  formatWon,
+} from "../../_lib/format";
+import {
+  computePricePerArea,
+  formatAreaRange,
+  formatPricePerArea,
+  formatRoundPrice,
+  formatStructuredAddress,
+  formatUsageCodes,
+  listRoundPrices,
+} from "../../_lib/item-extensions";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +45,21 @@ function Field({ label, value }: { label: string; value: string }) {
     <div className="field">
       <dt>{label}</dt>
       <dd>{value}</dd>
+    </div>
+  );
+}
+
+/**
+ * 줄바꿈이 포함될 수 있는 값(건물 구조·면적 서술, 예: `pjbBuldList` 원문
+ * `"철근콘크리트구조\n84.99㎡"`)을 위한 Field. `.multiline-value`(globals.css)가
+ * `white-space: pre-wrap`을 줘서 줄바꿈이 한 줄로 뭉개지지 않게 한다(spec: 여러 줄 값
+ * 표시). 값이 없을 때는 EMPTY 자체에는 줄바꿈이 없으니 일반 Field와 다르게 보이지 않는다.
+ */
+function MultilineField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="field">
+      <dt>{label}</dt>
+      <dd className="multiline-value">{value}</dd>
     </div>
   );
 }
@@ -66,6 +97,19 @@ export default async function ItemDetailPage({
   const changes = repository.listItemChanges(item.id);
   const realChanges = changes.filter(isRealChange).map(formatChangeDisplay);
 
+  // 확장 정보(enrich-item-fields task 4.1) 표시 판정은 전부 순수 헬퍼(item-extensions.ts)로
+  // 뽑아 테스트로 고정했다 — 이 페이지는 그 결과를 문자열로 받아서 그리기만 한다.
+  const areaText = formatAreaRange(item);
+  const pricePerAreaText = formatPricePerArea(computePricePerArea(item));
+  const roundPrices = listRoundPrices(item);
+  // 값이 있는 회차만 이어붙인다 — 없는 회차는 빈 행을 만들지 않고 그냥 걸러진다(task 4.4).
+  const roundPricesText =
+    roundPrices.length > 0 ? roundPrices.map(formatRoundPrice).join(" · ") : EMPTY;
+  // 용도 대/중/소분류 코드는 코드표가 미확인이라(design.md D4) 원본 문자열만 보여주고
+  // 라벨을 붙이지 않는다 — 아래 JSX의 필드 라벨 자체가 "원본 코드, 의미 미확인"임을 밝힌다.
+  const usageCodesText = formatUsageCodes(item);
+  const structuredAddressText = formatStructuredAddress(item);
+
   return (
     <main className="page">
       <p className="breadcrumb">
@@ -97,6 +141,71 @@ export default async function ItemDetailPage({
           <Field label="담당 법원" value={formatText(item.court)} />
           <Field label="최초 수집 시각" value={formatDateTime(item.firstSeenAt)} />
           <Field label="최종 수집 시각" value={formatDateTime(item.lastSeenAt)} />
+        </dl>
+      </section>
+
+      {/*
+        확장 정보(enrich-item-fields task 4.1). 32개 필드를 하나의 표로 나열하면 읽을 수
+        없으므로 spec이 요구하는 7개 카테고리(면적·건물구조 / 차수별 최저가 / 용도 분류 /
+        구조화 소재지 / 매각기일 시각·장소·결정기일·회차 / 사건 비고·중복사건 / 담당계·연락처)
+        대로 소제목(h3)을 나눠 묶는다. 값이 없는 항목은 EMPTY("-")로 표시되고(spec: 확장
+        정보가 없는 물건), 이 카드 자체는 확장 필드가 전부 비어 있어도 오류 없이 그려진다 —
+        모든 값이 item-extensions.ts의 순수 함수를 거쳐 항상 문자열이기 때문이다.
+
+        진행상태 원본 코드(statusCode/itemStatusCode)와 좌표(coordinateX/Y/Level)는 의도적으로
+        표시하지 않는다(design.md D4) — 코드표·좌표계가 미확인이라 라벨을 붙이면 추측이
+        사실처럼 보이고, 좌표는 지도 없이 숫자만 보여줘 봐야 사용자에게 의미가 없다.
+      */}
+      <section className="card">
+        <h2>확장 정보</h2>
+
+        <h3>면적 · 건물 구조</h3>
+        <dl className="fields">
+          <Field label="면적" value={areaText} />
+          <Field label="면적당 가격" value={pricePerAreaText} />
+        </dl>
+        <MultilineField label="건물 구조" value={formatText(item.buildingDescription)} />
+
+        <h3>차수별 최저매각가격</h3>
+        <dl className="fields">
+          <Field label="차수별 최저가" value={roundPricesText} />
+        </dl>
+
+        {/* 코드표 미확인(design.md D4) — 라벨 없이 원본 코드만 노출한다. */}
+        <h3>용도 분류 (원본 코드, 의미 미확인)</h3>
+        <dl className="fields">
+          <Field label="용도 코드" value={usageCodesText} />
+        </dl>
+
+        <h3>구조화된 소재지</h3>
+        <dl className="fields">
+          <Field label="소재지 상세" value={structuredAddressText} />
+        </dl>
+
+        <h3>매각기일 시각 · 장소 · 결정기일 · 회차</h3>
+        <dl className="fields">
+          {/* auctionTime은 원문 형식("1000" = 10:00)을 그대로 보존한다 — 콜론으로
+              재포맷하지 않는다(domain 필드 주석 그대로 화면에도 적용). */}
+          <Field label="매각기일 시각" value={formatText(item.auctionTime)} />
+          <Field label="매각장소" value={formatText(item.auctionPlace)} />
+          <Field label="매각결정기일" value={formatDate(item.auctionDecisionDate)} />
+          <Field label="매각기일 회차" value={formatCount(item.auctionRound)} />
+        </dl>
+
+        <h3>사건 비고 · 중복사건</h3>
+        <dl className="fields">
+          <Field label="비고" value={formatText(item.note)} />
+          {/* dupSaNo는 `<br/>` 구분자를 원문 그대로 보존한 값이다(NOTES.md §11) — HTML로
+              해석해 줄바꿈으로 렌더링하지 않는다. 실제로 있는 그대로("<br/>" 리터럴)를
+              보여줘야 값을 조작해 보여주는 것이 아니다. */}
+          <Field label="중복 사건번호" value={formatText(item.duplicateCaseNo)} />
+          <Field label="병합 사건번호" value={formatText(item.mergedCaseNo)} />
+        </dl>
+
+        <h3>담당계 · 연락처</h3>
+        <dl className="fields">
+          <Field label="담당계" value={formatText(item.courtDepartment)} />
+          <Field label="연락처" value={formatText(item.courtPhone)} />
         </dl>
       </section>
 

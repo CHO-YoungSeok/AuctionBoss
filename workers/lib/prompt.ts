@@ -14,7 +14,7 @@ import type { AuctionItem } from "@/lib/domain";
  * 저장되는 `prompt_version` 값. 템플릿 내용을 바꾸면 이 값과
  * `workers/prompts/analyze-item.md`의 `prompt_version` 주석을 함께 올린다 (design.md D5).
  */
-export const PROMPT_VERSION = "v1";
+export const PROMPT_VERSION = "v2";
 
 /** 템플릿에서 물건 JSON이 들어갈 자리. 철자를 바꾸면 템플릿도 같이 고쳐야 한다. */
 export const ITEM_JSON_TOKEN = "{{ITEM_JSON}}";

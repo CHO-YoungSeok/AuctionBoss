@@ -218,6 +218,25 @@ tbody tr:hover {
   font-size: 1.1rem;
 }
 
+/* 확장 정보 카드(물건 상세, enrich-item-fields task 4.1)의 그룹 소제목. 32개 확장
+   필드를 한 표로 나열하면 읽을 수 없어 카테고리별로 h3를 둬서 나눈다. */
+.card h3 {
+  margin: 1rem 0 0.5rem;
+  color: #3d434d;
+  font-size: 0.95rem;
+}
+
+.card h3:first-of-type {
+  margin-top: 0;
+}
+
+/* 줄바꿈이 포함된 값(건물 구조·면적 서술, 예: "철근콘크리트구조\n84.99㎡")을 위한 dd —
+   기본 white-space(normal)는 \n을 공백으로 뭉개므로 pre-wrap으로 보존한다(spec: 여러 줄
+   값 표시). word-break은 기존 .field dd와 같은 규칙을 유지한다. */
+.multiline-value {
+  white-space: pre-wrap;
+}
+
 .fields {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));

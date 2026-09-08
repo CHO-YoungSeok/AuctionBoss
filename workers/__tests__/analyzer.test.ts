@@ -208,6 +208,75 @@ describe("analyze-item.md 템플릿", () => {
   });
 });
 
+/**
+ * v2 프롬프트(enrich-item-fields task 5.1/5.2/5.4). 확장 필드로 가능해진 판단을
+ * 실제로 지시하는지, 그리고 권리관계·임차인·등기 정보를 "주어지지 않았다"가 아니라
+ * "이 소스에 존재하지 않는다"로 명시하는지를 템플릿 원문으로 고정한다.
+ */
+describe("analyze-item.md 템플릿 — v2 확장 필드 대응", () => {
+  const template = loadPromptTemplate();
+
+  it("면적당 가격·차수별 저감 추이·일괄매각 여부를 다루도록 지시한다", () => {
+    expect(template).toContain("면적당 가격");
+    expect(template).toContain("차수별 저감 추이");
+    expect(template).toContain("일괄매각");
+  });
+
+  it("권리관계·임차인·등기 정보가 이 데이터 소스에 존재하지 않는다고 명시한다", () => {
+    expect(template).toContain("권리관계·임차인·등기 정보는 이 데이터 소스에 존재하지 않는다");
+  });
+
+  it("확장 필드가 전부 null인 물건도 유효한 프롬프트를 만들고, 값 없음에 대한 대체 지시가 살아 있다", () => {
+    const item = makeItem({
+      minArea: null,
+      maxArea: null,
+      buildingDescription: null,
+      minBidPriceRound1: null,
+      minBidPriceRound2: null,
+      minBidPriceRound3: null,
+      minBidPriceRound4: null,
+      minBidPriceRateRound1: null,
+      minBidPriceRateRound2: null,
+      usageCodeLarge: null,
+      usageCodeMedium: null,
+      usageCodeSmall: null,
+      sido: null,
+      sigungu: null,
+      dong: null,
+      lotNumber: null,
+      buildingName: null,
+      buildingUnit: null,
+      coordinateX: null,
+      coordinateY: null,
+      coordinateLevel: null,
+      auctionTime: null,
+      auctionPlace: null,
+      auctionDecisionDate: null,
+      auctionRound: null,
+      note: null,
+      duplicateCaseNo: null,
+      mergedCaseNo: null,
+      courtDepartment: null,
+      courtPhone: null,
+      statusCode: null,
+      itemStatusCode: null,
+    });
+
+    const prompt = renderItemPrompt(template, item);
+
+    // 토큰이 남지 않고, 치환된 JSON이 그대로 다시 파싱 가능해야 한다(따옴표 깨짐 없음).
+    expect(prompt).not.toContain(ITEM_JSON_TOKEN);
+    const json = prompt.slice(prompt.indexOf("{"), prompt.lastIndexOf("}") + 1);
+    expect(JSON.parse(json)).toEqual(item);
+
+    // 확장 필드가 전부 null이어도, "없으면 추측하지 말고 이렇게 써라"는 대체 지시가
+    // 템플릿에 그대로 남아 있어야 한다 — 모델이 지어낼 여지를 열어두지 않는지 확인.
+    expect(prompt).toContain("면적 또는 최저매각가격 정보 없음");
+    expect(prompt).toContain("차수별 최저가 정보 없음");
+    expect(prompt).toContain("권리관계·임차인·등기 정보는 이 데이터 소스에 존재하지 않는다");
+  });
+});
+
 describe("runAnalysisOnce", () => {
   it("미분석 물건이 없으면 Claude를 호출하지도, 결과를 보내지도 않는다", async () => {
     const { fetchFn, posts } = makeFetch([]);
