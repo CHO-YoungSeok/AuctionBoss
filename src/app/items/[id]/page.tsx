@@ -70,6 +70,9 @@ export default async function ItemDetailPage({
     <main className="page">
       <p className="breadcrumb">
         <Link href="/">← 물건 목록</Link>
+        {" · "}
+        {/* add-collection-observability task 5.4: 수집·분석 워커 상태로 가는 경로. */}
+        <Link href="/status">워커 상태</Link>
       </p>
 
       <header className="page-header">

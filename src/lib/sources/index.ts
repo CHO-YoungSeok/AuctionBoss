@@ -1,4 +1,9 @@
-export { consoleLogger, type AuctionSource, type Logger } from "./types";
+export {
+  consoleLogger,
+  type AuctionSource,
+  type FetchActiveItemsResult,
+  type Logger,
+} from "./types";
 export {
   ResponseSchemaError,
   RobotDetectedError,
@@ -6,6 +11,7 @@ export {
   SourceError,
   SourceRequestError,
   WafBlockedError,
+  attachPagesRequested,
 } from "./errors";
 export {
   CourtAuctionAdapter,

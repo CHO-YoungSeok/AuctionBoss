@@ -76,6 +76,11 @@ export default async function ItemListPage({
             ? `${filtersActive ? "조건에 맞는 물건 " : "전체 "}${total.toLocaleString("ko-KR")}건 · ${sortLabel} ${directionLabel}`
             : null}
         </p>
+        {/* 상태 화면으로 가는 경로(add-collection-observability task 5.4) — 접근 경로가
+            없으면 아무도 보지 않는다. */}
+        <p className="muted">
+          <Link href="/status">워커 상태 보기 →</Link>
+        </p>
       </header>
 
       {databaseEmpty ? null : <ItemFilterForm query={query} usageTypes={usageTypes} />}

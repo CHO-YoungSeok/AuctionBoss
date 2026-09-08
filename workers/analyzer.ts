@@ -29,8 +29,11 @@ import {
   DEFAULT_API_BASE,
   fetchReanalysisCandidates,
   fetchUnanalyzedItems,
+  finishWorkerRun,
   postAnalysis,
+  startWorkerRun,
   type FetchFn,
+  type FinishWorkerRunInput,
 } from "./lib/api";
 import { DEFAULT_CLAUDE_TIMEOUT_MS, runClaudeHeadless, type RunClaude } from "./lib/claude";
 import { PROMPT_VERSION, loadPromptTemplate, renderItemPrompt } from "./lib/prompt";
@@ -89,10 +92,47 @@ function describeError(error: unknown): string {
 }
 
 /**
+ * 회차 기록 호출은 전부 이 두 helper를 거친다(design.md D3/D4, 스펙 MUST NOT).
+ * 분석 워커는 DB를 직접 쓰지 않으므로 collector와 달리 회차 기록도 네트워크 호출이라
+ * 실패 표면이 하나 더 있다(서버 다운, 타임아웃 등) — 그래도 기록 실패가 분석 자체를
+ * 막아서는 안 된다.
+ */
+async function safeStartWorkerRun(baseUrl: string, fetchFn: FetchFn, logger: Logger): Promise<number | null> {
+  try {
+    return await startWorkerRun({ baseUrl, worker: "analyzer", fetchFn });
+  } catch (error) {
+    logger.error(`[analyzer] 회차 시작 기록 실패 — 분석은 계속 진행합니다 (${describeError(error)})`);
+    return null;
+  }
+}
+
+/**
+ * `runId`가 null이면(시작 기록 자체가 실패했으면) 종료 기록을 시도하지 않는다 — collector의
+ * `safeFinishRun`과 같은 이유다: 갱신할 회차 행 자체가 없다.
+ */
+async function safeFinishWorkerRun(
+  baseUrl: string,
+  fetchFn: FetchFn,
+  logger: Logger,
+  runId: number | null,
+  input: FinishWorkerRunInput,
+): Promise<void> {
+  if (runId === null) return;
+  try {
+    await finishWorkerRun({ baseUrl, runId, input, fetchFn });
+  } catch (error) {
+    logger.error(`[analyzer] 회차 종료 기록 실패 (${describeError(error)})`);
+  }
+}
+
+/**
  * 한 회차 실행.
  *
- * 목록 조회 실패는 회차 전체의 실패라 그대로 throw한다(호출자가 로그를 남긴다).
- * 물건 단위 실패는 여기서 잡아 세기만 하고 절대 밖으로 던지지 않는다.
+ * 목록 조회 실패는 회차 전체의 실패라 그대로 throw한다(호출자가 로그를 남긴다) — 그
+ * 전에 이 회차를 `failed`로 기록한다(design.md D3). 물건 단위 실패는 여기서 잡아 세기만
+ * 하고 절대 밖으로 던지지 않으며, 회차 자체는 `success`로 기록된다(개별 실패는
+ * `detail.failed`에 담긴다) — 분석할 대상이 전혀 없는 회차도 마찬가지로 `success`/0건으로
+ * 기록된다(스펙 "분석할 물건이 없는 회차": 기록 자체가 없으면 죽은 워커와 구별할 수 없다).
  */
 export async function runAnalysisOnce(options: AnalysisRunOptions): Promise<AnalysisRunSummary> {
   const {
@@ -110,77 +150,106 @@ export async function runAnalysisOnce(options: AnalysisRunOptions): Promise<Anal
   // 회차마다 읽는다 — 프롬프트를 고치고 다음 주기를 기다리면 반영되게 하기 위함.
   const template = options.template ?? loadPromptTemplate();
 
-  // 1단계: 신규 분석. 항상 먼저 조회하고, 항상 전량 처리한다 — 재분석이 이 한도를
-  // 잠식하지 않는다(design.md D4의 "신규 우선").
-  const { items: newItems, total: newTotal } = await fetchUnanalyzedItems({
-    baseUrl,
-    pageSize: maxItemsPerRun,
-    fetchFn,
-  });
+  const runId = await safeStartWorkerRun(baseUrl, fetchFn, logger);
 
-  // 2단계: 재분석. 한도가 설정된 경우에만 조회한다(하위 호환 기본값 0 → 조회 자체를
-  // 생략). 1단계에서 이미 고른 물건은 제외한다 — 코드 리뷰 finding 2 수정 이후로는
-  // needsAnalysis=true가 "분석 행이 있는 물건"만 반환하므로 신규(미분석) 물건과 원칙적으로
-  // 겹치지 않지만, 이 dedupe는 안전망으로 남겨 둔다(정확성의 전제가 아니다 —
-  // repository.ts의 NEEDS_ANALYSIS_PREDICATE 주석 참고).
-  let reanalysisItems: AuctionItem[] = [];
-  if (maxReanalysisPerRun > 0) {
-    const alreadyPicked = new Set(newItems.map((item) => item.id));
-    const { items: candidates } = await fetchReanalysisCandidates({
+  try {
+    // 1단계: 신규 분석. 항상 먼저 조회하고, 항상 전량 처리한다 — 재분석이 이 한도를
+    // 잠식하지 않는다(design.md D4의 "신규 우선").
+    const { items: newItems, total: newTotal } = await fetchUnanalyzedItems({
       baseUrl,
-      pageSize: maxReanalysisPerRun,
-      promptVersion,
+      pageSize: maxItemsPerRun,
       fetchFn,
     });
-    reanalysisItems = candidates.filter((item) => !alreadyPicked.has(item.id));
-  }
 
-  const targets = [...newItems, ...reanalysisItems];
-
-  if (targets.length === 0) {
-    // 두 메시지를 구분한다: 재분석 조회 자체를 안 한 경우(하위 호환 기본 동작)와
-    // 재분석까지 조회했는데도 없는 경우는 "무엇을 확인했는지"가 다르다.
-    logger.info(
-      maxReanalysisPerRun > 0 ? "[analyzer] 미분석 물건도 재분석 대상도 없음" : "[analyzer] 미분석 물건 없음",
-    );
-    return { attempted: 0, succeeded: 0, failed: 0 };
-  }
-
-  logger.info(
-    `[analyzer] 신규 ${newItems.length}건(전체 미분석 ${newTotal}건 중), 재분석 ${reanalysisItems.length}건 ` +
-      `분석 시작 (prompt=${promptVersion}${model ? `, model=${model}` : ""})`,
-  );
-
-  const summary: AnalysisRunSummary = { attempted: targets.length, succeeded: 0, failed: 0 };
-
-  for (const item of targets) {
-    try {
-      const prompt = renderItemPrompt(template, item);
-      const result = await runClaude({ prompt, model, timeoutMs });
-      await postAnalysis({
+    // 2단계: 재분석. 한도가 설정된 경우에만 조회한다(하위 호환 기본값 0 → 조회 자체를
+    // 생략). 1단계에서 이미 고른 물건은 제외한다 — 코드 리뷰 finding 2 수정 이후로는
+    // needsAnalysis=true가 "분석 행이 있는 물건"만 반환하므로 신규(미분석) 물건과 원칙적으로
+    // 겹치지 않지만, 이 dedupe는 안전망으로 남겨 둔다(정확성의 전제가 아니다 —
+    // repository.ts의 NEEDS_ANALYSIS_PREDICATE 주석 참고).
+    let reanalysisItems: AuctionItem[] = [];
+    if (maxReanalysisPerRun > 0) {
+      const alreadyPicked = new Set(newItems.map((item) => item.id));
+      const { items: candidates } = await fetchReanalysisCandidates({
         baseUrl,
+        pageSize: maxReanalysisPerRun,
+        promptVersion,
         fetchFn,
-        payload: {
-          itemId: item.id,
-          body: result.text,
-          promptVersion,
-          // 모델을 알 수 없으면 필드를 아예 빼서 API가 null로 저장하게 둔다.
-          ...(result.model ? { model: result.model } : {}),
-        },
       });
-      summary.succeeded += 1;
-      logger.info(`[analyzer] 분석 저장 완료 ${describeItem(item)} (${result.text.length}자)`);
-    } catch (error) {
-      summary.failed += 1;
-      logger.error(`[analyzer] 분석 실패 ${describeItem(item)} — ${describeError(error)}`);
+      reanalysisItems = candidates.filter((item) => !alreadyPicked.has(item.id));
     }
+
+    const targets = [...newItems, ...reanalysisItems];
+
+    if (targets.length === 0) {
+      // 두 메시지를 구분한다: 재분석 조회 자체를 안 한 경우(하위 호환 기본 동작)와
+      // 재분석까지 조회했는데도 없는 경우는 "무엇을 확인했는지"가 다르다.
+      logger.info(
+        maxReanalysisPerRun > 0 ? "[analyzer] 미분석 물건도 재분석 대상도 없음" : "[analyzer] 미분석 물건 없음",
+      );
+      const emptySummary: AnalysisRunSummary = { attempted: 0, succeeded: 0, failed: 0 };
+      await safeFinishWorkerRun(baseUrl, fetchFn, logger, runId, {
+        outcome: "success",
+        detail: { newCount: 0, reanalysisCount: 0, succeeded: 0, failed: 0 },
+      });
+      return emptySummary;
+    }
+
+    logger.info(
+      `[analyzer] 신규 ${newItems.length}건(전체 미분석 ${newTotal}건 중), 재분석 ${reanalysisItems.length}건 ` +
+        `분석 시작 (prompt=${promptVersion}${model ? `, model=${model}` : ""})`,
+    );
+
+    const summary: AnalysisRunSummary = { attempted: targets.length, succeeded: 0, failed: 0 };
+
+    for (const item of targets) {
+      try {
+        const prompt = renderItemPrompt(template, item);
+        const result = await runClaude({ prompt, model, timeoutMs });
+        await postAnalysis({
+          baseUrl,
+          fetchFn,
+          payload: {
+            itemId: item.id,
+            body: result.text,
+            promptVersion,
+            // 모델을 알 수 없으면 필드를 아예 빼서 API가 null로 저장하게 둔다.
+            ...(result.model ? { model: result.model } : {}),
+          },
+        });
+        summary.succeeded += 1;
+        logger.info(`[analyzer] 분석 저장 완료 ${describeItem(item)} (${result.text.length}자)`);
+      } catch (error) {
+        summary.failed += 1;
+        logger.error(`[analyzer] 분석 실패 ${describeItem(item)} — ${describeError(error)}`);
+      }
+    }
+
+    logger.info(
+      `[analyzer] 회차 종료 — 시도 ${summary.attempted}건, 성공 ${summary.succeeded}건, 실패 ${summary.failed}건`,
+    );
+
+    await safeFinishWorkerRun(baseUrl, fetchFn, logger, runId, {
+      outcome: "success",
+      detail: {
+        newCount: newItems.length,
+        reanalysisCount: reanalysisItems.length,
+        succeeded: summary.succeeded,
+        failed: summary.failed,
+      },
+    });
+
+    return summary;
+  } catch (error) {
+    // 목록 조회 실패 등 회차 전체의 실패. 기록한 뒤 그대로 다시 던진다 — 호출자
+    // (startAnalyzer의 tick, main()의 --once 경로)가 기존과 같은 방식으로 로그를 남기고
+    // 계속 진행한다(제어 흐름은 바꾸지 않는다).
+    await safeFinishWorkerRun(baseUrl, fetchFn, logger, runId, {
+      outcome: "failed",
+      errorKind: error instanceof Error ? error.name : String(error),
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   }
-
-  logger.info(
-    `[analyzer] 회차 종료 — 시도 ${summary.attempted}건, 성공 ${summary.succeeded}건, 실패 ${summary.failed}건`,
-  );
-
-  return summary;
 }
 
 /** env가 있으면 양의 정수로 읽고, 값이 이상하면 조용히 넘기지 않고 throw한다. */

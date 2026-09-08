@@ -55,8 +55,33 @@ interface FetchCall {
 }
 
 /**
+ * 회차 기록 API(`POST /api/worker-runs`, `PATCH /api/worker-runs/[id]`)를 흉내 낸다
+ * (add-collection-observability 4.5/4.6). "분석 대상 조회/저장" 계약을 검증하는 기존
+ * 테스트들은 이 호출의 성공 여부에 관심이 없으므로, 매 fetch 픽스처가 기본으로
+ * 성공 응답을 주게 해서 회차 기록이 실패로 로그를 남기며 소음을 만들지 않게 한다.
+ * 4.5/4.6 전용 테스트는 이 helper를 안 쓰고 별도로 구성한다.
+ */
+function handleWorkerRunRequest(url: string, init: RequestInit | undefined): Response | undefined {
+  const parsed = new URL(url);
+  if (parsed.pathname === "/api/worker-runs" && (init?.method ?? "GET") === "POST") {
+    return new Response(JSON.stringify({ id: 1 }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  if (/^\/api\/worker-runs\/\d+$/.test(parsed.pathname) && init?.method === "PATCH") {
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  return undefined;
+}
+
+/**
  * `GET /api/items`는 주어진 물건 목록을, `POST /api/analyses`는 201을 돌려주는 가짜 서버.
- * `postStatus`로 저장 실패도 흉내 낸다.
+ * `postStatus`로 저장 실패도 흉내 낸다. 회차 기록 API는 기본으로 성공 응답을 준다
+ * (`handleWorkerRunRequest`).
  */
 function makeFetch(items: AuctionItem[], options?: { postStatus?: number }) {
   const calls: FetchCall[] = [];
@@ -64,6 +89,9 @@ function makeFetch(items: AuctionItem[], options?: { postStatus?: number }) {
 
   const fetchFn = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
     calls.push({ url, init });
+
+    const workerRunResponse = handleWorkerRunRequest(url, init);
+    if (workerRunResponse) return workerRunResponse;
 
     if (url.startsWith(`${BASE}/api/items`)) {
       return new Response(
@@ -104,6 +132,9 @@ function makeTwoPassFetch(options: {
   const fetchFn = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
     calls.push({ url, init });
     const parsed = new URL(url);
+
+    const workerRunResponse = handleWorkerRunRequest(url, init);
+    if (workerRunResponse) return workerRunResponse;
 
     if (parsed.pathname === "/api/items") {
       const pageSize = Number(parsed.searchParams.get("pageSize") ?? "0");
@@ -216,7 +247,10 @@ describe("runAnalysisOnce", () => {
     });
 
     expect(summary).toEqual({ attempted: 1, succeeded: 1, failed: 0 });
-    expect(calls[0]?.url).toBe(`${BASE}/api/items?analyzed=false&pageSize=3`);
+    // calls[0]은 이제 회차 시작 기록(POST /api/worker-runs)이다 — 물건 목록 조회 호출을
+    // path로 찾는다.
+    const itemsCall = calls.find((c) => c.url.startsWith(`${BASE}/api/items`));
+    expect(itemsCall?.url).toBe(`${BASE}/api/items?analyzed=false&pageSize=3`);
     expect(posts).toEqual([
       {
         itemId: 7,
@@ -363,6 +397,161 @@ describe("runAnalysisOnce", () => {
 });
 
 /**
+ * 회차 기록(add-collection-observability, design.md D3/D4, tasks 4.5/4.6). analyzer는
+ * DB를 직접 쓰지 않으므로 `POST`/`PATCH /api/worker-runs`로만 기록한다 — 이 두 테스트가
+ * HTTP 경계에서 실제로 오간 요청을 캡처해서 확인한다.
+ */
+describe("runAnalysisOnce — 회차 기록(observability)", () => {
+  /** 회차 기록 API로 오간 호출만 따로 캡처하는 가짜 서버. */
+  function makeObservabilityFetch(items: AuctionItem[]) {
+    interface WorkerRunCall {
+      method: string;
+      url: string;
+      body?: unknown;
+    }
+    const workerRunCalls: WorkerRunCall[] = [];
+    let nextRunId = 1;
+
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+      const parsed = new URL(url);
+      const method = init?.method ?? "GET";
+
+      if (parsed.pathname === "/api/worker-runs" && method === "POST") {
+        workerRunCalls.push({ method, url });
+        return new Response(JSON.stringify({ id: nextRunId++ }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (/^\/api\/worker-runs\/\d+$/.test(parsed.pathname) && method === "PATCH") {
+        workerRunCalls.push({
+          method,
+          url,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (parsed.pathname === "/api/items") {
+        return new Response(
+          JSON.stringify({ items, total: items.length, page: 1, pageSize: 5 }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (parsed.pathname === "/api/analyses") {
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`예상하지 못한 요청: ${url}`);
+    });
+
+    return { fetchFn, workerRunCalls };
+  }
+
+  it("4.5 — 분석할 물건이 없어도 회차가 success/0건으로 API에 기록된다(기록 자체가 없어서는 안 된다)", async () => {
+    const { fetchFn, workerRunCalls } = makeObservabilityFetch([]);
+
+    const summary = await runAnalysisOnce({
+      baseUrl: BASE,
+      maxItemsPerRun: 5,
+      template: TEMPLATE,
+      fetchFn,
+      logger: makeLogger(),
+    });
+
+    expect(summary).toEqual({ attempted: 0, succeeded: 0, failed: 0 });
+
+    const start = workerRunCalls.find((c) => c.url === `${BASE}/api/worker-runs`);
+    expect(start?.method).toBe("POST");
+
+    const finish = workerRunCalls.find((c) => c.url.startsWith(`${BASE}/api/worker-runs/`));
+    expect(finish?.method).toBe("PATCH");
+    expect(finish?.body).toMatchObject({
+      outcome: "success",
+      detail: { newCount: 0, reanalysisCount: 0, succeeded: 0, failed: 0 },
+    });
+  });
+
+  it("4.5 — 신규·재분석 건수와 성공·실패 건수가 종료 기록에 담긴다", async () => {
+    const items = [makeItem({ id: 1 }), makeItem({ id: 2 })];
+    const { fetchFn, workerRunCalls } = makeObservabilityFetch(items);
+
+    const runClaude = vi.fn(async ({ prompt }: RunClaudeOptions): Promise<ClaudeResult> => {
+      if (prompt.includes('"id": 2')) throw new Error("CLI가 죽었다");
+      return { text: "요약", model: null };
+    });
+
+    const summary = await runAnalysisOnce({
+      baseUrl: BASE,
+      maxItemsPerRun: 5,
+      template: TEMPLATE,
+      fetchFn,
+      runClaude,
+      logger: makeLogger(),
+    });
+
+    expect(summary).toEqual({ attempted: 2, succeeded: 1, failed: 1 });
+
+    const finish = workerRunCalls.find((c) => c.url.startsWith(`${BASE}/api/worker-runs/`));
+    expect(finish?.body).toMatchObject({
+      outcome: "success",
+      detail: { newCount: 2, reanalysisCount: 0, succeeded: 1, failed: 1 },
+    });
+  });
+
+  it("4.6 — 회차 기록 API(서버)가 죽어 있어도 분석 자체는 계속 진행되고 throw하지 않는다", async () => {
+    const item = makeItem({ id: 42 });
+    const logger = makeLogger();
+    const posts: unknown[] = [];
+
+    // 회차 기록 엔드포인트만 매번 네트워크 오류로 실패한다 — "서버가 죽어 있다"를
+    // 흉내 낸다. /api/items, /api/analyses는 정상 동작한다.
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+      const parsed = new URL(url);
+      if (parsed.pathname.startsWith("/api/worker-runs")) {
+        throw new TypeError("fetch failed");
+      }
+      if (parsed.pathname === "/api/items") {
+        return new Response(JSON.stringify({ items: [item], total: 1, page: 1, pageSize: 5 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (parsed.pathname === "/api/analyses") {
+        posts.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`예상하지 못한 요청: ${url}`);
+    });
+
+    const summary = await runAnalysisOnce({
+      baseUrl: BASE,
+      maxItemsPerRun: 5,
+      template: TEMPLATE,
+      fetchFn,
+      runClaude: async () => ({ text: "요약", model: null }),
+      logger,
+    });
+
+    // 분석 자체(목록 조회 → Claude 호출 → 결과 저장)는 회차 기록과 무관하게 끝까지 끝난다.
+    expect(summary).toEqual({ attempted: 1, succeeded: 1, failed: 0 });
+    expect(posts).toHaveLength(1);
+
+    // 시작 기록이 실패하면 runId가 없어 종료 기록은 아예 시도하지 않는다(collector의
+    // safeFinishRun과 같은 설계) — 로그에는 시작 실패만 남는다.
+    const log = logger.lines.join("\n");
+    expect(log).toContain("회차 시작 기록 실패");
+  });
+});
+
+/**
  * 재분석(design.md D4/D5, tasks 5.1-5.4). `runAnalysisOnce`가 두 단계로 대상을 조회하는
  * 규칙만 검증한다 — 실제 재분석 판정(SQL)은 `src/lib/db/__tests__/repository.test.ts`의
  * `listItems — needsAnalysis`가 고정한다.
@@ -486,8 +675,10 @@ describe("runAnalysisOnce — 재분석", () => {
     });
 
     expect(posts).toEqual([{ itemId: 7, body: "재분석 결과", promptVersion: PROMPT_VERSION }]);
+    // PATCH는 회차 종료 기록(add-collection-observability)이다 — 확인하려는 것은 여전히
+    // "DELETE가 없다"는 것이다.
     for (const call of calls) {
-      expect(["GET", "POST"]).toContain(call.init?.method ?? "GET");
+      expect(["GET", "POST", "PATCH"]).toContain(call.init?.method ?? "GET");
     }
   });
 

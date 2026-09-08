@@ -15,9 +15,37 @@
 
 export class SourceError extends Error {
   override readonly name: string = "SourceError";
+
+  /**
+   * 이 오류가 나기까지 실제로 요청을 보낸 페이지 수(add-collection-observability D1 정정
+   * 문단의 후속 수정). 어댑터가 catch/rethrow 시점에 채워 넣는다(`attachPagesRequested`).
+   *
+   * `undefined`(기본값)는 "어댑터가 아직 이 필드를 채우지 않았다"는 뜻이고, 그 경우
+   * 호출자는 0으로 취급해도 된다 — 세션 부트스트랩 단계처럼 검색 요청 자체를 한 번도
+   * 보내기 전에 실패한 경우가 정확히 이에 해당한다(실제로 0번 보냈으므로 0이 맞다).
+   *
+   * 반대로 검색 요청을 보낸 뒤(차단 포함) 실패하면 이 필드가 실제 요청 횟수로 채워진다
+   * — 0으로 두면 "요청을 안 보냈다"로 읽히는데, 차단은 요청을 보냈기 때문에 발생하므로
+   * 사실과 반대가 된다(설정 상수를 관측값 자리에 넣던 원래 결함과 같은 종류의 거짓).
+   */
+  pagesRequested?: number;
+
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
   }
+}
+
+/**
+ * 어댑터가 실패 직전까지 실제로 보낸 페이지 수를 오류에 실어 보낸다. 이미 값이 있으면
+ * (더 안쪽 호출이 먼저 채운 값) 더한다 — 여러 법원을 순회하다 하나가 실패하면, 그
+ * 법원에서 실패 전까지 보낸 페이지 수 + 그 앞서 완료한 법원들의 페이지 수를 합쳐야
+ * "총 몇 번 요청했는지"가 맞기 때문이다.
+ */
+export function attachPagesRequested<E>(error: E, pages: number): E {
+  if (error instanceof SourceError) {
+    error.pagesRequested = (error.pagesRequested ?? 0) + pages;
+  }
+  return error;
 }
 
 /** 네트워크 실패 또는 HTTP 상태 코드 이상. */

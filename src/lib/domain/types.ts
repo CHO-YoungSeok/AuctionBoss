@@ -212,7 +212,10 @@ export type SkipReason = (typeof SKIP_REASONS)[number];
 export interface CollectorRunDetail {
   /** 이번 회차가 대상으로 삼은 법원 이름들. */
   targetCourts: string[];
-  /** 요청한 페이지 수. */
+  /**
+   * 실제로 요청한 페이지 수(설정된 상한이 아니라 소스가 실제로 수행한 요청 수,
+   * `AuctionSource.fetchActiveItems`가 돌려준 값 그대로). design.md D1 참고.
+   */
   pagesRequested: number;
   /** 소스에서 가져온 물건 수. */
   itemsFetched: number;

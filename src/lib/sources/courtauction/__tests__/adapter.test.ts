@@ -12,6 +12,7 @@ import {
   ResponseSchemaError,
   RobotDetectedError,
   SourceBlockedError,
+  SourceError,
   SourceRequestError,
   WafBlockedError,
 } from "../../errors";
@@ -261,7 +262,7 @@ describe("CourtAuctionAdapter — 페이지네이션 (NOTES §5)", () => {
       { pageSize: 2 },
     );
 
-    const items = await adapter.fetchActiveItems(SCOPE);
+    const { items } = await adapter.fetchActiveItems(SCOPE);
 
     expect(searchCount()).toBe(3);
     // 페이지 사이마다 sleep — 동시 요청 금지의 근거
@@ -301,7 +302,47 @@ describe("CourtAuctionAdapter — 페이지네이션 (NOTES §5)", () => {
 
   it("결과가 0건이면 빈 배열이다 (실패와 구분된다)", async () => {
     const { adapter } = makeAdapter([validBody({ rows: [], totalCnt: 0 })]);
-    await expect(adapter.fetchActiveItems(SCOPE)).resolves.toEqual([]);
+    await expect(adapter.fetchActiveItems(SCOPE)).resolves.toEqual({
+      items: [],
+      pagesRequested: 1,
+    });
+  });
+});
+
+// ------------------------------------------------------------- 실제 페이지 수 기록
+
+describe("CourtAuctionAdapter — pagesRequested (add-collection-observability D1)", () => {
+  it("1페이지만 필요하면 pagesRequested=1이다", async () => {
+    const { adapter } = makeAdapter([validBody({ rows: [REAL_ROW], totalCnt: 1, pageSize: 40 })]);
+    const { pagesRequested } = await adapter.fetchActiveItems(SCOPE);
+    expect(pagesRequested).toBe(1);
+  });
+
+  it("여러 페이지를 다 돌면 실제로 요청한 페이지 수를 그대로 돌려준다", async () => {
+    const page = (rows: unknown[], pageNo: number) =>
+      validBody({ rows, totalCnt: 5, pageNo, pageSize: 2 });
+    const { adapter } = makeAdapter(
+      [
+        page([REAL_ROW, BUNDLE_ROWS[0]], 1),
+        page([BUNDLE_ROWS[1], BUNDLE_ROWS[2]], 2),
+        page([ROAD_ONLY_ROW], 3),
+      ],
+      { pageSize: 2 },
+    );
+    const { pagesRequested } = await adapter.fetchActiveItems(SCOPE);
+    expect(pagesRequested).toBe(3);
+  });
+
+  it("페이지 상한에 걸려 중간에 멈추면, 설정된 상한이 아니라 실제로 멈춘 페이지 수를 기록한다", async () => {
+    // totalCnt 기준으로는 10페이지가 필요하지만 maxPages=2에서 멈춘다.
+    // 여기서 설정 상한(2)과 실제 값이 우연히 같지 않도록, 응답을 3페이지치 준비해도
+    // maxPages=2에서 멈춰야 함을 검증한다(설정 상수를 그대로 기록하는 회귀를 잡는 테스트).
+    const { adapter } = makeAdapter(
+      [validBody({ rows: [REAL_ROW], totalCnt: 10, pageSize: 1 })],
+      { pageSize: 1, maxPages: 2 },
+    );
+    const { pagesRequested } = await adapter.fetchActiveItems(SCOPE);
+    expect(pagesRequested).toBe(2);
   });
 });
 
@@ -310,7 +351,9 @@ describe("CourtAuctionAdapter — 페이지네이션 (NOTES §5)", () => {
 describe("CourtAuctionAdapter — 정규화", () => {
   it("실제 응답 행을 AuctionItemInput으로 매핑한다 (NOTES §3.1)", async () => {
     const { adapter } = makeAdapter([validBody({ rows: [REAL_ROW] })]);
-    const [item] = await adapter.fetchActiveItems(SCOPE);
+    const {
+      items: [item],
+    } = await adapter.fetchActiveItems(SCOPE);
     expect(item).toEqual({
       court: "서울중앙지방법원",
       caseNo: "2011타경28497",
@@ -327,41 +370,51 @@ describe("CourtAuctionAdapter — 정규화", () => {
 
   it("유찰 0회는 신건으로 파생한다", async () => {
     const { adapter } = makeAdapter([validBody({ rows: BUNDLE_ROWS })]);
-    const [item] = await adapter.fetchActiveItems(SCOPE);
+    const {
+      items: [item],
+    } = await adapter.fetchActiveItems(SCOPE);
     expect(item.status).toBe("신건");
     expect(item.failedBidCount).toBe(0);
   });
 
   it("일괄매각 목적물 3행이 물건 1건으로 접히고 주소는 지번(addrGbncd=A)을 쓴다", async () => {
     const { adapter } = makeAdapter([validBody({ rows: BUNDLE_ROWS })]);
-    const items = await adapter.fetchActiveItems(SCOPE);
+    const { items } = await adapter.fetchActiveItems(SCOPE);
     expect(items).toHaveLength(1);
     expect(items[0].address).toBe("서울특별시 종로구 종로4가 185");
   });
 
   it("A 행이 없으면 도로명(R) 행 주소로 폴백한다", async () => {
     const { adapter } = makeAdapter([validBody({ rows: [ROAD_ONLY_ROW] })]);
-    const [item] = await adapter.fetchActiveItems(SCOPE);
+    const {
+      items: [item],
+    } = await adapter.fetchActiveItems(SCOPE);
     expect(item.address).toBe("서울특별시 관악구 남부순환로192길 10");
   });
 
   it("notifyMinmaePrice1을 최저매각가로 쓴다 (화면과 일치)", async () => {
     const { adapter } = makeAdapter([validBody({ rows: [ROAD_ONLY_ROW] })]);
-    const [item] = await adapter.fetchActiveItems(SCOPE);
+    const {
+      items: [item],
+    } = await adapter.fetchActiveItems(SCOPE);
     expect(item.minBidPrice).toBe(358_400_000); // minmaePrice(448,000,000)가 아니다
   });
 
   it("notifyMinmaePrice1이 비어 있으면 minmaePrice로 폴백한다", async () => {
     const row = { ...REAL_ROW, notifyMinmaePrice1: "0", minmaePrice: "711000000" };
     const { adapter } = makeAdapter([validBody({ rows: [row] })]);
-    const [item] = await adapter.fetchActiveItems(SCOPE);
+    const {
+      items: [item],
+    } = await adapter.fetchActiveItems(SCOPE);
     expect(item.minBidPrice).toBe(711_000_000);
   });
 
   it("매각기일이 YYYYMMDD가 아니면 null (조용히 잘못된 날짜를 만들지 않는다)", async () => {
     const row = { ...REAL_ROW, maeGiil: "" };
     const { adapter } = makeAdapter([validBody({ rows: [row] })]);
-    const [item] = await adapter.fetchActiveItems(SCOPE);
+    const {
+      items: [item],
+    } = await adapter.fetchActiveItems(SCOPE);
     expect(item.auctionDate).toBeNull();
   });
 
@@ -370,7 +423,7 @@ describe("CourtAuctionAdapter — 정규화", () => {
     const { adapter } = makeAdapter([validBody({ rows: [REAL_ROW, MISSING_KEY_ROW] })], {
       logger,
     });
-    const items = await adapter.fetchActiveItems(SCOPE);
+    const { items } = await adapter.fetchActiveItems(SCOPE);
     expect(items).toHaveLength(1);
     expect(items[0].caseNo).toBe("2011타경28497");
     const warn = logger.warns.join("\n");
@@ -389,7 +442,9 @@ describe("CourtAuctionAdapter — 정규화", () => {
   it("addrGbncd 필드가 아예 없어도 주소를 잃지 않는다", async () => {
     const row = { ...REAL_ROW, addrGbncd: undefined };
     const { adapter } = makeAdapter([validBody({ rows: [row] })]);
-    const [item] = await adapter.fetchActiveItems(SCOPE);
+    const {
+      items: [item],
+    } = await adapter.fetchActiveItems(SCOPE);
     expect(item.address).toBe(REAL_ROW.printSt);
   });
 });
@@ -409,6 +464,75 @@ describe("CourtAuctionAdapter — 실패 처리 (spec 수집 실패 처리)", ()
     );
     await expect(adapter.fetchActiveItems(SCOPE)).rejects.toBeInstanceOf(RobotDetectedError);
     expect(searchCount()).toBe(2); // 3페이지째는 시도하지 않는다
+  });
+
+  it(
+    "2페이지에서 차단되면 오류에 실제로 보낸 페이지 수(2)가 실린다 — 0이면 " +
+      "\"요청을 안 보냈다\"로 읽혀 차단(요청을 보냈기 때문에 발생)과 모순된다 (원래 결함 회귀 테스트)",
+    async () => {
+      const { adapter } = makeAdapter(
+        [validBody({ rows: [REAL_ROW], totalCnt: 3, pageSize: 1 }), ROBOT_BLOCKED_BODY],
+        { pageSize: 1 },
+      );
+      try {
+        await adapter.fetchActiveItems(SCOPE);
+        expect.unreachable("throw했어야 한다");
+      } catch (err) {
+        expect(err).toBeInstanceOf(RobotDetectedError);
+        expect((err as SourceError).pagesRequested).toBe(2);
+      }
+    },
+  );
+
+  it("1페이지째(첫 요청)부터 차단되어도 pagesRequested는 0이 아니라 1이다 — 그 요청은 실제로 보냈다", async () => {
+    const { adapter } = makeAdapter([ROBOT_BLOCKED_BODY]);
+    try {
+      await adapter.fetchActiveItems(SCOPE);
+      expect.unreachable("throw했어야 한다");
+    } catch (err) {
+      expect(err).toBeInstanceOf(RobotDetectedError);
+      expect((err as SourceError).pagesRequested).toBe(1);
+    }
+  });
+
+  it("여러 법원을 순회하다 두 번째 법원에서 차단되면, 첫 법원에서 이미 보낸 페이지 수까지 합산된다", async () => {
+    const twoCourts: CollectScope = {
+      courts: [
+        { name: "서울중앙지방법원", courtCode: "B000210" },
+        { name: "서울동부지방법원", courtCode: "B000211" },
+      ],
+    };
+    // 첫 법원: 2페이지(pageSize=1, totalCnt=2)를 정상 완료. 두 번째 법원: 1페이지째에서 차단.
+    const { adapter } = makeAdapter(
+      [
+        validBody({ rows: [REAL_ROW], totalCnt: 2, pageSize: 1 }),
+        validBody({ rows: [ROAD_ONLY_ROW], totalCnt: 2, pageNo: 2, pageSize: 1 }),
+        ROBOT_BLOCKED_BODY,
+      ],
+      { pageSize: 1 },
+    );
+    try {
+      await adapter.fetchActiveItems(twoCourts);
+      expect.unreachable("throw했어야 한다");
+    } catch (err) {
+      expect(err).toBeInstanceOf(RobotDetectedError);
+      // 첫 법원 2페이지 + 두 번째 법원에서 차단당한 1페이지 = 3.
+      expect((err as SourceError).pagesRequested).toBe(3);
+    }
+  });
+
+  it("세션 초기화 단계에서 실패하면 검색 요청을 한 번도 보내지 않았으므로 pagesRequested는 undefined(0으로 취급)다", async () => {
+    const adapter = new CourtAuctionAdapter({
+      fetchFn: async () => new Response("nope", { status: 500 }),
+      logger: collectingLogger(),
+      sleep: async () => {},
+    });
+    try {
+      await adapter.fetchActiveItems(SCOPE);
+      expect.unreachable("throw했어야 한다");
+    } catch (err) {
+      expect((err as SourceError).pagesRequested).toBeUndefined();
+    }
   });
 
   it("HTTP 5xx는 SourceRequestError", async () => {

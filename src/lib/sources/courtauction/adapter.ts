@@ -21,8 +21,14 @@ import {
   RobotDetectedError,
   SourceRequestError,
   WafBlockedError,
+  attachPagesRequested,
 } from "../errors";
-import { consoleLogger, type AuctionSource, type Logger } from "../types";
+import {
+  consoleLogger,
+  type AuctionSource,
+  type FetchActiveItemsResult,
+  type Logger,
+} from "../types";
 import { courtCodeByName } from "./courts";
 import { searchDataSchema, type SearchRow } from "./schema";
 
@@ -202,17 +208,28 @@ export class CourtAuctionAdapter implements AuctionSource {
     this.now = options.now ?? (() => new Date());
   }
 
-  async fetchActiveItems(scope: CollectScope): Promise<AuctionItemInput[]> {
+  async fetchActiveItems(scope: CollectScope): Promise<FetchActiveItemsResult> {
     // 회차당 쿠키는 한 번만 받는다 (NOTES §7 step 1).
     const cookie = await this.bootstrapSession();
 
     const items: AuctionItemInput[] = [];
+    let pagesRequested = 0;
     for (const [index, court] of scope.courts.entries()) {
       if (index > 0) await this.sleep(this.pageDelayMs);
-      const rows = await this.fetchCourtRows(court, cookie);
-      items.push(...this.foldRowsToItems(rows, court));
+      try {
+        const { rows, pagesRequested: courtPages } = await this.fetchCourtRows(court, cookie);
+        pagesRequested += courtPages;
+        items.push(...this.foldRowsToItems(rows, court));
+      } catch (error) {
+        // 이 법원에서 실패 전까지 보낸 페이지 수는 fetchCourtRows가 이미 오류에 실어
+        // 뒀다(attachPagesRequested) — 여기서는 그 앞에 완료한 법원들의 합계만 더한다.
+        // 차단으로 회차가 중단됐을 때 "실제로 몇 번 요청했길래 차단됐는지"를 남기려는
+        // 것이다(design.md D1 정정 문단의 후속 수정) — 0으로 남기면 "요청을 안 보냈다"로
+        // 읽혀 차단(요청을 보냈기 때문에 발생)과 모순된다.
+        throw attachPagesRequested(error, pagesRequested);
+      }
     }
-    return items;
+    return { items, pagesRequested };
   }
 
   // ---------------------------------------------------------------- 세션/요청
@@ -247,56 +264,73 @@ export class CourtAuctionAdapter implements AuctionSource {
     return cookie;
   }
 
-  /** 한 법원의 결과 행 전부. 페이지네이션은 여기서 끝난다. */
-  private async fetchCourtRows(court: CourtRef, cookie: string): Promise<SearchRow[]> {
+  /**
+   * 한 법원의 결과 행 전부와 실제로 요청한 페이지 수. 페이지네이션은 여기서 끝난다.
+   *
+   * `pagesRequested`는 매 페이지 요청을 **보내기 직전**에 갱신한다 — 그 요청 자체가
+   * 차단·오류로 실패해도 "시도했다"는 사실은 남아야 하기 때문이다. 그래서 이 함수
+   * 전체를 try/catch로 감싸, 어디서 실패하든 그때까지의 값을 오류에 실어(`attachPagesRequested`)
+   * 다시 던진다 — 호출자(`fetchActiveItems`)가 이 법원 앞의 누적치를 더한다.
+   */
+  private async fetchCourtRows(
+    court: CourtRef,
+    cookie: string,
+  ): Promise<{ rows: SearchRow[]; pagesRequested: number }> {
     const courtCode = resolveCourtCode(court);
     const { bidBgngYmd, bidEndYmd } = this.bidWindow();
     const rows: SearchRow[] = [];
+    let pagesRequested = 0;
 
-    // 첫 페이지: totalYn="Y"로 총건수까지 계산시킨다 (NOTES §5).
-    const first = await this.search(this.buildBody({ courtCode, pageNo: 1, bidBgngYmd, bidEndYmd }), cookie);
-    rows.push(...first.dlt_srchResult);
+    try {
+      // 첫 페이지: totalYn="Y"로 총건수까지 계산시킨다 (NOTES §5).
+      pagesRequested = 1;
+      const first = await this.search(this.buildBody({ courtCode, pageNo: 1, bidBgngYmd, bidEndYmd }), cookie);
+      rows.push(...first.dlt_srchResult);
 
-    // ★ 페이지 수는 totalCnt(행 수)로 계산한다. groupTotalCount(물건 수)로 계산하면
-    //   일괄매각 때문에 행 수 > 물건 수라서 뒷 페이지를 통째로 놓친다 (NOTES §5).
-    const totalRows = toInt(first.dma_pageInfo.totalCnt) ?? 0;
-    const pageCount = totalRows > 0 ? Math.ceil(totalRows / this.pageSize) : 1;
-    this.logger.info(
-      `[courtauction] ${court.name}(${courtCode}) 매각기일 ${bidBgngYmd}~${bidEndYmd}: ` +
-        `총 ${totalRows}행 / ${pageCount}페이지 (page 1: ${first.dlt_srchResult.length}행)`,
-    );
-
-    const lastPage = Math.min(pageCount, this.maxPages);
-    if (pageCount > this.maxPages) {
-      this.logger.warn(
-        `[courtauction] 페이지 상한(${this.maxPages})에 걸려 ${pageCount}페이지 중 ${lastPage}페이지까지만 수집합니다`,
-      );
-    }
-
-    for (let pageNo = 2; pageNo <= lastPage; pageNo += 1) {
-      // 동시 요청 금지 — 반드시 순차로, 사이에 sleep을 둔다 (NOTES §6.1).
-      await this.sleep(this.pageDelayMs);
-      const page = await this.search(
-        this.buildBody({
-          courtCode,
-          pageNo,
-          bidBgngYmd,
-          bidEndYmd,
-          bfPageNo: pageNo - 1,
-          totalYn: "N",
-          totalCnt: totalRows,
-        }),
-        cookie,
-      );
-      rows.push(...page.dlt_srchResult);
+      // ★ 페이지 수는 totalCnt(행 수)로 계산한다. groupTotalCount(물건 수)로 계산하면
+      //   일괄매각 때문에 행 수 > 물건 수라서 뒷 페이지를 통째로 놓친다 (NOTES §5).
+      const totalRows = toInt(first.dma_pageInfo.totalCnt) ?? 0;
+      const pageCount = totalRows > 0 ? Math.ceil(totalRows / this.pageSize) : 1;
       this.logger.info(
-        `[courtauction] ${court.name} page ${pageNo}/${lastPage}: ${page.dlt_srchResult.length}행 (누적 ${rows.length})`,
+        `[courtauction] ${court.name}(${courtCode}) 매각기일 ${bidBgngYmd}~${bidEndYmd}: ` +
+          `총 ${totalRows}행 / ${pageCount}페이지 (page 1: ${first.dlt_srchResult.length}행)`,
       );
-      // 총건수와 무관하게 빈 페이지가 나오면 더 볼 게 없다.
-      if (page.dlt_srchResult.length === 0) break;
-    }
 
-    return rows;
+      const lastPage = Math.min(pageCount, this.maxPages);
+      if (pageCount > this.maxPages) {
+        this.logger.warn(
+          `[courtauction] 페이지 상한(${this.maxPages})에 걸려 ${pageCount}페이지 중 ${lastPage}페이지까지만 수집합니다`,
+        );
+      }
+
+      for (let pageNo = 2; pageNo <= lastPage; pageNo += 1) {
+        // 동시 요청 금지 — 반드시 순차로, 사이에 sleep을 둔다 (NOTES §6.1).
+        await this.sleep(this.pageDelayMs);
+        pagesRequested = pageNo;
+        const page = await this.search(
+          this.buildBody({
+            courtCode,
+            pageNo,
+            bidBgngYmd,
+            bidEndYmd,
+            bfPageNo: pageNo - 1,
+            totalYn: "N",
+            totalCnt: totalRows,
+          }),
+          cookie,
+        );
+        rows.push(...page.dlt_srchResult);
+        this.logger.info(
+          `[courtauction] ${court.name} page ${pageNo}/${lastPage}: ${page.dlt_srchResult.length}행 (누적 ${rows.length})`,
+        );
+        // 총건수와 무관하게 빈 페이지가 나오면 더 볼 게 없다.
+        if (page.dlt_srchResult.length === 0) break;
+      }
+
+      return { rows, pagesRequested };
+    } catch (error) {
+      throw attachPagesRequested(error, pagesRequested);
+    }
   }
 
   /** "진행 중" = 오늘 이후 매각기일이 잡힌 물건 (NOTES §6.2 row 0의 실무적 해석). */
