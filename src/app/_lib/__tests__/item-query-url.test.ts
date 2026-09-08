@@ -50,20 +50,29 @@ describe("itemListHref → parseItemQueryLenient 라운드트립", () => {
       { ...DEFAULTS, usageTypes: ["  오피스텔  ", "아파트"] },
     ],
     [
-      "필터·정렬·페이지 전체 조합",
+      "필터·정렬·페이지 전체 조합(ux-overhaul-phase2 신규 필터 포함)",
       {
         page: 2,
         pageSize: 50,
         analyzed: false,
         usageTypes: ["아파트", "다세대"],
+        sidoValues: ["서울특별시", "경기도"],
+        sigunguValues: ["관악구"],
         minPrice: 100_000_000,
         maxPrice: 500_000_000,
         minFailedBidCount: 3,
         addressKeyword: "강남",
+        auctionDateFrom: "2026-01-01",
+        auctionDateTo: "2026-12-31",
+        excludePastAuctions: true,
+        bookmarked: true,
         sort: "bidRatio",
         direction: "asc",
       },
     ],
+    ["지역 필터만(반복 파라미터)", { ...DEFAULTS, sidoValues: ["서울특별시"], sigunguValues: ["관악구", "강남구"] }],
+    ["기일 범위만", { ...DEFAULTS, auctionDateFrom: "2026-01-01", auctionDateTo: "2026-12-31" }],
+    ["관심 제외(false)도 true와 구별되어 왕복한다", { ...DEFAULTS, bookmarked: false }],
   ];
 
   for (const [label, query] of cases) {
@@ -98,5 +107,24 @@ describe("itemListHref → parseItemQueryLenient 라운드트립", () => {
     const href = itemListHref(query, { page: 3 });
     const roundTripped = parseItemQueryLenient(searchParamsOf(href));
     expect(roundTripped).toEqual({ ...query, page: 3 });
+  });
+
+  describe("페이지 이동 후에도 각 신규 필터가 유지된다(0번 체크리스트 0.2)", () => {
+    const filterCases: Array<[string, ItemQuery]> = [
+      ["지역", { ...DEFAULTS, sidoValues: ["서울특별시"], sigunguValues: ["관악구"] }],
+      ["가격(억/만원에서 합산된 원 단위)", { ...DEFAULTS, minPrice: 100_000_000, maxPrice: 300_000_000 }],
+      ["기일 범위", { ...DEFAULTS, auctionDateFrom: "2026-01-01", auctionDateTo: "2026-12-31" }],
+      ["지난 기일 제외", { ...DEFAULTS, excludePastAuctions: true }],
+      ["관심만 보기", { ...DEFAULTS, bookmarked: true }],
+      ["용도 토큰", { ...DEFAULTS, usageTypes: ["오피스텔"] }],
+    ];
+
+    for (const [label, query] of filterCases) {
+      it(`${label} — 다음 페이지 링크가 조건을 그대로 들고 간다`, () => {
+        const nextPageHref = itemListHref(query, { page: (query.page ?? 1) + 1 });
+        const roundTripped = parseItemQueryLenient(searchParamsOf(nextPageHref));
+        expect(roundTripped).toEqual({ ...query, page: (query.page ?? 1) + 1 });
+      });
+    }
   });
 });

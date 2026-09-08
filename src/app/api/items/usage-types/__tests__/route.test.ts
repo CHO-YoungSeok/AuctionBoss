@@ -67,4 +67,13 @@ describe("GET /api/items/usage-types", () => {
     const body = (await response.json()) as { usageTypes: string[] };
     expect(body.usageTypes).toEqual([]);
   });
+
+  it("복합 문자열은 쉼표로 쪼갠 개별 토큰으로 반환한다(ux-overhaul-phase2 design.md D2)", async () => {
+    const repo = getRepository();
+    repo.upsertItems([makeItem({ itemNo: "1", usageType: "상가,오피스텔,근린시설" })]);
+
+    const response = GET();
+    const body = (await response.json()) as { usageTypes: string[] };
+    expect(body.usageTypes.sort()).toEqual(["근린시설", "상가", "오피스텔"]);
+  });
 });

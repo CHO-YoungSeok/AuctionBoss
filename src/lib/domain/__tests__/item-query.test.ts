@@ -336,6 +336,109 @@ describe("parseItemQueryLenient", () => {
   });
 });
 
+describe("지역 필터(sido/sigungu) — tasks.md 1.1", () => {
+  it("usage와 같은 반복 파라미터 인코딩으로 다중 선택을 받는다", () => {
+    const query = ok(parseItemQuery(new URLSearchParams("sido=서울특별시&sido=경기도&sigungu=관악구")));
+    expect(query.sidoValues).toEqual(["서울특별시", "경기도"]);
+    expect(query.sigunguValues).toEqual(["관악구"]);
+  });
+
+  it("빈 값·개수 상한은 usage와 같은 규칙을 따른다", () => {
+    expect(fields(fail(parseItemQuery({ sido: [""] })))).toEqual(["sido"]);
+    const tooMany = Array.from({ length: 51 }, (_, i) => `지역${i}`);
+    expect(fields(fail(parseItemQuery({ sido: tooMany })))).toEqual(["sido"]);
+  });
+
+  it("페이지 이동 후에도 조건이 유지된다(0.2) — lenient 왕복으로 확인", () => {
+    const query = ok(parseItemQuery({ sido: ["서울특별시"], sigungu: ["관악구"] }));
+    expect(parseItemQueryLenient({ sido: query.sidoValues, sigungu: query.sigunguValues, page: "3" })).toEqual({
+      ...DEFAULTS,
+      page: 3,
+      sidoValues: ["서울특별시"],
+      sigunguValues: ["관악구"],
+    });
+  });
+});
+
+describe("가격 폼(억/만원) — tasks.md 2.1/2.2", () => {
+  it("억/만원을 원 단위로 합산한다", () => {
+    const query = ok(parseItemQuery({ minEok: "1", minMan: "2000", maxEok: "3" }));
+    expect(query.minPrice).toBe(120_000_000);
+    expect(query.maxPrice).toBe(300_000_000);
+  });
+
+  it("한쪽만(만원만) 와도 나머지는 0으로 본다", () => {
+    expect(ok(parseItemQuery({ minMan: "500" })).minPrice).toBe(5_000_000);
+  });
+
+  it("판정: 원 단위 파라미터(minPrice/maxPrice)가 있으면 억/만원은 무시된다(design.md D3 precedence)", () => {
+    const query = ok(parseItemQuery({ minPrice: "1", minEok: "5", minMan: "5000" }));
+    expect(query.minPrice).toBe(1); // eok/man(5억 5천만원)이 아니라 원 단위 값(1원)이 이긴다
+  });
+
+  it("억/만원 합산값이 뒤집힌 범위면 400이고, 필드는 실제로 온 eok/man 이름을 지목한다", () => {
+    const issues = fail(parseItemQuery({ minEok: "5", maxEok: "1" }));
+    expect(fields(issues).sort()).toEqual(["maxEok", "minEok"]);
+  });
+
+  it("원 단위와 eok/man이 섞여도(한쪽은 원, 한쪽은 억) 합산 방향 검증이 걸린다", () => {
+    const issues = fail(parseItemQuery({ minPrice: "500000000", maxEok: "1" })); // 5억 > 1억
+    expect(fields(issues).sort()).toEqual(["maxEok", "minPrice"]);
+  });
+
+  it("원 단위끼리만 뒤집히면 기존 메시지 그대로다(회귀 — 위 새 교차검증과 중복 보고하지 않는다)", () => {
+    const issues = fail(parseItemQuery({ minPrice: "500", maxPrice: "100" }));
+    expect(issues).toHaveLength(2); // eok/man 교차검증이 같은 케이스를 다시 보고하면 4개가 된다
+  });
+
+  it("lenient는 억/만원도 minPrice/maxPrice로 정규화해 돌려준다", () => {
+    expect(parseItemQueryLenient({ minEok: "1" })).toEqual({ ...DEFAULTS, minPrice: 100_000_000 });
+  });
+});
+
+describe("매각기일 범위 필터 — tasks.md 3.1/3.2", () => {
+  it("YYYY-MM-DD 형식의 from/to를 받는다", () => {
+    const query = ok(parseItemQuery({ dateFrom: "2026-01-01", dateTo: "2026-12-31" }));
+    expect(query.auctionDateFrom).toBe("2026-01-01");
+    expect(query.auctionDateTo).toBe("2026-12-31");
+  });
+
+  it("형식이 다르면 400이다", () => {
+    expect(fields(fail(parseItemQuery({ dateFrom: "2026/01/01" })))).toEqual(["dateFrom"]);
+    expect(fields(fail(parseItemQuery({ dateTo: "20260101" })))).toEqual(["dateTo"]);
+  });
+
+  it("dateFrom이 dateTo보다 늦으면 400이고 둘 다 지목한다", () => {
+    const issues = fail(parseItemQuery({ dateFrom: "2026-12-31", dateTo: "2026-01-01" }));
+    expect(fields(issues)).toEqual(["dateFrom", "dateTo"]);
+  });
+
+  it("같으면 통과한다(경계값)", () => {
+    expect(ok(parseItemQuery({ dateFrom: "2026-01-01", dateTo: "2026-01-01" }))).toMatchObject({
+      auctionDateFrom: "2026-01-01",
+      auctionDateTo: "2026-01-01",
+    });
+  });
+
+  it("\"지난 기일 제외\"는 opt-in이라 excludePast가 없으면 필드 자체가 없다(기본 동작 무변경, tasks.md 3.2)", () => {
+    expect(ok(parseItemQuery({}))).not.toHaveProperty("excludePastAuctions");
+    expect(ok(parseItemQuery({ dateFrom: "2026-01-01" }))).not.toHaveProperty("excludePastAuctions");
+  });
+
+  it("excludePast=true만 지원한다 — false/다른 값은 거부한다(needsAnalysis와 같은 패턴)", () => {
+    expect(ok(parseItemQuery({ excludePast: "true" })).excludePastAuctions).toBe(true);
+    expect(fields(fail(parseItemQuery({ excludePast: "false" })))).toEqual(["excludePast"]);
+  });
+});
+
+describe("관심 필터(bookmarked) — tasks.md 4.1", () => {
+  it("true/false 둘 다 지원한다(analyzed와 같은 패턴)", () => {
+    expect(ok(parseItemQuery({ bookmarked: "true" })).bookmarked).toBe(true);
+    expect(ok(parseItemQuery({ bookmarked: "false" })).bookmarked).toBe(false);
+    expect(fields(fail(parseItemQuery({ bookmarked: "1" })))).toEqual(["bookmarked"]);
+  });
+});
+
 describe("hasActiveFilters", () => {
   it("필터가 하나라도 있으면 true, 페이지·정렬만 있으면 false다", () => {
     expect(hasActiveFilters(DEFAULTS)).toBe(false);
@@ -359,6 +462,18 @@ describe("hasActiveFilters", () => {
   it("needsAnalysis도 결과를 좁히는 필터다(analyzed와 같은 이유). promptVersion 단독은 아니다", () => {
     expect(hasActiveFilters({ needsAnalysis: true })).toBe(true);
     expect(hasActiveFilters({ promptVersion: "v1" })).toBe(false);
+  });
+
+  it("ux-overhaul-phase2로 추가된 필터도 전부 hasActiveFilters에 반영된다(0번 체크리스트)", () => {
+    expect(hasActiveFilters({ sidoValues: ["서울특별시"] })).toBe(true);
+    expect(hasActiveFilters({ sidoValues: [] })).toBe(false);
+    expect(hasActiveFilters({ sigunguValues: ["관악구"] })).toBe(true);
+    expect(hasActiveFilters({ sigunguValues: [] })).toBe(false);
+    expect(hasActiveFilters({ auctionDateFrom: "2026-01-01" })).toBe(true);
+    expect(hasActiveFilters({ auctionDateTo: "2026-12-31" })).toBe(true);
+    expect(hasActiveFilters({ excludePastAuctions: true })).toBe(true);
+    expect(hasActiveFilters({ bookmarked: true })).toBe(true);
+    expect(hasActiveFilters({ bookmarked: false })).toBe(true); // analyzed와 같은 이유 — 값의 참/거짓과 무관하게 활성
   });
 });
 
@@ -385,6 +500,32 @@ describe("chooseEmptyState", () => {
       kind: "emptyFiltered",
     });
     expect(chooseEmptyState(0, { ...DEFAULTS, addressKeyword: "존재하지않는주소" })).toEqual({
+      kind: "emptyFiltered",
+    });
+  });
+
+  it("0건이고 ux-overhaul-phase2 신규 필터 하나만 있어도 emptyFiltered다(0번 체크리스트 0.1)", () => {
+    // 필터마다 이 케이스를 확인한다 — hasActiveFilters 누락(finding 1과 같은 사고)을
+    // 잡는 유일한 자동화된 방어선이다.
+    expect(chooseEmptyState(0, { ...DEFAULTS, sidoValues: ["존재하지않는시도"] })).toEqual({
+      kind: "emptyFiltered",
+    });
+    expect(chooseEmptyState(0, { ...DEFAULTS, sigunguValues: ["존재하지않는시군구"] })).toEqual({
+      kind: "emptyFiltered",
+    });
+    expect(chooseEmptyState(0, { ...DEFAULTS, minPrice: 999_999_999_999 })).toEqual({
+      kind: "emptyFiltered",
+    });
+    expect(chooseEmptyState(0, { ...DEFAULTS, auctionDateFrom: "2099-01-01" })).toEqual({
+      kind: "emptyFiltered",
+    });
+    expect(chooseEmptyState(0, { ...DEFAULTS, auctionDateTo: "1900-01-01" })).toEqual({
+      kind: "emptyFiltered",
+    });
+    expect(chooseEmptyState(0, { ...DEFAULTS, excludePastAuctions: true })).toEqual({
+      kind: "emptyFiltered",
+    });
+    expect(chooseEmptyState(0, { ...DEFAULTS, bookmarked: true })).toEqual({
       kind: "emptyFiltered",
     });
   });

@@ -55,6 +55,8 @@ export {
   listAnalyses,
   listItemChanges,
   listItems,
+  listSidoValues,
+  listSigunguValues,
   listUsageTypes,
   upsertItems,
   type AuctionRepository,

@@ -59,13 +59,26 @@ a:hover {
   text-align: center;
 }
 
-/* 필터·정렬 폼 (평범한 GET form). 입력칸이 늘어나도 줄바꿈으로 흐르게 둔다. */
-.filters {
+/* 필터·정렬 폼을 감싸는 <details>(ux-overhaul-phase2 tasks.md 7.2). 필터가 걸려 있으면
+   펼쳐진 채로 열린다(JSX의 open={filtersActive}) — 이 CSS는 접힘/펼침 시각 표현만 담당한다. */
+.filters-details {
   margin-bottom: 1.25rem;
-  padding: 1rem 1.25rem;
+  padding: 0.75rem 1.25rem;
   background: #ffffff;
   border: 1px solid #dfe3e8;
   border-radius: 6px;
+}
+
+.filters-details summary {
+  padding: 0.25rem 0;
+  color: #1a2733;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* 필터·정렬 폼 (평범한 GET form). 입력칸이 늘어나도 줄바꿈으로 흐르게 둔다. */
+.filters {
+  margin-top: 0.75rem;
 }
 
 .filter-group {
@@ -114,6 +127,7 @@ a:hover {
 
 .filters input[type="text"],
 .filters input[type="number"],
+.filters input[type="date"],
 .filters select {
   width: 100%;
   padding: 0.35rem 0.5rem;
@@ -122,6 +136,58 @@ a:hover {
   border: 1px solid #cfd5dd;
   border-radius: 4px;
   font: inherit;
+}
+
+.price-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.price-preset-link {
+  padding: 0.2rem 0.6rem;
+  color: #1a4fd6;
+  background: #eef2ff;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.price-preset-link:hover {
+  text-decoration: underline;
+}
+
+/* 적용 중인 필터 칩(tasks.md 7.1) — 폼(<details>)이 접혀 있어도 무엇이 걸려 있는지
+   한눈에 보인다. */
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.5rem 0.2rem 0.7rem;
+  color: #1a2733;
+  background: #eef1f5;
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+
+.filter-chip a {
+  color: #5f6672;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.filter-chip a:hover {
+  color: #b3261e;
 }
 
 .filter-actions {

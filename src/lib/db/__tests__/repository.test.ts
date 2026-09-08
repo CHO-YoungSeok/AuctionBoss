@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { AuctionItemInput } from "@/lib/domain";
+import { hasActiveFilters, type AuctionItemInput } from "@/lib/domain";
 import { openDatabase, type Db } from "../client";
 import { createBookmarksRepository } from "../bookmarks";
 import { ItemNotFoundError } from "../errors";
@@ -1077,10 +1077,24 @@ describe("listItems 필터·정렬", () => {
       expect(found({ usageTypes: ["아파트", "다세대"] }).sort()).toEqual(["1", "2", "4"]);
     });
 
-    it("쉼표가 들어간 용도 값도 그대로 매칭된다", () => {
+    it("복합 문자열의 개별 토큰만으로도 매칭된다(계약 변경, ux-overhaul-phase2 design.md D2)", () => {
+      // 이전 계약(정확 일치)에서는 usageTypes: ["상가"]가 0건이었다 — "상가,오피스텔,근린시설"과
+      // 정확히 같은 문자열이 아니었기 때문이다. 이제는 토큰 단위로 걸려 "3"이 나온다 —
+      // 같은 `usage=오피스텔` 요청이 이전보다 넓은 결과를 반환한다는 의도된 계약 변경이다.
+      expect(found({ usageTypes: ["상가"] })).toEqual(["3"]);
+      expect(found({ usageTypes: ["오피스텔"] })).toEqual(["3"]);
+      expect(found({ usageTypes: ["근린시설"] })).toEqual(["3"]);
+      // 복합 문자열 전체를 그대로 줘도(기존처럼) 여전히 매칭된다 — 앞뒤 구분자를 붙인
+      // 패턴이 원본 문자열 전체와도 일치한다.
       expect(found({ usageTypes: ["상가,오피스텔,근린시설"] })).toEqual(["3"]);
-      // 쉼표로 쪼갠 조각은 어디에도 없다.
-      expect(found({ usageTypes: ["상가", "오피스텔", "근린시설"] })).toEqual([]);
+    });
+
+    it("부분 문자열 오탐을 피한다 — \"오피스텔형\"은 \"오피스텔\" 토큰과 다르다(design.md D2)", () => {
+      repo.upsertItems([
+        makeItem({ itemNo: "6", usageType: "오피스텔형", auctionDate: "2026-05-05" }),
+      ]);
+      expect(found({ usageTypes: ["오피스텔"] })).not.toContain("6");
+      expect(found({ usageTypes: ["오피스텔형"] })).toEqual(["6"]);
     });
 
     it("빈 배열이면 필터를 걸지 않는다", () => {
@@ -1282,6 +1296,200 @@ describe("listItems 필터·정렬", () => {
   });
 });
 
+/**
+ * 지역·기일·관심·면적당가격 필터/정렬 데이터셋(ux-overhaul-phase2). "listItems 필터·정렬"의
+ * 기존 5건 데이터셋과 별개로 둔다 — sido/sigungu/minArea/maxArea/북마크까지 얽히면 기존
+ * 스위트가 읽기 어려워진다.
+ *
+ * `now`는 항상 2026-06-01(UTC 자정 = 한국시간 같은 날 09:00)로 고정해 "지난 기일 제외"를
+ * 결정적으로 검증한다.
+ *
+ * | itemNo | 시/도      | 시/군/구 | 매각기일    | 관심 | 최저가 | 면적(㎡) |
+ * |--------|------------|----------|-------------|------|--------|----------|
+ * | 1      | 서울특별시 | 관악구   | 2026-01-01(과거) | O | 100  | 10 |
+ * | 2      | 서울특별시 | 강남구   | 2026-12-31(미래) | X | 200  | 20 |
+ * | 3      | 경기도     | 수원시   | (없음)      | X | 300  | (없음) |
+ * | 4      | (없음)     | (없음)   | 2026-06-01(오늘, 경계) | O | (없음) | 5 |
+ */
+describe("listItems — 지역/기일/관심/면적당가격 (ux-overhaul-phase2)", () => {
+  const NOW = "2026-06-01T00:00:00.000Z";
+
+  beforeEach(() => {
+    repo.upsertItems([
+      makeItem({
+        itemNo: "1",
+        sido: "서울특별시",
+        sigungu: "관악구",
+        auctionDate: "2026-01-01",
+        minBidPrice: 100,
+        minArea: 10,
+        maxArea: 10,
+      }),
+      makeItem({
+        itemNo: "2",
+        sido: "서울특별시",
+        sigungu: "강남구",
+        auctionDate: "2026-12-31",
+        minBidPrice: 200,
+        minArea: 20,
+        maxArea: 20,
+      }),
+      makeItem({
+        itemNo: "3",
+        sido: "경기도",
+        sigungu: "수원시",
+        auctionDate: null,
+        minBidPrice: 300,
+      }),
+      makeItem({
+        itemNo: "4",
+        sido: null,
+        sigungu: null,
+        auctionDate: "2026-06-01",
+        minBidPrice: null,
+        minArea: 5,
+        maxArea: 5,
+      }),
+    ]);
+    const bookmarks = createBookmarksRepository(db);
+    const byItemNo = new Map(
+      repo.listItems({ pageSize: 10 }).items.map((item) => [item.itemNo, item.id]),
+    );
+    bookmarks.addBookmark(byItemNo.get("1")!);
+    bookmarks.addBookmark(byItemNo.get("4")!);
+  });
+
+  function found(query: Parameters<AuctionRepository["listItems"]>[0]): string[] {
+    return repo.listItems({ pageSize: 10, ...query }, { now: NOW }).items.map((item) => item.itemNo);
+  }
+
+  describe("지역 필터(sido/sigungu) — tasks.md 1.1~1.4", () => {
+    it("시/도로 좁히면 그 지역 물건만 남고 total도 그 기준이다", () => {
+      const result = repo.listItems({ sidoValues: ["서울특별시"], pageSize: 10 });
+      expect(result.items.map((item) => item.itemNo).sort()).toEqual(["1", "2"]);
+      expect(result.total).toBe(2);
+    });
+
+    it("시/군/구로 더 좁힐 수 있다", () => {
+      expect(found({ sigunguValues: ["관악구"] })).toEqual(["1"]);
+    });
+
+    it("여러 값을 주면 OR로 걸린다", () => {
+      expect(found({ sigunguValues: ["관악구", "강남구"] }).sort()).toEqual(["1", "2"]);
+    });
+
+    it("시/도·시/군/구가 없는(NULL) 물건은 지역 필터에 걸리지 않는다", () => {
+      expect(found({ sidoValues: ["서울특별시", "경기도"] })).not.toContain("4");
+    });
+
+    it("빈 배열이면 필터를 걸지 않는다", () => {
+      expect(repo.listItems({ sidoValues: [], pageSize: 10 }).total).toBe(4);
+    });
+
+    it("0건일 때 올바른 빈 상태로 이어진다(0.1 — hasActiveFilters와 짝)", () => {
+      const result = repo.listItems({ sidoValues: ["존재하지않는시도"], pageSize: 10 });
+      expect(result.total).toBe(0);
+      expect(hasActiveFilters({ sidoValues: ["존재하지않는시도"] })).toBe(true);
+    });
+
+    it("[회귀] 지역을 지정하지 않으면 이전과 동일한 결과·건수다(tasks.md 1.4)", () => {
+      expect(repo.listItems({ pageSize: 10 }).total).toBe(4);
+      expect(
+        repo.listItems({ pageSize: 10, sidoValues: undefined, sigunguValues: undefined }),
+      ).toEqual(repo.listItems({ pageSize: 10 }));
+    });
+  });
+
+  describe("매각기일 범위 필터 — tasks.md 3.1~3.3", () => {
+    it("from/to로 좁힐 수 있고 경계값을 포함한다", () => {
+      expect(found({ auctionDateFrom: "2026-01-01", auctionDateTo: "2026-01-01" })).toEqual(["1"]);
+      expect(found({ auctionDateFrom: "2026-06-01" }).sort()).toEqual(["2", "4"]);
+    });
+
+    it("매각기일이 없는(NULL) 물건은 기일 범위 필터에서 제외된다", () => {
+      expect(found({ auctionDateFrom: "2000-01-01" })).not.toContain("3");
+    });
+
+    it("\"지난 기일 제외\"는 오늘(한국시간) 이후만 남기고, 오늘 당일은 포함한다(경계)", () => {
+      // now=2026-06-01. 1번(2026-01-01)만 과거라 제외되고, 3번(NULL)도 비교식이 참이 되지
+      // 않아 제외된다. 4번(오늘 당일)은 포함된다 — >= 비교라 경계 포함.
+      expect(found({ excludePastAuctions: true }).sort()).toEqual(["2", "4"]);
+    });
+
+    it("[회귀] excludePastAuctions를 지정하지 않으면 지난 기일 물건도 그대로 포함된다(opt-in, tasks.md 3.2)", () => {
+      expect(found({}).sort()).toEqual(["1", "2", "3", "4"]);
+    });
+
+    it("0건일 때 올바른 빈 상태로 이어진다(0.1)", () => {
+      expect(repo.listItems({ auctionDateFrom: "2099-01-01", pageSize: 10 }, { now: NOW }).total).toBe(0);
+      expect(hasActiveFilters({ auctionDateFrom: "2099-01-01" })).toBe(true);
+    });
+
+    it("페이지 이동 후에도 조건이 유지된다(0.2) — total은 페이지와 무관하게 필터 기준", () => {
+      const page1 = repo.listItems({ excludePastAuctions: true, pageSize: 1, page: 1 }, { now: NOW });
+      const page2 = repo.listItems({ excludePastAuctions: true, pageSize: 1, page: 2 }, { now: NOW });
+      expect(page1.total).toBe(2);
+      expect(page2.total).toBe(2);
+      expect([...page1.items, ...page2.items].map((i) => i.itemNo).sort()).toEqual(["2", "4"]);
+    });
+  });
+
+  describe("관심 필터(bookmarked) — tasks.md 4.1~4.2", () => {
+    it("관심만 보기는 담긴 물건만 남긴다", () => {
+      expect(found({ bookmarked: true }).sort()).toEqual(["1", "4"]);
+    });
+
+    it("관심 제외는 담기지 않은 물건만 남긴다", () => {
+      expect(found({ bookmarked: false }).sort()).toEqual(["2", "3"]);
+    });
+
+    it("생략하면 전체가 나온다(opt-in)", () => {
+      expect(found({}).sort()).toEqual(["1", "2", "3", "4"]);
+    });
+
+    it("관심 표시 컬럼(bookmarked)은 여전히 total에 영향을 주지 않는다(design.md D4, D6 보장 유지)", () => {
+      // 필터를 걸지 않은 채로도 각 행의 bookmarked 표시는 정확하다 — BOOKMARKED_EXPR가
+      // WHERE에 관여하지 않는다는 기존 보장이 새 EXISTS 필터 추가로 깨지지 않았다.
+      const all = repo.listItems({ pageSize: 10 });
+      expect(all.total).toBe(4);
+      const byItemNo = new Map(all.items.map((item) => [item.itemNo, item.bookmarked]));
+      expect(byItemNo.get("1")).toBe(true);
+      expect(byItemNo.get("2")).toBe(false);
+      expect(byItemNo.get("4")).toBe(true);
+    });
+
+    it("0건일 때 올바른 빈 상태로 이어진다(0.1)", () => {
+      const bookmarks = createBookmarksRepository(db);
+      const target = repo.listItems({ pageSize: 10 }).items.find((i) => i.itemNo === "1")!;
+      bookmarks.removeBookmark(target.id);
+      const target4 = repo.listItems({ pageSize: 10 }).items.find((i) => i.itemNo === "4")!;
+      bookmarks.removeBookmark(target4.id);
+      expect(repo.listItems({ bookmarked: true, pageSize: 10 }).total).toBe(0);
+      expect(hasActiveFilters({ bookmarked: true })).toBe(true);
+    });
+
+    it("페이지 이동 후에도 조건이 유지된다(0.2)", () => {
+      const page1 = repo.listItems({ bookmarked: true, pageSize: 1, page: 1 });
+      const page2 = repo.listItems({ bookmarked: true, pageSize: 1, page: 2 });
+      expect(page1.total).toBe(2);
+      expect(page2.total).toBe(2);
+    });
+  });
+
+  describe("면적당 가격 정렬(pricePerArea) — tasks.md 6.1~6.4", () => {
+    // 최저가/㎡: 1번=100/10=10, 2번=200/20=10(동률 → id 안정 정렬), 3번=최저가 있지만
+    // 면적 없음 → NULL, 4번=최저가 없음 → NULL.
+    it("오름/내림차순 모두 면적을 계산할 수 없는 물건은 방향과 무관하게 뒤로 간다", () => {
+      expect(found({ sort: "pricePerArea", direction: "asc" })).toEqual(["1", "2", "3", "4"]);
+      expect(found({ sort: "pricePerArea", direction: "desc" })).toEqual(["1", "2", "3", "4"]);
+    });
+
+    it("동률이면 id로 안정 정렬된다(1번과 2번은 면적당 가격이 같다)", () => {
+      expect(found({ sort: "pricePerArea", direction: "asc" }).slice(0, 2)).toEqual(["1", "2"]);
+    });
+  });
+});
+
 describe("listUsageTypes", () => {
   it("중복 없이 정렬해서 돌려주고 NULL은 제외한다", () => {
     repo.upsertItems([
@@ -1293,6 +1501,16 @@ describe("listUsageTypes", () => {
     ]);
 
     expect(repo.listUsageTypes()).toEqual(["다세대", "아파트", "오피스텔"]);
+  });
+
+  it("복합 문자열을 쉼표로 쪼개 개별 토큰으로 만들고 중복을 제거한다(design.md D2)", () => {
+    repo.upsertItems([
+      makeItem({ itemNo: "1", usageType: "상가,오피스텔,근린시설" }),
+      makeItem({ itemNo: "2", usageType: "오피스텔" }), // 위 복합 문자열의 토큰과 중복
+      makeItem({ itemNo: "3", usageType: "아파트" }),
+    ]);
+
+    expect(repo.listUsageTypes()).toEqual(["근린시설", "상가", "아파트", "오피스텔"]);
   });
 
   it("저장된 물건이 없으면 빈 배열이다(오류가 아니다)", () => {
