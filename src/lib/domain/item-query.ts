@@ -28,10 +28,16 @@
  */
 import { z } from "zod";
 
-import type { Won } from "./types";
+import type { IsoDate, Won } from "./types";
 
 /** 정렬 기준. SQL 표현식 매핑은 저장소(`src/lib/db/repository.ts`)가 갖는다. */
-export const SORT_KEYS = ["auctionDate", "minBidPrice", "bidRatio", "failedBidCount"] as const;
+export const SORT_KEYS = [
+  "auctionDate",
+  "minBidPrice",
+  "bidRatio",
+  "failedBidCount",
+  "pricePerArea",
+] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 
 export const SORT_DIRECTIONS = ["asc", "desc"] as const;
@@ -59,6 +65,9 @@ export const MAX_PAGE_SIZE = 200;
  * 수십 개이므로, 여유를 두고 여기서 400으로 먼저 걸러 방어한다.
  */
 export const MAX_USAGE_TYPES = 50;
+/** `sido`/`sigungu` 반복 파라미터의 최대 개수. `MAX_USAGE_TYPES`와 같은 이유(SQLite 바인딩
+ * 파라미터 상한 방어)로 값을 둔다 — 실제 시/도·시군구 종류는 이보다 훨씬 적다. */
+export const MAX_REGION_VALUES = 50;
 
 /**
  * 목록 조회 조건. 새 필드는 전부 optional이며, 생략하면 이 변경 이전과 동일하게 동작한다
@@ -92,7 +101,12 @@ export interface ItemQuery {
    * (기존 동작과 동일).
    */
   reanalysisCooldownHours?: number;
-  /** 용도. 하나라도 일치하면 통과(OR). 저장된 값과 **정확히** 일치해야 한다. */
+  /**
+   * 용도. 하나라도 일치하면 통과(OR). **토큰 단위 매칭이다**(design.md D2, tasks.md 5.2) —
+   * 저장된 값이 복합 문자열(`"상가,오피스텔,근린시설"`)이면 쉼표로 나눈 개별 토큰 중
+   * 하나라도 일치해도 통과한다. 복합 문자열 전체와 정확히 같아야 통과하던 이전 계약을
+   * 깨는 **의도된 변경**이다(같은 `usage=오피스텔` 요청이 이전보다 넓은 결과를 반환한다).
+   */
   usageTypes?: string[];
   /** 최저매각가격 하한(원, 포함). 최저매각가격이 없는(NULL) 물건은 제외된다. */
   minPrice?: Won;
@@ -102,6 +116,25 @@ export interface ItemQuery {
   minFailedBidCount?: number;
   /** 소재지 부분 일치 키워드. */
   addressKeyword?: string;
+  /** 시/도. 하나라도 일치하면 통과(OR). 저장된 값과 정확히 일치해야 한다(`sido` 컬럼은
+   * 복합 문자열이 아니다 — `usageTypes`와 다른 매칭 규칙). */
+  sidoValues?: string[];
+  /** 시/군/구. `sidoValues`와 같은 규칙. */
+  sigunguValues?: string[];
+  /** 매각기일 하한(포함, `YYYY-MM-DD`). 매각기일이 없는(NULL) 물건은 제외된다. */
+  auctionDateFrom?: IsoDate;
+  /** 매각기일 상한(포함). */
+  auctionDateTo?: IsoDate;
+  /**
+   * `true`=오늘(한국 시간) 이후 매각기일만. **opt-in 전용**이다(design.md D4) — 이 필드가
+   * 없으면(기본) 지난 기일 물건도 그대로 포함된다. 실데이터 389건 중 121건(31%)이 이미
+   * 지난 기일이라, 이걸 기본값으로 하면 그 물건들이 조용히 사라진다.
+   */
+  excludePastAuctions?: boolean;
+  /** `true`=관심 목록에 담긴 물건만, `false`=담기지 않은 물건만, 생략=전체. 목록 행의
+   * 관심 표시(`AuctionItem.bookmarked`, 스칼라 서브쿼리)와는 별개의 `WHERE` 조건이다
+   * (design.md D4 — `BOOKMARKED_EXPR`는 필터에 관여하지 않는 보장을 유지한다). */
+  bookmarked?: boolean;
   /** 생략하면 매각기일 정렬(기존 기본 동작). */
   sort?: SortKey;
   /** 생략하면 오름차순. */
@@ -126,6 +159,16 @@ export const ITEM_QUERY_PARAMS = [
   "q",
   "sort",
   "dir",
+  "sido",
+  "sigungu",
+  "minEok",
+  "minMan",
+  "maxEok",
+  "maxMan",
+  "dateFrom",
+  "dateTo",
+  "excludePast",
+  "bookmarked",
 ] as const;
 
 export type ItemQueryParam = (typeof ITEM_QUERY_PARAMS)[number];
@@ -143,7 +186,11 @@ export type ItemQueryParam = (typeof ITEM_QUERY_PARAMS)[number];
  * 한 곳에 흡수하므로 사라진다. HTML 체크박스 그룹이 그대로 반복 파라미터를 보내므로
  * UI 쪽도 오히려 단순해진다.
  */
-const MULTI_VALUE_PARAMS: ReadonlySet<string> = new Set<ItemQueryParam>(["usage"]);
+const MULTI_VALUE_PARAMS: ReadonlySet<string> = new Set<ItemQueryParam>([
+  "usage",
+  "sido",
+  "sigungu",
+]);
 
 /** 서버 컴포넌트의 `searchParams`와 `URLSearchParams`를 함께 받는다. */
 export type SearchParamsLike =
@@ -164,6 +211,16 @@ interface RawItemQueryParams {
   q?: string;
   sort?: string;
   dir?: string;
+  sido?: string[];
+  sigungu?: string[];
+  minEok?: string;
+  minMan?: string;
+  maxEok?: string;
+  maxMan?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  excludePast?: string;
+  bookmarked?: string;
 }
 
 /**
@@ -241,6 +298,53 @@ function integerParam(label: string) {
     .refine(Number.isSafeInteger, `${label}이(가) 너무 큽니다`);
 }
 
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** `YYYY-MM-DD`만 통과시킨다. `IsoDate`(매각기일)와 같은 형식이어야 SQL 비교(`>=`/`<=`)가
+ * 사전식 비교로 정확히 날짜 순서와 일치한다. */
+function dateParam(label: string) {
+  return z.string().regex(DATE_ONLY_PATTERN, `${label}은(는) YYYY-MM-DD 형식이어야 합니다`);
+}
+
+/** 1억 = 100,000,000원. 표시 계층(`src/app/_lib/format.ts`)도 같은 상수를 써서 파싱과
+ * 표시가 어긋나지 않게 한다. */
+export const WON_PER_EOK = 100_000_000;
+/** 1만원 = 10,000원. */
+export const WON_PER_MAN = 10_000;
+const EOK_WON = WON_PER_EOK;
+const MAN_WON = WON_PER_MAN;
+
+interface EffectiveBound {
+  /** 결합된 원 단위 값. min/max 어느 쪽도 지정하지 않았으면 undefined. */
+  value: number | undefined;
+  /** 이 값을 만든 실제 파라미터 이름들 — lenient 재시도가 지울 대상이자 strict 400의
+   * `field`가 된다. */
+  sourceFields: string[];
+}
+
+/**
+ * `minPrice`/`maxPrice`(원 정수, 기존 계약)와 `minEok`/`minMan`(신규, 억/만원 단위)이
+ * 동시에 오면 **원 단위 파라미터가 이긴다**(design.md D3 Open Question, tasks.md 2.2로
+ * 여기서 확정·문서화한다). 이미 계약·테스트로 고정된 원 단위 필드가 사람 편의를 위해
+ * 새로 추가한 필드 때문에 흔들리면 안 된다는 판단이다. eok/man 중 하나만 와도 나머지는
+ * 0으로 본다(예: 만원 단위만 입력).
+ */
+function effectivePriceBound(
+  rawValue: number | undefined,
+  eok: number | undefined,
+  man: number | undefined,
+  rawField: "minPrice" | "maxPrice",
+  eokField: "minEok" | "maxEok",
+  manField: "minMan" | "maxMan",
+): EffectiveBound {
+  if (rawValue !== undefined) return { value: rawValue, sourceFields: [rawField] };
+  if (eok === undefined && man === undefined) return { value: undefined, sourceFields: [] };
+  const sourceFields: string[] = [];
+  if (eok !== undefined) sourceFields.push(eokField);
+  if (man !== undefined) sourceFields.push(manField);
+  return { value: (eok ?? 0) * EOK_WON + (man ?? 0) * MAN_WON, sourceFields };
+}
+
 /**
  * 파라미터 검증 스키마. 필드 이름은 **URL 파라미터 이름**이다 — 오류 경로가 곧
  * "어떤 파라미터가 잘못됐는지"가 되고, lenient가 그 이름으로 파라미터를 버릴 수 있다.
@@ -292,6 +396,39 @@ const itemQueryParamsSchema = z
         errorMap: () => ({ message: "dir는 asc 또는 desc여야 합니다" }),
       })
       .optional(),
+    sido: z
+      .array(z.string().min(1, "sido 값은 비어 있을 수 없습니다"))
+      .min(1)
+      .max(MAX_REGION_VALUES, `sido는 한 번에 ${MAX_REGION_VALUES}개 이하만 지정할 수 있습니다`)
+      .optional(),
+    sigungu: z
+      .array(z.string().min(1, "sigungu 값은 비어 있을 수 없습니다"))
+      .min(1)
+      .max(MAX_REGION_VALUES, `sigungu는 한 번에 ${MAX_REGION_VALUES}개 이하만 지정할 수 있습니다`)
+      .optional(),
+    // 억/만원 입력(design.md D3) — minPrice/maxPrice(원 정수)와 별개로 받아 서버가 합산한다.
+    // 0도 유효하다(integerParam의 `^\d+$`가 이미 허용) — "억은 0, 만원만 입력" 같은 조합.
+    minEok: integerParam("minEok").optional(),
+    minMan: integerParam("minMan").optional(),
+    maxEok: integerParam("maxEok").optional(),
+    maxMan: integerParam("maxMan").optional(),
+    dateFrom: dateParam("dateFrom").optional(),
+    dateTo: dateParam("dateTo").optional(),
+    // "지난 기일 제외"는 opt-in 전용이라 true만 지원한다(needsAnalysis와 같은 패턴,
+    // design.md D4) — false를 지원하면 "포함"이라는 반대 방향 질의가 생겨 기본 동작과
+    // 헷갈린다.
+    excludePast: z
+      .enum(["true"], {
+        errorMap: () => ({ message: "excludePast는 true만 지원합니다" }),
+      })
+      .transform(() => true)
+      .optional(),
+    bookmarked: z
+      .enum(["true", "false"], {
+        errorMap: () => ({ message: "bookmarked는 true 또는 false여야 합니다" }),
+      })
+      .transform((value) => value === "true")
+      .optional(),
   })
   .superRefine((params, ctx) => {
     // needsAnalysis=true는 항상 promptVersion과 함께 와야 한다(design.md D4) — 판정
@@ -327,6 +464,67 @@ const itemQueryParamsSchema = z
         message: "minPrice는 maxPrice보다 클 수 없습니다",
       });
     }
+  })
+  .superRefine((params, ctx) => {
+    // 억/만원(eok/man) 입력의 합산값도 minPrice/maxPrice와 같은 방향 검증을 받아야 한다 —
+    // 안 그러면 "최소 3억, 최대 1억"처럼 뒤집힌 조건이 그대로 통과해 조용히 0건을 낸다.
+    // 원 단위 파라미터끼리만 온 경우(둘 다 sourceFields가 ["minPrice"]/["maxPrice"])는
+    // 바로 위 교차검증이 이미 처리했으므로 여기서 다시 보고하지 않는다.
+    const minBound = effectivePriceBound(
+      params.minPrice,
+      params.minEok,
+      params.minMan,
+      "minPrice",
+      "minEok",
+      "minMan",
+    );
+    const maxBound = effectivePriceBound(
+      params.maxPrice,
+      params.maxEok,
+      params.maxMan,
+      "maxPrice",
+      "maxEok",
+      "maxMan",
+    );
+
+    const minIsRawOnly = minBound.sourceFields.length === 1 && minBound.sourceFields[0] === "minPrice";
+    const maxIsRawOnly = maxBound.sourceFields.length === 1 && maxBound.sourceFields[0] === "maxPrice";
+    if (minIsRawOnly && maxIsRawOnly) return;
+
+    for (const bound of [minBound, maxBound]) {
+      if (bound.value !== undefined && !Number.isSafeInteger(bound.value)) {
+        for (const field of bound.sourceFields) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [field],
+            message: `${field}이(가) 너무 큽니다`,
+          });
+        }
+        return;
+      }
+    }
+
+    if (minBound.value === undefined || maxBound.value === undefined) return;
+    if (minBound.value <= maxBound.value) return;
+    for (const field of [...minBound.sourceFields, ...maxBound.sourceFields]) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [field],
+        message: "최소 가격(억/만원 합산 포함)은 최대 가격보다 클 수 없습니다",
+      });
+    }
+  })
+  .superRefine((params, ctx) => {
+    // 매각기일 범위도 같은 이유(minPrice/maxPrice)로 뒤집힌 조건을 막는다.
+    if (params.dateFrom === undefined || params.dateTo === undefined) return;
+    if (params.dateFrom <= params.dateTo) return; // YYYY-MM-DD는 사전식 비교가 날짜 순서와 같다
+    for (const name of ["dateFrom", "dateTo"] as const) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [name],
+        message: "dateFrom은 dateTo보다 늦을 수 없습니다",
+      });
+    }
   });
 
 type ParsedItemQueryParams = z.output<typeof itemQueryParamsSchema>;
@@ -342,10 +540,36 @@ function toItemQuery(params: ParsedItemQueryParams): ItemQuery {
   if (params.needsAnalysis !== undefined) query.needsAnalysis = params.needsAnalysis;
   if (params.promptVersion !== undefined) query.promptVersion = params.promptVersion;
   if (params.usage !== undefined) query.usageTypes = params.usage;
-  if (params.minPrice !== undefined) query.minPrice = params.minPrice;
-  if (params.maxPrice !== undefined) query.maxPrice = params.maxPrice;
+  // minPrice/maxPrice는 원 단위 파라미터가 있으면 그대로, 없으면 억/만원(eok/man)을
+  // 합산한 값을 쓴다(design.md D3, tasks.md 2.2 — 원 단위가 이긴다). ItemQuery는
+  // 합산된 원 단위 값만 갖는다 — eok/man은 API 계약(minPrice/maxPrice) 밖의 입력
+  // 형태일 뿐, 도메인 조건에는 흔적을 남기지 않는다.
+  const minBound = effectivePriceBound(
+    params.minPrice,
+    params.minEok,
+    params.minMan,
+    "minPrice",
+    "minEok",
+    "minMan",
+  );
+  const maxBound = effectivePriceBound(
+    params.maxPrice,
+    params.maxEok,
+    params.maxMan,
+    "maxPrice",
+    "maxEok",
+    "maxMan",
+  );
+  if (minBound.value !== undefined) query.minPrice = minBound.value;
+  if (maxBound.value !== undefined) query.maxPrice = maxBound.value;
   if (params.minFailed !== undefined) query.minFailedBidCount = params.minFailed;
   if (params.q !== undefined) query.addressKeyword = params.q;
+  if (params.sido !== undefined) query.sidoValues = params.sido;
+  if (params.sigungu !== undefined) query.sigunguValues = params.sigungu;
+  if (params.dateFrom !== undefined) query.auctionDateFrom = params.dateFrom;
+  if (params.dateTo !== undefined) query.auctionDateTo = params.dateTo;
+  if (params.excludePast !== undefined) query.excludePastAuctions = params.excludePast;
+  if (params.bookmarked !== undefined) query.bookmarked = params.bookmarked;
   if (params.sort !== undefined) query.sort = params.sort;
   if (params.dir !== undefined) query.direction = params.dir;
   return query;
@@ -447,7 +671,13 @@ export function hasActiveFilters(query: ItemQuery): boolean {
     query.minPrice !== undefined ||
     query.maxPrice !== undefined ||
     query.minFailedBidCount !== undefined ||
-    (query.addressKeyword !== undefined && query.addressKeyword !== "")
+    (query.addressKeyword !== undefined && query.addressKeyword !== "") ||
+    (query.sidoValues !== undefined && query.sidoValues.length > 0) ||
+    (query.sigunguValues !== undefined && query.sigunguValues.length > 0) ||
+    query.auctionDateFrom !== undefined ||
+    query.auctionDateTo !== undefined ||
+    query.excludePastAuctions !== undefined ||
+    query.bookmarked !== undefined
   );
 }
 

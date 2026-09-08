@@ -26,6 +26,7 @@ import { formatMismatchDescription, detectFailedBidRateMismatch } from "./_lib/b
 import { isRecentlyChanged } from "./_lib/change-history";
 import { buildCollectionBanner, formatCoverage, shouldWarnCollection } from "./_lib/collection-banner";
 import { computeDDay, formatDDay } from "./_lib/d-day";
+import { buildFilterChips } from "./_lib/filter-chips";
 import {
   DISCOUNT_STAGE_LABELS,
   classifyDiscountStage,
@@ -63,8 +64,11 @@ export default async function ItemListPage({
   const query = parseItemQueryLenient(params);
 
   const repository = getRepository();
-  // 용도 선택지는 저장된 데이터에서 도출한다 — 하드코딩하지 않는다 (design.md D3).
+  // 용도·지역 선택지는 저장된 데이터에서 도출한다 — 하드코딩하지 않는다(design.md D3,
+  // ux-overhaul-phase2 tasks.md 1.2/5.1).
   const usageTypes = repository.listUsageTypes();
+  const sidoValues = repository.listSidoValues();
+  const sigunguValues = repository.listSigunguValues();
   const { items, total, page, pageSize } = repository.listItems(query);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -77,6 +81,10 @@ export default async function ItemListPage({
   const unreadCount = getUnreadCount();
 
   const filtersActive = hasActiveFilters(query);
+  // 필터 칩(design.md D5, tasks.md 7.1/7.4) — 폼이 접혀 있어도(details) 무엇이 적용
+  // 중인지 한눈에 보이고, 칩 하나를 눌러 그 조건만 해제할 수 있다. 해제 링크는 새
+  // 함수 없이 기존 itemListHref(query, chip.clear)로 만든다.
+  const filterChips = buildFilterChips(query);
   // "DB 자체가 비었다"와 "필터에 걸리는 물건이 없다"는 사용자에게 전혀 다른 상황이라
   // 안내 문구도, 다음에 할 행동(수집을 기다린다 / 조건을 고친다)도 달라야 한다.
   // 판단 자체는 순수 함수(`chooseEmptyState`)에 있다 — JSX 조건문에 흩어 두면
@@ -147,7 +155,28 @@ export default async function ItemListPage({
         {collectionWarning ? " · 수집이 차단되었거나 오래 멈췄습니다 — 가격이 최신이 아닐 수 있습니다." : ""}
       </p>
 
-      {databaseEmpty ? null : <ItemFilterForm query={query} usageTypes={usageTypes} />}
+      {databaseEmpty ? null : (
+        <>
+          {filterChips.length > 0 ? (
+            <ul className="filter-chips">
+              {filterChips.map((chip) => (
+                <li key={chip.key} className="filter-chip">
+                  <span>{chip.label}</span>
+                  <Link href={itemListHref(query, chip.clear)} aria-label={`${chip.label} 해제`}>
+                    ×
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <ItemFilterForm
+            query={query}
+            usageTypes={usageTypes}
+            sidoValues={sidoValues}
+            sigunguValues={sigunguValues}
+          />
+        </>
+      )}
 
       {total === 0 ? (
         databaseEmpty ? (

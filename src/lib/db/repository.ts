@@ -404,16 +404,27 @@ const LAST_CHANGED_AT_EXPR = `(
   WHERE item_changes.item_id = items.id AND item_changes.kind = 'change'
 )`;
 
+/** `bookmarks` 조인의 EXISTS 절 본문. `BOOKMARKED_EXPR`(표시용 스칼라 컬럼)과
+ * `BOOKMARK_FILTER_CONDITION`(WHERE 필터, ux-overhaul-phase2 D4) 둘 다 이 텍스트를
+ * 공유해서 두 곳이 SQL을 각자 베끼다 어긋나는 일을 막는다. */
+const BOOKMARK_EXISTS_SQL = "EXISTS (SELECT 1 FROM bookmarks WHERE bookmarks.item_id = items.id)";
+
 /**
  * `listItems`/`getItemById`가 목록·상세 행에 붙이는 "관심 목록에 담겼는가" 스칼라 서브쿼리
  * (add-bookmarks-and-feed, design.md D6 — `lastChangedAt`을 추가할 때와 같은 방식).
  * `WHERE`·`ORDER BY`·`total`에는 관여하지 않으므로 기존 필터·정렬 로직과 그 테스트를
- * 건드리지 않는다. "관심 물건만 보기" 필터는 이번 범위 밖이다(design.md D6) — 전용 페이지
- * (`/bookmarks`)가 그 역할을 한다.
+ * 건드리지 않는다 — "관심만 보기"/"관심 제외" 필터(ux-overhaul-phase2 D4)는 이 컬럼을
+ * 재사용하지 않고 `buildFilter`가 별도 `EXISTS` 조건(`BOOKMARK_FILTER_CONDITION`)을
+ * `WHERE`에 추가하는 방식으로 구현한다 — 이 상수의 "필터에 관여하지 않는다"는 보장은
+ * 그대로 유지된다.
  */
 const BOOKMARKED_EXPR = `(
-  EXISTS (SELECT 1 FROM bookmarks WHERE bookmarks.item_id = items.id)
+  ${BOOKMARK_EXISTS_SQL}
 )`;
+
+/** "관심만 보기"/"관심 제외" 필터가 `WHERE`에 넣는 조건(ux-overhaul-phase2 design.md D4).
+ * `BOOKMARKED_EXPR`(표시용)과 텍스트를 공유하되 별도 조건으로 존재한다. */
+const BOOKMARK_FILTER_CONDITION = BOOKMARK_EXISTS_SQL;
 
 /**
  * 정렬 기준 → SQL 표현식 화이트리스트 (design.md D2).
@@ -428,6 +439,16 @@ const SORT_EXPRESSIONS: Record<SortKey, string> = {
   // 아래 NULL 규칙(항상 뒤로)에 맡긴다.
   bidRatio: "CAST(items.min_bid_price AS REAL) / NULLIF(items.appraisal_price, 0)",
   failedBidCount: "items.failed_bid_count",
+  // 면적당 가격(design.md D2, tasks.md 6.1~6.2) — `src/lib/domain/price.ts`의
+  // `computePricePerArea`와 같은 규칙: minArea 우선, 없으면 maxArea. 둘 다 없거나
+  // 0 이하면(NULLIF) COALESCE가 NULL을 만들고, bidRatio와 같은 NULL 규칙(IS NULL을
+  // 선행 키로)에 맡긴다. Phase 1의 면적 정직화(NULLIF로 0 이하를 걸러내는 것) 이후에만
+  // 이 정렬이 "저평가 순"이라는 의미를 갖는다(design.md D1 — 그 전이면 대지면적이 큰
+  // 순 정렬이 되어 버린다). `items.min_area`/`items.max_area`는 이미 저장 시점에
+  // 0 이하가 NULL로 접혀 있지만(`upsertItem`, enrich-item-fields), 방어적으로 다시
+  // NULLIF를 건다.
+  pricePerArea:
+    "CAST(items.min_bid_price AS REAL) / NULLIF(COALESCE(NULLIF(items.min_area, 0), NULLIF(items.max_area, 0)), 0)",
 };
 
 function orderByClause(sort: SortKey | undefined, direction: SortDirection | undefined): string {
@@ -475,6 +496,19 @@ type BindParams = Record<string, string | number | null>;
  */
 function computeCooldownBefore(cooldownHours: number, nowIso: string): string {
   return new Date(new Date(nowIso).getTime() - cooldownHours * 60 * 60 * 1000).toISOString();
+}
+
+/**
+ * "지난 기일 제외" 필터(design.md D4, tasks.md 3.2)의 기준일. UTC 자정이 아니라 **한국
+ * 시간 자정**을 하루의 경계로 써야 한다 — 매각기일은 한국 법원 일정이라 UTC 자정 기준으로
+ * 자르면 한국 시간 이른 아침(00~09시, UTC로는 전날 15~24시)에 하루가 밀려 보인다.
+ * `formatDateTime`(표시 계층, `src/app/_lib/format.ts`)과 같은 `Asia/Seoul` 변환이지만,
+ * 이건 SQL 바인딩에 쓰는 도메인 계산이라 그 파일을 가져오지 않고(그 파일은 `src/app` 전용
+ * 표시 계층이다) 여기 별도로 둔다.
+ */
+const seoulDateFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" });
+function todayInSeoul(nowIso: string): string {
+  return seoulDateFormatter.format(new Date(nowIso));
 }
 
 interface Filter {
@@ -528,13 +562,23 @@ function buildFilter(query: ItemQuery, nowIso: string): Filter {
     throw new Error(`지원하지 않는 needsAnalysis 값: ${String(query.needsAnalysis)}`);
   }
 
+  // 용도는 토큰 단위로 매칭한다(ux-overhaul-phase2 design.md D2, tasks.md 5.2) — **의도된
+  // 계약 변경**이다. 저장된 `usage_type`은 복합 문자열일 수 있다(`"상가,오피스텔,근린시설"`).
+  // `IN`(정확 일치)이면 이 물건은 "상가"/"오피스텔"/"근린시설" 어느 것을 골라도 걸리지
+  // 않았다 — 개별 토큰과 복합 문자열 전체가 다른 값이기 때문이다. 대신 저장된 값의
+  // 앞뒤에 구분자를 붙여(`,오피스텔형,`이 아니라 `,오피스텔,`) LIKE로 토큰 경계를 맞춘다.
+  // `usage_type`이 NULL이면 문자열 연결(`||`) 결과도 NULL이라 LIKE가 거짓이 되므로
+  // (기존 IN과 동일하게) 용도 없는 물건은 계속 제외된다. 부분 문자열 오탐
+  // (`"오피스텔"`이 `"오피스텔형"`에 걸리는 것)은 앞뒤 콤마 덕분에 생기지 않는다 —
+  // `",오피스텔형,"`은 `",오피스텔,"`을 부분 문자열로 포함하지 않는다.
   const usageTypes = query.usageTypes?.filter((usageType) => usageType !== "");
   if (usageTypes !== undefined && usageTypes.length > 0) {
-    const placeholders = usageTypes.map((usageType, index) => {
-      params[`usage${index}`] = usageType;
-      return `@usage${index}`;
+    const clauses = usageTypes.map((usageType, index) => {
+      params[`usage${index}`] = `%,${escapeLikePattern(usageType)},%`;
+      return `(',' || items.usage_type || ',') LIKE @usage${index} ESCAPE @likeEscape`;
     });
-    conditions.push(`items.usage_type IN (${placeholders.join(", ")})`);
+    conditions.push(`(${clauses.join(" OR ")})`);
+    params.likeEscape = LIKE_ESCAPE_CHAR;
   }
 
   if (query.minPrice !== undefined) {
@@ -557,6 +601,55 @@ function buildFilter(query: ItemQuery, nowIso: string): Filter {
     conditions.push("items.address LIKE @addressKeyword ESCAPE @likeEscape");
     params.addressKeyword = `%${escapeLikePattern(keyword)}%`;
     params.likeEscape = LIKE_ESCAPE_CHAR;
+  }
+
+  // 지역 필터(ux-overhaul-phase2 design.md, tasks.md 1.1) — `sido`/`sigungu`는 소스가
+  // 이미 조각내 준 구조화 컬럼이라(복합 문자열이 아니다) 용도와 달리 정확 일치 `IN`이 맞다.
+  const sidoValues = query.sidoValues?.filter((value) => value !== "");
+  if (sidoValues !== undefined && sidoValues.length > 0) {
+    const placeholders = sidoValues.map((value, index) => {
+      params[`sido${index}`] = value;
+      return `@sido${index}`;
+    });
+    conditions.push(`items.sido IN (${placeholders.join(", ")})`);
+  }
+
+  const sigunguValues = query.sigunguValues?.filter((value) => value !== "");
+  if (sigunguValues !== undefined && sigunguValues.length > 0) {
+    const placeholders = sigunguValues.map((value, index) => {
+      params[`sigungu${index}`] = value;
+      return `@sigungu${index}`;
+    });
+    conditions.push(`items.sigungu IN (${placeholders.join(", ")})`);
+  }
+
+  // 매각기일 범위(tasks.md 3.1). 매각기일이 없는(NULL) 물건은 비교식이 참이 되지 않으므로
+  // 다른 범위 필터(가격 등)와 같은 이유로 제외된다.
+  if (query.auctionDateFrom !== undefined) {
+    conditions.push("items.auction_date >= @auctionDateFrom");
+    params.auctionDateFrom = query.auctionDateFrom;
+  }
+  if (query.auctionDateTo !== undefined) {
+    conditions.push("items.auction_date <= @auctionDateTo");
+    params.auctionDateTo = query.auctionDateTo;
+  }
+
+  // "지난 기일 제외"는 opt-in일 때만 조건을 추가한다(design.md D4, tasks.md 3.2) —
+  // 이 필드가 없으면 기존 동작(지난 기일도 포함)과 완전히 같은 SQL이 나온다.
+  if (query.excludePastAuctions === true) {
+    conditions.push("items.auction_date >= @excludePastBefore");
+    params.excludePastBefore = todayInSeoul(nowIso);
+  } else if (query.excludePastAuctions !== undefined) {
+    throw new Error(`지원하지 않는 excludePastAuctions 값: ${String(query.excludePastAuctions)}`);
+  }
+
+  // 관심 필터(design.md D4, tasks.md 4.1) — `BOOKMARKED_EXPR`(표시용 스칼라 컬럼)을
+  // 재사용하지 않고 별도 `EXISTS` 조건을 추가한다. 그래야 "관심 표시는 WHERE/total에
+  // 관여하지 않는다"는 `BOOKMARKED_EXPR`의 기존 보장이 그대로 유지된다.
+  if (query.bookmarked === true) {
+    conditions.push(BOOKMARK_FILTER_CONDITION);
+  } else if (query.bookmarked === false) {
+    conditions.push(`NOT ${BOOKMARK_FILTER_CONDITION}`);
   }
 
   return {
@@ -584,8 +677,18 @@ export interface AuctionRepository {
    */
   listItems(query?: ItemQuery, options?: { now?: IsoDateTime }): ListItemsResult;
   getItemById(id: number): AuctionItem | null;
-  /** 저장된 물건에 실제로 존재하는 용도 목록. 중복 없이 정렬해서 돌려준다. */
+  /**
+   * 저장된 물건에 실제로 존재하는 용도 목록(ux-overhaul-phase2 design.md D2, tasks.md 5.1).
+   * 복합 문자열(`"상가,오피스텔,근린시설"`)을 쉼표로 쪼개 개별 토큰으로 만들고 중복을
+   * 제거해 정렬한다 — `buildFilter`의 토큰 매칭과 짝을 이룬다. 저장된 원본 복합 문자열
+   * 그대로를 선택지로 주면 체크박스가 "상가,오피스텔,근린시설"이라는 값 하나가 되어
+   * 사용자가 "오피스텔"만 고를 수 없다.
+   */
   listUsageTypes(): string[];
+  /** 저장된 물건에 실제로 존재하는 시/도 목록. 중복 없이 정렬해서 돌려준다(tasks.md 1.2). */
+  listSidoValues(): string[];
+  /** 저장된 물건에 실제로 존재하는 시/군/구 목록. 중복 없이 정렬해서 돌려준다(tasks.md 1.2). */
+  listSigunguValues(): string[];
   insertAnalysis(input: AnalysisInput, options?: { now?: IsoDateTime }): Analysis;
   getLatestAnalysis(itemId: number): Analysis | null;
   /**
@@ -747,10 +850,18 @@ export function createRepository(db: Db): AuctionRepository {
     SELECT COUNT(*) AS count FROM analyses WHERE item_id = @itemId
   `);
 
+  // 정렬은 하지 않는다 — 토큰으로 쪼갠 뒤 JS에서 다시 정렬한다(원본 문자열 순서로
+  // 정렬해 봐야 토큰 순서와 무관하다).
   const selectUsageTypes = db.prepare<[], { usage_type: string }>(`
-    SELECT DISTINCT usage_type FROM items
-    WHERE usage_type IS NOT NULL
-    ORDER BY usage_type
+    SELECT DISTINCT usage_type FROM items WHERE usage_type IS NOT NULL
+  `);
+
+  const selectSidoValues = db.prepare<[], { sido: string }>(`
+    SELECT DISTINCT sido FROM items WHERE sido IS NOT NULL ORDER BY sido
+  `);
+
+  const selectSigunguValues = db.prepare<[], { sigungu: string }>(`
+    SELECT DISTINCT sigungu FROM items WHERE sigungu IS NOT NULL ORDER BY sigungu
   `);
 
   /** 자연 키를 배치 내 중복 감지용 문자열로 합친다. items UNIQUE (court, case_no, item_no)와 같은 조합. */
@@ -963,7 +1074,23 @@ export function createRepository(db: Db): AuctionRepository {
     },
 
     listUsageTypes() {
-      return selectUsageTypes.all().map((row) => row.usage_type);
+      // 복합 문자열을 쉼표로 쪼개 개별 토큰만 남기고 중복 제거·정렬한다(design.md D2).
+      const tokens = new Set<string>();
+      for (const row of selectUsageTypes.all()) {
+        for (const token of row.usage_type.split(",")) {
+          const trimmed = token.trim();
+          if (trimmed !== "") tokens.add(trimmed);
+        }
+      }
+      return Array.from(tokens).sort();
+    },
+
+    listSidoValues() {
+      return selectSidoValues.all().map((row) => row.sido);
+    },
+
+    listSigunguValues() {
+      return selectSigunguValues.all().map((row) => row.sigungu);
     },
 
     listItemChanges(itemId) {
@@ -1038,6 +1165,14 @@ export function getItemById(id: number): AuctionItem | null {
 
 export function listUsageTypes(): string[] {
   return getRepository().listUsageTypes();
+}
+
+export function listSidoValues(): string[] {
+  return getRepository().listSidoValues();
+}
+
+export function listSigunguValues(): string[] {
+  return getRepository().listSigunguValues();
 }
 
 export function insertAnalysis(

@@ -278,12 +278,19 @@ add-bookmarks-and-feed change가 관심 물건·변동 피드용 엔드포인트
 | `analyzed` | `true` \| `false` | (없음 = 전체) | 분석 결과 유무 필터. analyzer의 1단계(신규 분석)가 `analyzed=false`를 쓴다. **이 필터의 의미는 재분석 기능이 생긴 뒤에도 바뀌지 않았다** — "분석 결과가 하나도 없는 물건"만 뜻하며, 이미 분석됐지만 재분석이 필요한 물건은 포함하지 않는다. |
 | `needsAnalysis` | `true` | (없음) | 재분석 대상 필터(§6.2 참고). `true`만 지원한다(`false`는 지원하지 않음 — 400). **반드시 `promptVersion`과 함께 와야 하며, 혼자 오면 400이다.** analyzer의 2단계(재분석)가 쓴다. **이 필터가 걸리면 정렬이 강제로 바뀐다 — 아래 "정렬" 문단 참고.** |
 | `promptVersion` | 문자열(비어 있지 않음) | (없음) | `needsAnalysis=true`의 판정 기준이 되는 "호출자의 현재 프롬프트 버전". `needsAnalysis` 없이 혼자 오면 아무것도 좁히지 않는다(무시된다). |
-| `usage` | 문자열, **반복 파라미터** | (없음 = 전체) | 용도(`usageType`) 필터. 하나라도 일치하면 통과(OR), 저장된 값과 **정확히** 일치해야 한다. **`usage=a&usage=b`처럼 이름을 반복해서 보낸다 — 쉼표로 합쳐 보내면 안 된다.** 실제 수집 데이터의 용도 문자열 자체에 쉼표가 들어 있는 경우가 있다(예: 실측값 `"상가,오피스텔,근린시설"` — `src/lib/sources/courtauction/NOTES.md` §8). 쉼표 구분으로 인코딩하면 이 값이 존재하지 않는 용도 3개로 쪼개져 아무것도 매칭되지 않는다. 최대 `MAX_USAGE_TYPES`(50)개, 초과 시 400. |
-| `minPrice` | 정수 ≥ 0(원) | (없음) | 최저매각가격(`minBidPrice`) 하한, 포함. 값이 `NULL`인 물건은 제외된다. `maxPrice`보다 크면 둘 다 400. |
+| `usage` | 문자열, **반복 파라미터** | (없음 = 전체) | 용도(`usageType`) 필터. 하나라도 일치하면 통과(OR). **토큰 단위로 매칭한다(ux-overhaul-phase2, 계약 변경)** — 저장된 값이 복합 문자열(`"상가,오피스텔,근린시설"`)이면 쉼표로 나눈 개별 토큰 중 하나만 같아도 통과한다. 예전에는 복합 문자열 전체와 정확히 같아야만 통과했다(그래서 `"상가,오피스텔,근린시설"` 물건 115건이 `usage=오피스텔`에서 전부 빠졌다) — 이제는 같은 요청이 그 물건들도 포함한다. 앞뒤에 `,` 구분자를 붙여 비교해 `"오피스텔형"` 같은 부분 문자열 오탐은 피한다. **`usage=a&usage=b`처럼 이름을 반복해서 보낸다 — 쉼표로 합쳐 보내면 안 된다**(용도 문자열 자체에 쉼표가 들어 있다, `src/lib/sources/courtauction/NOTES.md` §8). 최대 `MAX_USAGE_TYPES`(50)개, 초과 시 400. |
+| `sido` | 문자열, **반복 파라미터** | (없음 = 전체) | 시/도(`sido`) 필터. 저장된 값과 정확히 일치해야 한다(구조화 컬럼이라 `usage`와 달리 복합 문자열이 아니다). `usage`와 같은 반복 파라미터 인코딩. 최대 `MAX_REGION_VALUES`(50)개. |
+| `sigungu` | 문자열, **반복 파라미터** | (없음 = 전체) | 시/군/구(`sigungu`) 필터. `sido`와 같은 규칙. `dong`(읍/면/동)은 아직 지원하지 않는다(관악구만 동이 수십 개라 체크박스가 감당하지 못한다 — 지역을 좁힌 뒤 필요해지면 추가한다). |
+| `minPrice` | 정수 ≥ 0(원) | (없음) | 최저매각가격(`minBidPrice`) 하한, 포함. 값이 `NULL`인 물건은 제외된다. 합산된 유효 하한이 `maxPrice`(또는 `maxEok`/`maxMan` 합산값)보다 크면 400. |
 | `maxPrice` | 정수 ≥ 0(원) | (없음) | 최저매각가격 상한, 포함. |
+| `minEok`/`minMan`, `maxEok`/`maxMan` | 정수 ≥ 0 | (없음) | **억/만원 단위 입력**(ux-overhaul-phase2). 사람이 억/만원으로 입력하면 서버가 `eok*1억 + man*1만원`으로 합산해 `minPrice`/`maxPrice`와 똑같이 다룬다 — API가 실제로 받는 값은 여전히 원 정수다(워커 계약·기존 400 동작 불변). 한쪽만 와도 나머지는 0으로 본다. **우선순위: 같은 요청에 `minPrice`(원 단위)와 `minEok`/`minMan`이 동시에 오면 `minPrice`가 이긴다** — `maxPrice`/`maxEok`/`maxMan`도 대칭. 이미 계약·테스트로 고정된 원 단위 필드가 새로 추가된 사람 편의용 필드 때문에 흔들리면 안 된다는 판단이다(design.md D3). 자주 쓰는 가격대(`1억 이하`/`1~3억`/`3~5억`/`5~10억`/`10억+`)는 화면에 프리셋 링크로 제공되며, 이미 계산된 `minPrice`/`maxPrice`(원 단위) 값을 URL에 직접 담는 단순 링크다. |
 | `minFailed` | 정수 ≥ 0 | (없음) | 유찰횟수(`failedBidCount`) 하한, 포함. 값이 `NULL`인 물건은 제외된다. |
 | `q` | 문자열(비어 있지 않음) | (없음) | 소재지(`address`) 부분 일치 키워드(`LIKE`, 대소문자·특수문자 이스케이프 처리). |
-| `sort` | `auctionDate` \| `minBidPrice` \| `bidRatio` \| `failedBidCount` | `auctionDate`(`DEFAULT_SORT_KEY`) | 정렬 기준. `bidRatio`는 최저매각가격/감정가 비율. |
+| `dateFrom` | `YYYY-MM-DD` | (없음) | 매각기일(`auctionDate`) 하한, 포함. 값이 `NULL`인 물건은 제외된다. `dateTo`보다 늦으면 둘 다 400. |
+| `dateTo` | `YYYY-MM-DD` | (없음) | 매각기일 상한, 포함. |
+| `excludePast` | `true` | (없음) | **지난 기일 제외 — opt-in 전용이다.** `true`만 지원한다(다른 값은 400). 오늘(한국 시간) 이후 매각기일만 남긴다(당일 포함, 경계 포함). **기본값이 아니다** — 이 필터를 기본으로 켜면 실데이터 기준 121건(31%)이 조용히 사라진다. |
+| `bookmarked` | `true` \| `false` | (없음 = 전체) | 관심 물건 필터. `true`=관심만, `false`=관심 제외. 목록 행의 관심 표시(스칼라 서브쿼리, `bookmarked` 필드)와는 별개의 `WHERE` 조건이라 그 표시 컬럼의 "필터·정렬·total에 영향 없음" 보장은 그대로 유지된다. |
+| `sort` | `auctionDate` \| `minBidPrice` \| `bidRatio` \| `failedBidCount` \| `pricePerArea` | `auctionDate`(`DEFAULT_SORT_KEY`) | 정렬 기준. `bidRatio`는 최저매각가격/감정가 비율. `pricePerArea`(ux-overhaul-phase2)는 최저매각가격/면적(㎡) — 면적이 없어 계산할 수 없는 물건은 방향과 무관하게 뒤로 간다(`bidRatio`와 같은 NULL 규칙). |
 | `dir` | `asc` \| `desc` | `asc`(`DEFAULT_SORT_DIRECTION`) | 정렬 방향. 값이 없는(`NULL`) 물건은 방향과 무관하게 항상 뒤로 간다. |
 
 정렬은 기본적으로 매각기일 오름차순이며(값이 없는 물건은 뒤로) `sort`/`dir`로 바꿀 수 있다.
@@ -464,9 +471,15 @@ add-bookmarks-and-feed change가 관심 물건·변동 피드용 엔드포인트
 보여줄지 저장된 데이터에서 직접 뽑아 쓴다(고정 목록이 아니다) — `GET /api/items`의
 `usage` 파라미터에 넣을 수 있는 값의 출처이기도 하다.
 
+**ux-overhaul-phase2부터 복합 문자열을 쉼표로 쪼갠 개별 토큰을 돌려준다** — 저장된
+`usage_type`이 `"상가,오피스텔,근린시설"`이면 원본 문자열이 아니라 `"상가"`/`"오피스텔"`/
+`"근린시설"` 세 개의 토큰이 각각 목록에 들어간다(중복 제거). `usage` 파라미터의 토큰
+매칭 규칙과 짝을 이룬다(위 §5 표 참고) — 선택지와 매칭 규칙이 같은 단위를 쓰지 않으면
+체크박스로 고른 값이 매칭에 안 걸리는 모순이 생긴다.
+
 ```jsonc
 // 200 OK
-{ "usageTypes": ["아파트", "오피스텔", "상가,오피스텔,근린시설"] }
+{ "usageTypes": ["근린시설", "상가", "아파트", "오피스텔"] }
 ```
 
 - 물건이 하나도 없으면 빈 배열(오류 아님).
@@ -993,6 +1006,75 @@ AI 분석 프롬프트까지 오염시키고 있었다.** 이 change는 표시 �
   화면 어디에도 없었다 — 분석 본문만 읽은 사용자가 그것을 권리분석까지 포함한 결과로
   오해할 위험이 있었다.
 
+### 6.6 필터 확장 — 지역·가격 폼·기일·관심·용도 토큰·면적당 가격 정렬 (ux-overhaul-phase2)
+
+Phase 1이 **틀린 표시**를 고쳤다면, 이 change는 **찾을 수 없는 문제**를 고친다. 목록
+쿼리의 `WHERE`/`ORDER BY`/`total`을 실제로 건드리는 유일한 change라 지금까지 중 회귀
+위험이 가장 크다 — 새 필터 파라미터 하나마다 `ITEM_QUERY_PARAMS`/zod 스키마/`ItemQuery`
+타입/`hasActiveFilters`/`buildFilter`/`itemQuerySearchParams` 여섯 곳을 동시에 고쳐야
+한다(design.md Context). API 파라미터 표는 위 §5를 참고하고, 여기서는 판단이 필요했던
+지점만 정리한다.
+
+**용도 토큰 매칭 — 유일한 계약 변경**
+
+- 저장된 `usage_type`이 복합 문자열(`"상가,오피스텔,근린시설"`, 115건)이라 예전에는
+  `usage=오피스텔`이 정확 일치(`IN`)로 걸려 이 115건이 전부 빠졌다 — 화면에는 24건만
+  보여 "오피스텔이 별로 없다"는 잘못된 인상을 줬다.
+- 이제 저장된 값 앞뒤에 `,` 구분자를 붙여(`,상가,오피스텔,근린시설,`) `LIKE`로 토큰
+  경계를 맞춘다. `"오피스텔형"`처럼 부분 문자열만 겹치는 값은 구분자 덕분에 걸리지
+  않는다. 실데이터로 확인: `usage=오피스텔`이 24건 → 139건.
+- 선택지(`listUsageTypes`)도 같은 규칙으로 토큰을 쪼개 돌려준다 — 그렇지 않으면
+  체크박스에 `"상가,오피스텔,근린시설"`이라는 값 하나가 뜨고, 그걸 골라도 개별 용도
+  검색은 안 되는 모순이 생긴다.
+- 분석 워커는 `usage`를 전혀 참조하지 않으므로(코드 검색으로 확인) 워커 계약은
+  이 변경의 영향을 받지 않는다.
+
+**가격 폼 — 억/만원 입력과 원 단위 파라미터의 관계**
+
+- 실데이터가 76만원~261억까지 걸쳐 있어 원 단위 11자리 입력은 0 하나만 틀려도 조용히
+  10배 다른 결과를 낸다. 화면 입력칸은 억/만원 두 칸(`minEok`/`minMan`,
+  `maxEok`/`maxMan`)으로 받고, **서버가 원 단위로 합산**해 기존 `minPrice`/`maxPrice`
+  (원 정수, 워커 계약)로 처리한다 — API가 실제로 받아들이는 값의 단위는 바뀌지 않았다.
+- **우선순위(design.md D3 Open Question, 여기서 확정)**: 같은 요청에 `minPrice`와
+  `minEok`/`minMan`이 동시에 오면 **`minPrice`(원 단위)가 이긴다** — `maxPrice`도
+  대칭. 이미 계약·테스트로 고정된 필드가 새로 추가한 사람 편의용 필드 때문에 흔들리면
+  안 된다는 판단이다. 화면 폼은 항상 억/만원 칸만 제출하므로 이 충돌은 실제로는
+  URL을 손으로 조합했을 때만 발생한다.
+- 프리셋(`1억 이하`/`1~3억`/`3~5억`/`5~10억`/`10억+`)은 이미 계산된 `minPrice`/
+  `maxPrice`(원 단위) 값이 담긴 단순 링크다(`src/app/_lib/price-input.ts`의
+  `PRICE_PRESETS`). 현재 적용된 가격 조건은 억/만원 단위로도 화면에 함께 표시된다
+  (`formatWonAsEokMan`, `src/app/_lib/format.ts`).
+
+**매각기일 범위·관심 필터 — 반드시 opt-in**
+
+- `dateFrom`/`dateTo`는 일반적인 범위 필터지만, "지난 기일 제외"(`excludePast=true`)는
+  **기본값으로 만들지 않는다.** 실데이터 389건 중 121건(31%)이 이미 지난 기일이라,
+  기본으로 켜면 그 물건들이 조용히 사라지고 "물건이 갑자기 줄었다"로 읽힌다 — 6회차에서
+  법원을 중간에 끊지 않기로 한 것과 같은 이유(§4.1a).
+- 관심 필터(`bookmarked=true`/`false`)는 §6.3의 `bookmarked` 표시 컬럼(스칼라
+  서브쿼리)과 별개의 `WHERE` 조건이다 — 표시 컬럼이 "필터·정렬·total에 관여하지
+  않는다"는 기존 보장을 건드리지 않으려고 재사용하지 않고 새 `EXISTS` 조건을 추가했다.
+
+**지역 필터·면적당 가격 정렬**
+
+- `sido`/`sigungu`는 이미 저장돼 있던 구조화 컬럼을 다중 선택 필터로 노출한 것뿐이다
+  (선택지는 `listSidoValues`/`listSigunguValues`로 저장 데이터에서 도출, 고정 목록
+  아님). 관악구가 전체의 47%(183건)라 지역을 좁히지 않으면 목록이 사실상 관악구
+  목록이었다. `dong`(읍/면/동)은 이번에 넣지 않는다 — 관악구만 동이 수십 개라
+  체크박스가 감당하지 못한다.
+- 정렬 기준에 `pricePerArea`(면적당 가격)가 추가됐다. `bidRatio`가 확립한 NULL 규칙
+  (`(식) IS NULL`을 선행 정렬 키로 둬서 계산 불가한 물건을 방향과 무관하게 뒤로 보냄)을
+  그대로 따른다. **§6.5(Phase 1)의 면적 정직화가 선행 조건이다** — 그게 없으면
+  "저평가 순 정렬"이 실제로는 대지면적이 큰 순 정렬이 되어 버린다.
+
+**필터 상태 가시화**
+
+- 적용 중인 조건은 칩으로 표시되고(`src/app/_lib/filter-chips.ts`) 칩마다 개별 해제
+  링크가 있다 — 새 함수 없이 기존 `itemListHref(query, { 필드: undefined })`로 만든다.
+- 필터 폼 전체는 `<details>`로 접힌다(필터가 하나라도 걸려 있으면 펼쳐진 채로 시작) —
+  클라이언트 JS 없이 상세 페이지의 "이전 분석"(§6.1)과 같은 방식이다.
+- 페이지 크기를 20건 고정에서 사용자가 고를 수 있게 했다(10/20/50/100/200건).
+
 ## 7. 워커 상태 관측 (observability)
 
 수집·분석 워커가 실제로 돌고 있는지, 무엇을 했는지, 왜 멈췄는지를 로그가 아니라 조회
@@ -1211,7 +1293,9 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 |   |   +- bookmarks/page.tsx      # 관심 물건 목록 (/bookmarks, §6.3)
 |   |   +- feed/page.tsx           # 변동 피드 (/feed, §6.3)
 |   |   +- api/items/route.ts      # GET /api/items (page, pageSize, analyzed, needsAnalysis,
-|   |   |                          #   promptVersion, usage, minPrice, maxPrice, minFailed, q, sort, dir)
+|   |   |                          #   promptVersion, usage, sido, sigungu, minPrice, maxPrice,
+|   |   |                          #   minEok/minMan/maxEok/maxMan, minFailed, q, dateFrom, dateTo,
+|   |   |                          #   excludePast, bookmarked, sort, dir — ux-overhaul-phase2)
 |   |   +- api/items/[id]/route.ts # GET /api/items/:id
 |   |   +- api/items/[id]/changes/route.ts  # GET /api/items/:id/changes
 |   |   +- api/items/usage-types/route.ts   # GET /api/items/usage-types
@@ -1232,6 +1316,8 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 |   |   +- _lib/feed-display.ts    # /feed 표시 판단(미확인 여부, 변동 요약 문구, §6.3)
 |   |   +- _lib/analysis-history.ts # 분석 이력 표시 판단(최신/이전 분리)
 |   |   +- _lib/item-query-url.ts  # ItemQuery -> 목록 페이지 URL 직렬화
+|   |   +- _lib/filter-chips.ts    # 적용 중인 필터 칩 표시 판단(ux-overhaul-phase2)
+|   |   +- _lib/price-input.ts     # 가격 폼(억/만원) 프리셋·입력 초기값 변환(ux-overhaul-phase2)
 |   |   +- _lib/safe-redirect.ts   # 관심/피드 폼의 returnTo 검증(오픈 리다이렉트 방지, §6.3)
 |   |   +- _lib/feed-query.ts      # GET /api/bookmarks, /api/feed 쿼리 파라미터 검증
 |   |   +- _lib/status-display.ts  # /status 표시 판단(상태->라벨/심각도, 소요시간 포맷 등, §7.1)
@@ -1245,7 +1331,8 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 |       +- db/                     # SQLite 접근 (여기 밖으로 snake_case 컬럼명이 안 나간다)
 |       |   +- client.ts           # 연결/WAL/싱글턴, AUCTIONBOSS_DB 해석
 |       |   +- schema.ts           # items / analyses / item_changes / worker_runs / collector_state / bookmarks / feed_reads 테이블 DDL
-|       |   +- repository.ts       # upsertItems, listItems, insertAnalysis, listItemChanges ...
+|       |   +- repository.ts       # upsertItems, listItems, listUsageTypes, listSidoValues,
+|       |   |                      #   listSigunguValues, insertAnalysis, listItemChanges ...
 |       |   +- worker-runs.ts      # startRun, finishRun, listWorkerRuns, summarizeRuns, getWorkerStatus (§7)
 |       |   +- collector-state.ts  # 로테이션 다음 위치 등 소규모 운영 상태 키-값 저장소 (§4.1a)
 |       |   +- bookmarks.ts        # addBookmark, removeBookmark, listBookmarkedItems, listFeed, getUnreadCount, markFeedRead (§6.3, 단일 사용자 전제)
@@ -1320,10 +1407,13 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
      원문 그대로 보여준다.
 5. **워커가 죽으면 수동 재시작이다.** 프로세스 매니저(pm2 등)나 재시작 정책이 없다. 시작/종료 로그로
    감지만 가능하다. 배포 단계에서 도입 예정.
-6. **목록 화면 필터에는 UI가 없는 조건도 있다.** 용도·가격대·유찰횟수·소재지 키워드·정렬은
-   `ItemFilterForm`(`src/app/_components/item-filter-form.tsx`)으로 붙어 있다. 다만
+6. **목록 화면 필터에는 UI가 없는 조건도 있다.** 용도·지역(시/도·시/군/구)·가격대(억/만원
+   입력+프리셋)·유찰횟수·소재지 키워드·매각기일 범위·지난 기일 제외·관심 물건·정렬·페이지
+   크기는 `ItemFilterForm`(`src/app/_components/item-filter-form.tsx`)으로 붙어 있다(폼은
+   `<details>`로 접혀 있다가 필터가 걸리면 펼쳐진다, ux-overhaul-phase2). 다만
    `analyzed`(분석 여부)는 URL로는 받아 유지하지만 폼에 입력칸이 없고, `needsAnalysis`는
-   analyzer 전용이라 애초에 사람이 쓸 UI가 없다.
+   analyzer 전용이라 애초에 사람이 쓸 UI가 없다. `dong`(읍/면/동) 필터도 아직 없다(관악구만
+   동이 수십 개라 체크박스가 감당하지 못한다).
 7. **인증/권한이 없다.** 서버를 띄우면 접근 가능한 누구나 전체를 볼 수 있다. 로컬/내부망
    전제다. **인증 없는 쓰기 엔드포인트 전체 목록은 §7.4에 한곳에 모아 뒀다** — 워커 회차
    기록(§7.4)뿐 아니라 관심 물건 등록/해제·읽음 처리(§6.3, add-bookmarks-and-feed)까지

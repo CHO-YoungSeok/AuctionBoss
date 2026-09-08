@@ -28,12 +28,27 @@ export function itemQuerySearchParams(query: ItemQuery): URLSearchParams {
   for (const usageType of query.usageTypes ?? []) {
     params.append("usage", usageType); // 값마다 하나씩 — 절대 쉼표로 합치지 않는다
   }
+  for (const sido of query.sidoValues ?? []) {
+    params.append("sido", sido); // usage와 같은 반복 파라미터 인코딩(design.md D1)
+  }
+  for (const sigungu of query.sigunguValues ?? []) {
+    params.append("sigungu", sigungu);
+  }
+  // 억/만원(minEok/minMan 등)은 왕복하지 않는다 — ItemQuery는 합산된 원 단위 값만 갖고
+  // 있고(item-query.ts의 `effectivePriceBound`), 그게 API 계약이다(design.md D3). 링크가
+  // 항상 minPrice/maxPrice로 정규화되는 편이 lenient 파서의 다른 필드들과 일관된다.
   if (query.minPrice !== undefined) params.set("minPrice", String(query.minPrice));
   if (query.maxPrice !== undefined) params.set("maxPrice", String(query.maxPrice));
   if (query.minFailedBidCount !== undefined) {
     params.set("minFailed", String(query.minFailedBidCount));
   }
   if (query.addressKeyword !== undefined) params.set("q", query.addressKeyword);
+  if (query.auctionDateFrom !== undefined) params.set("dateFrom", query.auctionDateFrom);
+  if (query.auctionDateTo !== undefined) params.set("dateTo", query.auctionDateTo);
+  if (query.excludePastAuctions !== undefined) {
+    params.set("excludePast", String(query.excludePastAuctions));
+  }
+  if (query.bookmarked !== undefined) params.set("bookmarked", String(query.bookmarked));
   if (query.sort !== undefined) params.set("sort", query.sort);
   if (query.direction !== undefined) params.set("dir", query.direction);
   // 페이지에는 UI가 없지만 URL로 들어온 값은 유지한다 — 링크를 눌렀다고 조건이

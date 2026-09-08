@@ -5,7 +5,15 @@
  * 사람이 읽는 문자열로 바꾸는 책임만 지고, 값이 없으면 항상 `EMPTY`("-")를 돌려준다.
  * `_lib`처럼 밑줄로 시작하는 디렉터리는 App Router가 라우트로 취급하지 않는다.
  */
-import type { IsoDate, IsoDateTime, SortDirection, SortKey, Won } from "@/lib/domain";
+import {
+  WON_PER_EOK,
+  WON_PER_MAN,
+  type IsoDate,
+  type IsoDateTime,
+  type SortDirection,
+  type SortKey,
+  type Won,
+} from "@/lib/domain";
 
 /**
  * 정렬 기준의 화면 표시 이름. `SortKey`를 키로 하는 `Record`라, 도메인에 정렬 기준이
@@ -16,6 +24,7 @@ export const SORT_LABELS: Record<SortKey, string> = {
   minBidPrice: "최저매각가격",
   bidRatio: "감정가 대비 최저가",
   failedBidCount: "유찰횟수",
+  pricePerArea: "면적당 가격",
 };
 
 export const DIRECTION_LABELS: Record<SortDirection, string> = {
@@ -32,6 +41,35 @@ const wonFormatter = new Intl.NumberFormat("ko-KR");
 export function formatWon(value: Won | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY;
   return `${wonFormatter.format(value)}원`;
+}
+
+/**
+ * 원 단위 정수를 "3억 5,000만원" 같은 사람이 읽는 억/만원 표기로 바꾼다(ux-overhaul-phase2
+ * tasks.md 2.4). 실데이터가 76만원~261억까지 걸쳐 있어(proposal.md) 원 단위 11자리 숫자로는
+ * "지금 얼마로 걸려 있는지"가 한눈에 안 들어온다 — 이 함수는 그 표시 전용이다.
+ *
+ * API 파라미터(`minPrice`/`maxPrice`)는 여전히 원 정수다(design.md D3) — 이 함수는 순수
+ * 표시 변환이고 파싱의 역방향이 아니다. 만원 미만 잔액(억/만원으로 나눠떨어지지 않는
+ * 부분)이 있으면 마지막에 원 단위로 그대로 덧붙인다 — 값을 조용히 반올림하거나 버리지
+ * 않는다. `WON_PER_EOK`/`WON_PER_MAN`은 도메인(`item-query.ts`)의 억/만원 합산 로직과
+ * 같은 상수를 가져다 쓴다 — 두 곳이 각자 100_000_000을 하드코딩하면 하나만 바뀌었을 때
+ * 표시와 파싱이 어긋난다.
+ */
+export function formatWonAsEokMan(value: Won | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY;
+  const sign = value < 0 ? "-" : "";
+  const abs = Math.abs(value);
+  const eok = Math.floor(abs / WON_PER_EOK);
+  const afterEok = abs % WON_PER_EOK;
+  const man = Math.floor(afterEok / WON_PER_MAN);
+  const won = afterEok % WON_PER_MAN;
+
+  const parts: string[] = [];
+  if (eok > 0) parts.push(`${wonFormatter.format(eok)}억`);
+  if (man > 0) parts.push(`${wonFormatter.format(man)}만원`);
+  if (won > 0 || parts.length === 0) parts.push(`${wonFormatter.format(won)}원`);
+
+  return `${sign}${parts.join(" ")}`;
 }
 
 /** 정수 카운트. 0은 그대로 `0`으로 표시한다(값 없음과 구분). */

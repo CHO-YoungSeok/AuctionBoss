@@ -181,4 +181,85 @@ describe("GET /api/items", () => {
     expect(body.items).toEqual([]);
     expect(body.total).toBe(0);
   });
+
+  describe("ux-overhaul-phase2 신규 필터 — HTTP 경계", () => {
+    it("sido/sigungu 필터가 라우트를 통해 동작한다", async () => {
+      const repo = getRepository();
+      repo.upsertItems([
+        makeItem({ itemNo: "1", sido: "서울특별시", sigungu: "관악구" }),
+        makeItem({ itemNo: "2", sido: "경기도", sigungu: "수원시" }),
+      ]);
+
+      const response = GET(request("sido=서울특별시"));
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { total: number; items: Array<{ itemNo: string }> };
+      expect(body.total).toBe(1);
+      expect(body.items[0]?.itemNo).toBe("1");
+    });
+
+    it("억/만원 입력이 minPrice/maxPrice로 합산돼 필터링된다", async () => {
+      const repo = getRepository();
+      repo.upsertItems([
+        makeItem({ itemNo: "1", minBidPrice: 150_000_000 }),
+        makeItem({ itemNo: "2", minBidPrice: 400_000_000 }),
+      ]);
+
+      const response = GET(request("minEok=1&maxEok=3"));
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { total: number; items: Array<{ itemNo: string }> };
+      expect(body.total).toBe(1);
+      expect(body.items[0]?.itemNo).toBe("1");
+    });
+
+    it("매각기일 범위·지난 기일 제외·관심 필터가 함께 동작한다", async () => {
+      const repo = getRepository();
+      repo.upsertItems([
+        makeItem({ itemNo: "1", auctionDate: "2020-01-01" }), // 과거
+        makeItem({ itemNo: "2", auctionDate: "2099-01-01" }), // 미래
+      ]);
+
+      const excludePast = GET(request("excludePast=true"));
+      expect(excludePast.status).toBe(200);
+      const body = (await excludePast.json()) as { items: Array<{ itemNo: string }> };
+      expect(body.items.map((i) => i.itemNo)).toEqual(["2"]);
+    });
+
+    it("bookmarked=true/false 둘 다 200이다", async () => {
+      const repo = getRepository();
+      repo.upsertItems([makeItem({ itemNo: "1" })]);
+      expect(GET(request("bookmarked=true")).status).toBe(200);
+      expect(GET(request("bookmarked=false")).status).toBe(200);
+    });
+
+    it("잘못된 dateFrom 형식은 400이다", async () => {
+      const response = GET(request("dateFrom=2026/01/01"));
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { details: Array<{ field: string }> };
+      expect(body.details).toEqual([{ field: "dateFrom", message: expect.any(String) }]);
+    });
+
+    it("dateFrom이 dateTo보다 늦으면 400이다", async () => {
+      const response = GET(request("dateFrom=2026-12-31&dateTo=2026-01-01"));
+      expect(response.status).toBe(400);
+    });
+
+    it("bookmarked에 true/false가 아닌 값을 주면 400이다", async () => {
+      const response = GET(request("bookmarked=yes"));
+      expect(response.status).toBe(400);
+    });
+
+    it("억/만원 합산값이 뒤집힌 범위(minEok > maxEok)면 400이다", async () => {
+      const response = GET(request("minEok=5&maxEok=1"));
+      expect(response.status).toBe(400);
+    });
+
+    it("[회귀] 새 필터 파라미터 없이 호출하면 여전히 200이고 응답 형태가 그대로다", async () => {
+      const repo = getRepository();
+      repo.upsertItems([makeItem()]);
+      const response = GET(request(""));
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(Object.keys(body).sort()).toEqual(["items", "page", "pageSize", "total"]);
+    });
+  });
 });
