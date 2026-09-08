@@ -53,7 +53,7 @@
 ```
 
 핵심 경계 두 가지 (`openspec/changes/archive/2026-09-07-auction-pipeline-mvp/design.md` D3/D5 —
-이 change는 완료되어 archive로 이동했다, §8 참고):
+이 change는 완료되어 archive로 이동했다, §9 참고):
 
 - **수집 소스는 어댑터 뒤로 격리한다.** 사이트 고유 필드명(`jiwonNm`, `srnSaNo` 등)은
   `src/lib/sources/courtauction/` 밖으로 나가지 않는다. 소스를 갈아끼워도 나머지 코드는 그대로다.
@@ -64,6 +64,11 @@ analyzer는 한 회차에 서버를 **두 번** 조회한다: 먼저 `GET /api/i
 미분석 물건을, 그다음 `GET /api/items?needsAnalysis=true&promptVersion=<현재 버전>`로 재분석
 대상을 가져온다(§6 "변경 이력과 재분석" 참고). 신규 조회가 항상 먼저이고 전량 처리되므로,
 재분석 대상이 아무리 쌓여도 신규 분석 물건이 뒤로 밀리지 않는다.
+
+두 워커 모두 회차(실행 1회분)마다 자신의 실행 기록을 남긴다 — collector는 저장소 함수
+(`startRun`/`finishRun`)를 직접 호출하고, analyzer는 DB를 열지 않으므로 `POST /api/worker-runs`
+/ `PATCH /api/worker-runs/[id]`로 같은 기록을 남긴다. 이 기록이 `/status` 화면과 회차 조회
+API의 근거다(§7 참고).
 
 ## 2. 사전 요건
 
@@ -143,20 +148,26 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
     "maxReanalysisPerRun": 2,
     "reanalysisCooldownHours": 24,
     "intervalMs": 600000
+  },
+  "observability": {
+    "maxRunsPerWorker": 1000,
+    "staleAfterIntervals": 3
   }
 }
 ```
 
 | 필드 | 기본값 | 의미와 바꿨을 때의 효과 |
 | --- | --- | --- |
-| `scope.courts[]` | 서울중앙지방법원 1곳 | 수집 대상 법원 목록. 최소 1곳 필요(빈 배열이면 시작 시 `CollectorConfigError`). 법원을 늘리면 **법원 수만큼 요청이 배로 늘어난다** — 로봇탐지 위험이 그만큼 커진다(§7). |
+| `scope.courts[]` | 서울중앙지방법원 1곳 | 수집 대상 법원 목록. 최소 1곳 필요(빈 배열이면 시작 시 `CollectorConfigError`). 법원을 늘리면 **법원 수만큼 요청이 배로 늘어난다** — 로봇탐지 위험이 그만큼 커진다(§8). |
 | `scope.courts[].name` | `"서울중앙지방법원"` | 법원 이름. DB `items.court`에 그대로 저장되는 값이다. |
 | `scope.courts[].courtCode` | `"B000210"` | 사이트의 `cortOfcCd`. 빈 문자열이면 어댑터가 `name`으로 `src/lib/sources/courtauction/courts.ts`의 60개 코드표에서 찾는다. 다른 법원 코드는 그 파일 참조. |
-| `intervalMs` | `600000` (10분) | collector 수집 주기. **늘리는 것이 안전한 방향이다** — §7 참고. 이전 회차가 아직 안 끝났으면 이번 tick은 건너뛴다(중첩 실행 없음). |
+| `intervalMs` | `600000` (10분) | collector 수집 주기. **늘리는 것이 안전한 방향이다** — §8 참고. 이전 회차가 아직 안 끝났으면 이번 tick은 건너뛴다(중첩 실행 없음). |
 | `analysis.maxItemsPerRun` | `5` | analyzer 한 회차에 분석할 최대 **신규** 물건 수(아직 분석 결과가 하나도 없는 물건). Claude 호출 비용의 상한이다. 올리면 회차당 비용과 소요 시간이 비례해 늘어난다(호출은 순차 실행). |
 | `analysis.maxReanalysisPerRun` | `2` | analyzer 한 회차에 재분석할 최대 물건 수(§6 참고). `maxItemsPerRun`과는 **독립된 별도 한도**다 — 회차당 총 Claude 호출 수 상한은 두 값의 **합**(`maxItemsPerRun + maxReanalysisPerRun`, 기본 5+2=7)이지, 하나의 한도를 나눠 쓰는 게 아니다. |
 | `analysis.reanalysisCooldownHours` | `24` | 재분석 쿨다운(시간). 물건의 최신 분석이 이 시간 이내면 감시 필드가 다시 바뀌어도 재분석 대상에서 제외한다. 정수(0 이상), 소수·음수·누락은 다른 `analysis` 필드와 똑같이 시작 시 `CollectorConfigError`로 죽는다. 0을 주면 쿨다운이 완전히 꺼진다(이전 동작과 동일) — **왜 이 필드가 필요한지는 §6.2의 "왜 쿨다운이 필요한가" 문단을 반드시 읽을 것.** |
 | `analysis.intervalMs` | `600000` (10분) | analyzer 주기. 신규 미분석 물건도 재분석 대상도 없으면 `[analyzer] 미분석 물건도 재분석 대상도 없음`만 찍고 아무것도 호출하지 않는다. |
+| `observability.maxRunsPerWorker` | `1000` | 워커별(`collector`/`analyzer` 각각) `worker_runs` 보관 상한(건수). 새 회차를 기록할 때마다 이 값을 넘는 오래된 행을 지운다(`src/lib/db/worker-runs.ts`의 `prune`). 10분 주기면 하루 144행이 쌓이므로 상한이 없으면 기록이 무한정 불어난다 — 기본값 1000은 약 7일치다. 올리면 `/status`·`GET /api/worker-runs`에서 더 긴 이력을 볼 수 있지만 DB 파일이 그만큼 커진다. |
+| `observability.staleAfterIntervals` | `3` | 워커 상태를 `stale`(미실행)로 판정하는 배수. 마지막 성공(또는 마지막 기록)이 `기대 주기 × 이 값`보다 오래되면 `stale`이 된다(기대 주기는 collector면 `intervalMs`, analyzer면 `analysis.intervalMs`). 값을 낮추면 워커가 죽었을 때 더 빨리 `stale`로 잡히지만, 회차 소요 시간이 주기에 가까운 상황에서는 정상 실행 중에도 오탐할 수 있다(design.md Open Questions — 이 배수가 적절한지는 아직 실측으로 검증되지 않았다). |
 
 설정이 없거나 JSON이 깨졌거나 스키마에 안 맞으면 **기본값으로 조용히 넘어가지 않고 즉시 종료한다**
 (수집 범위가 의도와 다르게 도는 것이 더 나쁘다는 판단). 로딩은 프로세스 수명 동안 캐시되므로
@@ -173,7 +184,7 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 | `AUCTIONBOSS_CONFIG` | collector, analyzer | `<cwd>/config/collector.json` | 설정 파일 경로. `loadCollectorConfig()`를 호출하는 두 워커만 읽는다 — Next.js 앱은 `config/collector.json`을 아예 import하지 않는다(`src/lib/domain/config.ts` 사용처는 `workers/collector.ts`, `workers/analyzer.ts`뿐). |
 | `AUCTIONBOSS_COLLECT_INTERVAL_MS` | collector | `config.intervalMs` | 수집 주기(ms). 양의 정수. |
 | `AUCTIONBOSS_COLLECT_BACKOFF_MS` | collector | `3600000` (1시간) | 로봇탐지 차단 감지 시 tick을 건너뛸 시간(ms). |
-| `AUCTIONBOSS_COLLECT_PAGE_SIZE` | collector | `40` | 한 요청으로 가져올 **행** 수. **40이 서버 상한이고, 넘기면 경고 후 40으로 클램프된다**(§7). |
+| `AUCTIONBOSS_COLLECT_PAGE_SIZE` | collector | `40` | 한 요청으로 가져올 **행** 수. **40이 서버 상한이고, 넘기면 경고 후 40으로 클램프된다**(§8). |
 | `AUCTIONBOSS_COLLECT_PAGE_DELAY_MS` | collector | `5000` | 페이지 사이 대기(ms). 줄이면 차단 위험이 커진다. |
 | `AUCTIONBOSS_COLLECT_BID_WINDOW_DAYS` | collector | `60` | 매각기일 조회 범위(오늘 ~ 오늘+N일). 줄이면 대상 행 수와 요청 횟수가 함께 줄어든다. |
 | `AUCTIONBOSS_COLLECT_MAX_PAGES` | collector | `50` | 폭주 방지용 페이지 상한. 여기 걸리면 경고 로그를 남기고 그 회차를 중단한다. |
@@ -196,11 +207,14 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 
 ## 5. API
 
-다섯 개다(`find src/app/api -name route.ts` 기준: `/api/items`, `/api/items/[id]`,
-`/api/items/[id]/changes`, `/api/items/usage-types`, `/api/analyses`). analyzer는 이 중
-`GET /api/items`(§1의 두 단계 조회에 각각 한 번씩)와 `POST /api/analyses`를 계약으로
-쓰므로 응답 형태를 임의로 바꾸면 안 된다 — 나머지(`/api/items/[id]`, `.../changes`,
-`.../usage-types`)는 웹 UI 전용이라 analyzer와 무관하다.
+여덟 개다(`find src/app/api -name route.ts` 기준: `/api/items`, `/api/items/[id]`,
+`/api/items/[id]/changes`, `/api/items/usage-types`, `/api/analyses`, `/api/worker-runs`,
+`/api/worker-runs/[id]`, `/api/worker-runs/summary`). analyzer는 이 중 `GET /api/items`
+(§1의 두 단계 조회에 각각 한 번씩), `POST /api/analyses`, 그리고 회차 기록용
+`POST /api/worker-runs` / `PATCH /api/worker-runs/[id]`를 계약으로 쓰므로 응답 형태를
+임의로 바꾸면 안 된다 — 나머지(`/api/items/[id]`, `.../changes`, `.../usage-types`,
+`GET /api/worker-runs`, `.../summary`)는 웹 UI(목록/상세, `/status`) 전용이라 analyzer와
+무관하다.
 
 ### `GET /api/items` — 물건 목록
 
@@ -375,6 +389,123 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 물건당 분석은 여러 건 쌓일 수 있고(재분석은 새 행을 추가할 뿐 이전 분석을 지우지 않는다),
 조회는 항상 최신 1건을 돌려준다.
 
+### `GET /api/worker-runs` — 회차 기록 목록
+
+`src/app/api/worker-runs/route.ts`. 워커의 실행 회차(run)를 최신순으로 조회한다
+(§7 "워커 상태 관측" 참고). 파라미터 검증은 `src/app/_lib/worker-run-query.ts`가 한다 —
+인식되는 이름에 잘못된 값이 오면(오탈자, 범위 밖 숫자) 조용히 기본값으로 넘어가지 않고
+**400**으로 거절한다.
+
+| 쿼리 파라미터 | 타입 | 기본값 | 설명 |
+| --- | --- | --- | --- |
+| `worker` | `collector` \| `analyzer` | (없음 = 전체) | 워커 종류 필터 |
+| `outcome` | `running` \| `success` \| `failed` \| `blocked` \| `skipped` | (없음 = 전체) | 결과 구분 필터 |
+| `page` | 정수 ≥ 1 | `1` | 페이지 번호 |
+| `pageSize` | 정수 1~200 | `20` | 페이지 크기. 200 초과는 400 |
+
+```jsonc
+// 200 OK
+{
+  "runs": [
+    {
+      "id": 42,
+      "worker": "collector",
+      "startedAt": "2026-09-08T06:50:00.000Z",
+      "finishedAt": "2026-09-08T06:51:12.000Z",  // 아직 끝나지 않은(running) 회차는 null
+      "outcome": "success",                       // running | success | failed | blocked | skipped
+      "errorKind": null,          // failed/blocked면 오류 클래스 이름(예: "RobotDetectedError"),
+                                   // skipped면 사유("overlap" | "backoff")
+      "errorMessage": null,
+      "detail": {                 // 워커별로 형태가 다르다. collector 회차의 예:
+        "targetCourts": ["서울중앙지방법원"],
+        "pagesRequested": 12,     // 실제로 보낸 요청 페이지 수(§7.3 참고)
+        "itemsFetched": 444,
+        "inserted": 2,
+        "updated": 440,
+        "changed": 3              // 감시 필드가 실제로 바뀐 물건 수(§7.2 참고)
+      },
+      "itemsChanged": 3           // 위 detail.changed와 항상 같은 값(집계용 컬럼). analyzer
+                                   // 회차나 detail이 없는 회차는 null
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "pageSize": 20
+}
+```
+
+analyzer 회차의 `detail`은 `{ newCount, reanalysisCount, succeeded, failed }` 형태다(신규
+분석 건수, 재분석 건수, 성공·실패 건수).
+
+### `POST /api/worker-runs` — 회차 시작 기록
+
+```jsonc
+// 요청 본문
+{ "worker": "collector" }  // "collector" | "analyzer", 필수
+```
+
+- 성공: **201** + `{ "id": <새 회차 id> }`
+- 본문 형식 오류: **400**
+
+collector는 이 API를 쓰지 않고 저장소 함수(`startRun`)를 직접 호출한다. analyzer는 DB를
+직접 열지 않으므로(§1) 회차 시작마다 이 엔드포인트를 호출해야 한다.
+
+**⚠️ 이 엔드포인트는 인증이 없다.** §7.4 및 아래 `PATCH /api/worker-runs/[id]`의 경고를
+반드시 읽을 것.
+
+### `PATCH /api/worker-runs/[id]` — 회차 종료 기록
+
+```jsonc
+// 요청 본문
+{
+  "outcome": "success",       // "success" | "failed" | "blocked", 필수 (running/skipped는 이 API로 못 만든다)
+  "errorKind": "RobotDetectedError",   // 선택. 빈 문자열 불가
+  "errorMessage": "...",               // 선택. 빈 문자열 불가
+  "detail": {                          // 선택. worker에 맞는 형태만 허용(zod union)
+    "newCount": 3, "reanalysisCount": 1, "succeeded": 4, "failed": 0
+  }
+}
+```
+
+- 성공: **200** + 갱신된 회차 객체(위 `GET /api/worker-runs`의 `runs[]` 항목과 같은 형태)
+- 본문 형식 오류: **400**
+- `id`가 숫자가 아니거나 존재하지 않는 회차: **404**
+
+**⚠️ 인증이 없다 — 완곡하게 말하지 않는다.** `POST /api/worker-runs`와
+`PATCH /api/worker-runs/[id]`는 둘 다 인증 없이 누구나 호출할 수 있다. 현재는 로컬/개인
+전용 실행이 전제라 허용된 상태이지만(design.md D3), **이 서버가 외부에 노출되는 순간
+누구나 임의의 회차 기록을 주입할 수 있다.** `/status` 화면과 `GET /api/worker-runs/summary`
+집계는 전부 이 기록에서 계산되므로, 주입된 "성공" 기록 하나가 실제로는 멈추거나 차단된
+워커를 "정상"으로 둔갑시켜 진짜 장애를 감출 수 있다. **인증을 도입할 때 반드시 포함해야
+할 엔드포인트로 지금부터 명시해 둔다.**
+
+### `GET /api/worker-runs/summary` — 최근 기간 집계
+
+`src/app/api/worker-runs/summary/route.ts`. `/status` 화면의 "성공률/차단 횟수/누적 변경
+건수" 카드가 이 라우트가 호출하는 것과 같은 함수(`summarizeRuns()`)를 쓴다 — 다만 화면은
+서버 컴포넌트라 이 API를 거치지 않고 함수를 직접 호출한다(§7.1 참고). 이 API는 화면이
+아닌 외부 클라이언트(운영자의 curl, 향후 모니터링 도구)를 위한 것이다.
+
+| 쿼리 파라미터 | 타입 | 기본값 | 설명 |
+| --- | --- | --- | --- |
+| `worker` | `collector` \| `analyzer` | (없음 = 전체) | 워커 종류 필터 |
+| `since` | ISO 날짜·시각 문자열 | (없음 = 보관 중인 전체 기록) | 이 시각(포함) 이후 시작된 회차만 집계 |
+
+```jsonc
+// 200 OK
+{
+  "totalRuns": 42,
+  "successCount": 38,
+  "failedCount": 1,
+  "blockedCount": 2,
+  "skippedCount": 1,
+  "runningCount": 0,
+  "successRate": 0.9268292682926829,  // successCount / (success+failed+blocked). 완료된 회차가
+                                        // 하나도 없으면 null(0%와 구별하기 위해 — "0"이 아니다)
+  "itemsChanged": 57                   // 이 기간 items_changed 컬럼의 합(§7.2)
+}
+```
+
 ## 6. 변경 이력과 재분석
 
 ### 6.1 변경 이력
@@ -480,7 +611,95 @@ analyzer는 처음에는 "분석 결과가 하나도 없는 물건"만 분석했
 지출 결정으로 취급해야 한다. 급하게 소진하고 싶다면 `AUCTIONBOSS_ANALYZE_REANALYZE_MAX`를
 일시적으로 올려서 회차당 처리량을 늘릴 수 있다(그만큼 회차당 비용도 늘어난다).
 
-## 7. ⚠️ 수집 관련 주의사항
+## 7. 워커 상태 관측 (observability)
+
+수집·분석 워커가 실제로 돌고 있는지, 무엇을 했는지, 왜 멈췄는지를 로그가 아니라 조회
+가능한 기록으로 남기는 기능이다(`openspec/changes/add-collection-observability/`, 아직
+archive로 이동하지 않은 진행 중 change). 워커는 회차(run, 실행 1회분)마다 `worker_runs`
+테이블에 시작·종료·결과를 남기고(§5의 `GET /api/worker-runs`), 이를 사람이 보는 화면
+(`/status`)과 집계 API(`GET /api/worker-runs/summary`)로 노출한다.
+
+### 7.1 `/status` 페이지
+
+`src/app/status/page.tsx`(서버 컴포넌트, `force-dynamic` — 다른 페이지와 같은 관례로
+정적 프리렌더를 꺼서 새 회차가 바로 보이게 한다)가 collector/analyzer 두 워커 각각에
+대해 카드 하나씩 보여준다:
+
+- 현재 상태(4가지, 아래 표) + 마지막 성공 시각
+- 최근 24시간 성공률 · 차단 횟수 · 누적 변경 건수 · 전체 회차 수(`summarizeRuns()`를
+  화면이 직접 호출한 결과 — `GET /api/worker-runs/summary` API를 거치지 않는다. 서버
+  컴포넌트라 저장소를 바로 호출할 수 있기 때문)
+- 최근 회차 20건 목록(시작 시각, 결과 배지, 소요시간, 상세 — `RECENT_RUNS_LIMIT`).
+  전체 이력은 `GET /api/worker-runs`(페이지네이션)로 봐야 한다.
+
+표시 판단(상태 → 라벨/심각도, 소요시간 포맷, `null` 성공률을 "0%"와 구별해서 보여주는
+것 등)은 전부 `src/app/_lib/status-display.ts`의 순수 함수로 분리돼 있고 페이지는 그
+결과를 렌더링만 한다.
+
+상태는 `getWorkerStatus()`(`src/lib/db/worker-runs.ts`)가 매번 최신 기록에서 도출하며
+저장되지 않는다(design.md D5) — 판정 순서대로:
+
+| 상태 | 화면 라벨 | 뜻 |
+| --- | --- | --- |
+| `ok` | 정상 | 가장 최근 완료된 회차가 성공이다(위 세 상태 어디에도 해당 안 함). |
+| `blocked` | 차단됨 | 가장 최근 **완료된** 회차가 로봇탐지 차단으로 중단됐다. 화면에 배지 색과 별도로 "차단 상태입니다 — 지금 확인이 필요합니다" 배너가 함께 뜬다. |
+| `failed` | 실패 | 가장 최근 완료된 회차가 오류로 실패했다(차단이 아닌 일반 실패). |
+| `stale` | 미실행 | **⚠️ "idle"(한가함)이 아니다.** 기록이 아예 없거나, 마지막 성공(또는 성공이 하나도 없으면 마지막 기록)이 `기대 주기 × observability.staleAfterIntervals`(기본 3배, §4.1)보다 오래됐다는 뜻 — **워커가 멈췄거나 죽었을 수 있다.** |
+
+`stale`을 오해하면 안 되는 이유가 여기 있다: 이 상태는 "지금 처리할 게 없어서 쉬는 중"이
+아니라 "워커가 그 어떤 새 회차도 기록하지 못하고 있다"는 뜻이다. `stale`을 "대기 중" 같은
+문구로 보여주면 죽은 워커를 건강한 것처럼 안내하는 거짓 정보가 된다. 판정은 (1) 기록
+없음 → `stale`, (2) 위 나이 조건 초과 → `stale`(회차 도중 죽어 `running`으로 영원히 남은
+고아 회차도 결국 여기 걸린다), (3) 가장 최근 **완료된**(성공/실패/차단) 회차가 `blocked`
+→ `blocked`, (4) 같은 조건에서 `failed` → `failed`, (5) 그 외 → `ok` 순으로 첫 번째로
+맞는 것을 채택한다. `skipped`(중첩 실행 방지/백오프로 건너뜀) 회차는 "완료된 회차"로 치지
+않으므로 3·4번 판정에서 제외된다 — 중첩 건너뜀은 정상 동작이고, 백오프 건너뜀은 그 앞의
+`blocked` 회차가 이미 상태를 결정하기 때문이다.
+
+기록이 하나도 없을 때(첫 실행 전)는 오류 대신 "아직 실행 기록이 없습니다"로 안내한다.
+
+### 7.2 `changed` — 왜 지켜봐야 하는 값인가
+
+collector가 회차마다 남기는 `저장 완료 — inserted=N, updated=N, changed=N` 로그와 회차
+기록의 `detail.changed`(= 집계용 `itemsChanged` 컬럼)는 **감시 대상 필드(watched fields)가
+실제로 바뀐 "물건 수"**다 — 이력 테이블에 쌓인 **행 수**가 아니고, 최초 저장 시의 기준점
+(baseline)도 세지 않는다(§6.1). 이 숫자가 운영자가 지켜봐야 할 신호인 이유는 비용과
+직결되기 때문이다: 아카이브된 `add-price-change-history` change의 design.md가 계산한
+비용 리스크가, 소스가 같은 물건의 값을 회차마다 다르게(예: 유찰횟수가 일시적으로
+틀어졌다 복구되는 패턴) 보고하면 그 물건 **하나**가 감시 필드 변경 조건에 걸려 매 회차
+재분석 대상으로 재적격되고, 10분 주기 기준 하루 최대 144번의 유료 Claude 호출을 유발할
+수 있다는 것이다(§6.2 "왜 쿨다운이 필요한가" 참고 — `reanalysisCooldownHours`가 이
+낭비의 상한을 하루 1회로 줄이지만 노이즈 자체를 없애지는 않는다). `changed`가 물건 수
+(대개 수백 건 규모)에 비해 비정상적으로 크거나 특정 회차마다 비슷한 값이 반복되면, 바로
+이 소스 노이즈로 인한 스퓨리어스 변경이 의심되는 상황이다 — `/status`와
+`GET /api/worker-runs`(개별 회차의 `detail.changed`) 양쪽에서 이 값을 볼 수 있다.
+
+### 7.3 `pagesRequested` — 10분 주기가 지속 가능한가를 재는 값
+
+collector 회차 기록의 `detail.pagesRequested`는 그 회차가 소스에 실제로 보낸 요청
+페이지 수다 — 설정된 상한(`AUCTIONBOSS_COLLECT_MAX_PAGES`, 기본 50)이 아니라
+`AuctionSource.fetchActiveItems()`가 실제로 수행한 요청 수 그대로다(design.md D1).
+**로봇탐지 차단으로 회차가 중단된 경우에도, 차단 직전까지 실제로 보낸 페이지 수가 그대로
+남는다**(`SourceError.pagesRequested`를 어댑터가 던지고 collector가 그 값으로 detail을
+덮어쓴다) — 실패한 회차라고 이 수치가 0이나 설정값으로 뭉개지지 않는다.
+
+이 값이 필요한 이유는 이 프로젝트에서 가장 오래된 미해결 질문 때문이다: **"10분 주기
+상시 운용이 이 사이트에서 지속 가능한가"**(`src/lib/sources/courtauction/NOTES.md` §6.1 —
+조사 당시 5분에 총 15회 미만의 요청으로도 로봇탐지 차단에 걸렸다). 이전에는 이 질문에
+추정치(서울중앙 한 곳·매각기일 2개월 범위 기준 회차당 약 13요청)로만 답할 수 있었는데,
+이제 `pagesRequested`가 회차마다 실측값으로 남으므로 `GET /api/worker-runs`로 실제 요청
+수 추이를 쌓아 보고 판단할 수 있다(§11 "알려진 한계" 2번 참고).
+
+### 7.4 ⚠️ 쓰기 API에 인증이 없다
+
+`POST /api/worker-runs`와 `PATCH /api/worker-runs/[id]`(§5)는 인증 없이 누구나 호출할 수
+있다. 현 단계가 로컬/개인 전용 실행이라는 전제에서만 허용된 것이며, **이 서버가 외부에
+노출되면 누구나 임의의 회차 기록을 주입할 수 있다.** `/status` 화면과
+`GET /api/worker-runs/summary` 집계는 전부 이 기록으로 계산되므로, 주입된 "성공" 기록이
+실제로는 멈추거나 차단된 워커를 정상으로 둔갑시켜 진짜 장애를 감출 수 있다. 인증을
+도입할 때 반드시 포함해야 할 엔드포인트로 지금부터 명시해 둔다(§11 "알려진 한계" 참고).
+
+## 8. ⚠️ 수집 관련 주의사항
 
 **이 섹션은 읽고 넘어가지 말 것.** 근거는 전부 실측이며
 `src/lib/sources/courtauction/NOTES.md` §6.1 / §9와
@@ -508,21 +727,22 @@ analyzer는 처음에는 "분석 결과가 하나도 없는 물건"만 분석했
   **사이트 이용약관은 아직 검토하지 않았다.** 현 단계는 **개인/내부 열람 용도**를 전제로 하며,
   수집한 데이터를 외부에 재배포·재판매하기 전에 별도의 법적 검토가 반드시 필요하다.
 
-## 8. 개발
+## 9. 개발
 
 ```bash
-npm test        # vitest run — 260 tests / 13 files
+npm test        # vitest run — 365 tests / 19 files
 npm run typecheck   # tsc --noEmit
 npm run lint        # eslint (설정: eslint.config.mjs, next/core-web-vitals + next/typescript)
 ```
 
-- 테스트 위치 (`vitest.config.mts`가 `src/**/*.test.ts`, `src/**/__tests__/**/*.test.ts`, `workers/**/*.test.ts`를 수집. 실측: `npx vitest run` 260 tests / 13 files, `npx vitest list --filesOnly` 아래 13개):
-  - `src/lib/db/__tests__/client.test.ts`, `repository.test.ts`
+- 테스트 위치 (`vitest.config.mts`가 `src/**/*.test.ts`, `src/**/__tests__/**/*.test.ts`, `workers/**/*.test.ts`를 수집. 실측: `npx vitest run` 365 tests / 19 files, `npx vitest list --filesOnly` 아래 19개):
+  - `src/lib/db/__tests__/client.test.ts`, `repository.test.ts`, `worker-runs.test.ts`
   - `src/lib/domain/__tests__/config.test.ts`, `item-query.test.ts`
   - `src/lib/sources/courtauction/__tests__/adapter.test.ts` (+ `fixtures.ts`)
-  - `src/app/_lib/__tests__/change-history.test.ts`, `analysis-history.test.ts`, `item-query-url.test.ts`
+  - `src/app/_lib/__tests__/change-history.test.ts`, `analysis-history.test.ts`, `item-query-url.test.ts`, `status-display.test.ts`
   - `src/app/api/items/__tests__/route.test.ts`, `src/app/api/items/[id]/changes/__tests__/route.test.ts`, `src/app/api/items/usage-types/__tests__/route.test.ts`
-  - `workers/__tests__/analyzer.test.ts`, `analyzer.integration.test.ts`(재분석 두 단계 선정을 실제 저장소·API 라우트로 구동하는 회귀 테스트)
+  - `src/app/api/worker-runs/__tests__/route.test.ts`, `src/app/api/worker-runs/[id]/__tests__/route.test.ts`, `src/app/api/worker-runs/summary/__tests__/route.test.ts`
+  - `workers/__tests__/analyzer.test.ts`, `analyzer.integration.test.ts`(재분석 두 단계 선정을 실제 저장소·API 라우트로 구동하는 회귀 테스트), `collector.test.ts`
 - 테스트는 **네트워크를 타지 않고 실제 DB 파일도 만들지 않는다.** `fetch`, `claude` 실행 함수,
   DB 경로가 전부 주입 지점으로 열려 있어 인메모리 DB와 가짜 fetch로 돈다.
 - `npm run build`는 타입 체크와 린트를 함께 수행하므로, 커밋 전 최소 확인은 `npm test && npm run build`다.
@@ -536,13 +756,14 @@ openspec/
   config.yaml
   specs/                       # 확정된(배포된) 스펙
   changes/
-    add-price-change-history/  # 진행 중인 change (예)
+    add-collection-observability/  # 진행 중인 change (예 — §7의 근거)
       proposal.md              # 왜 하는가
       design.md                # 설계 결정과 리스크
       specs/                   # 이 change가 더하는 스펙 델타
       tasks.md                 # 실행 단위 태스크 목록
     archive/                   # 완료된 change (예: 2026-09-07-auction-pipeline-mvp/,
-                                #                    2026-09-07-add-item-search-filters/)
+                                #                    2026-09-07-add-item-search-filters/,
+                                #                    2026-09-07-add-price-change-history/)
 ```
 
 구현 전에 해당 change의 proposal / design / specs / tasks를 먼저 읽는다.
@@ -554,38 +775,45 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 - `/opsx:archive` — 완료된 change를 archive로 이동
 - `/opsx:sync` — change의 델타 스펙을 `openspec/specs/`에 반영
 
-## 9. 프로젝트 구조
+## 10. 프로젝트 구조
 
 중요한 경로만 추렸다.
 
 ```
 .
 +- config/
-|   +- collector.json              # 수집 범위/주기/분석 건수 (§4.1)
+|   +- collector.json              # 수집 범위/주기/분석 건수/관측 설정 (§4.1)
 +- src/
 |   +- app/                        # Next.js App Router
 |   |   +- page.tsx                # 물건 목록 (/)
 |   |   +- items/[id]/page.tsx     # 물건 상세 + AI 분석(최신/이전) + 변경 이력 (/items/:id)
+|   |   +- status/page.tsx         # 워커 상태 화면 (/status, §7.1)
 |   |   +- api/items/route.ts      # GET /api/items (page, pageSize, analyzed, needsAnalysis,
 |   |   |                          #   promptVersion, usage, minPrice, maxPrice, minFailed, q, sort, dir)
 |   |   +- api/items/[id]/route.ts # GET /api/items/:id
 |   |   +- api/items/[id]/changes/route.ts  # GET /api/items/:id/changes
 |   |   +- api/items/usage-types/route.ts   # GET /api/items/usage-types
 |   |   +- api/analyses/route.ts   # POST /api/analyses
+|   |   +- api/worker-runs/route.ts          # GET/POST /api/worker-runs
+|   |   +- api/worker-runs/[id]/route.ts     # PATCH /api/worker-runs/:id
+|   |   +- api/worker-runs/summary/route.ts  # GET /api/worker-runs/summary
 |   |   +- _components/item-filter-form.tsx # 목록 필터·정렬 폼(순수 <form method="get">)
 |   |   +- _lib/format.ts          # 금액/날짜 표시 포맷터
 |   |   +- _lib/change-history.ts  # 변경 이력 표시 판단(기준점 구별, 가격 변화폭 등)
 |   |   +- _lib/analysis-history.ts # 분석 이력 표시 판단(최신/이전 분리)
 |   |   +- _lib/item-query-url.ts  # ItemQuery -> 목록 페이지 URL 직렬화
+|   |   +- _lib/status-display.ts  # /status 표시 판단(상태->라벨/심각도, 소요시간 포맷 등, §7.1)
+|   |   +- _lib/worker-run-query.ts # GET /api/worker-runs(/summary) 쿼리 파라미터 검증
 |   +- lib/
 |       +- domain/                 # 정규화 도메인 모델 + config 로더
-|       |   +- types.ts            # AuctionItem, Analysis, ItemChange, CollectorConfig ...
+|       |   +- types.ts            # AuctionItem, Analysis, ItemChange, CollectorConfig, WorkerRun ...
 |       |   +- config.ts           # config/collector.json 로딩 + zod 검증
 |       |   +- item-query.ts       # GET /api/items 쿼리 파라미터 파싱(ItemQuery, strict/lenient)
 |       +- db/                     # SQLite 접근 (여기 밖으로 snake_case 컬럼명이 안 나간다)
 |       |   +- client.ts           # 연결/WAL/싱글턴, AUCTIONBOSS_DB 해석
-|       |   +- schema.ts           # items / analyses / item_changes 테이블 DDL
+|       |   +- schema.ts           # items / analyses / item_changes / worker_runs 테이블 DDL
 |       |   +- repository.ts       # upsertItems, listItems, insertAnalysis, listItemChanges ...
+|       |   +- worker-runs.ts      # startRun, finishRun, listWorkerRuns, summarizeRuns, getWorkerStatus (§7)
 |       +- sources/                # 수집 소스 어댑터 경계
 |           +- types.ts            # AuctionSource 인터페이스
 |           +- errors.ts           # RobotDetectedError, WafBlockedError ...
@@ -602,16 +830,18 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 |   |   +- claude.ts               # claude CLI headless 호출 + 출력 파싱
 |   |   +- prompt.ts               # 프롬프트 템플릿 로딩/렌더링, PROMPT_VERSION
 |   +- prompts/analyze-item.md     # 분석 프롬프트 템플릿 ({{ITEM_JSON}} 토큰)
-+- openspec/                       # 계획/스펙 (§8)
++- openspec/                       # 계획/스펙 (§9)
 +- data/auctionboss.db             # 기본 DB 파일 (git ignore, 첫 실행 때 생성)
 ```
 
-## 10. 알려진 한계 / 다음 단계
+## 11. 알려진 한계 / 다음 단계
 
 1. **"진행 중" 필터의 의미가 검증되지 않았다.** 사이트에 진행상태 전용 파라미터를 찾지 못해
    매각기일 범위(`오늘 ~ 오늘+60일`)로 대신하고 있다. 이것이 사이트가 말하는 "진행중"과 같은 개념인지는
    미확인이다(수신 행은 전부 `mulJinYn="Y"`였다). — NOTES §6.2 row 0, §9.3
-2. **10분 주기 상시 운용이 미검증이다.** §7 참고. 장시간 무인 운용 로그가 아직 없다.
+2. **10분 주기 상시 운용이 미검증이다.** §8 참고. 다만 §7.3의 `pagesRequested`가 회차마다
+   실측값으로 남기 시작했으므로, 이제 로그가 아니라 `GET /api/worker-runs`로 실제 요청 수
+   추이를 관측할 수 있다 — 장시간 무인 운용 데이터 자체는 아직 없다.
 3. **비공식 엔드포인트라 예고 없이 바뀔 수 있다.** zod 검증으로 즉시 감지·로그하지만, 바뀌면 수집은 멈춘다.
    대안인 **상용 데이터 API 어댑터는 아직 구현되어 있지 않다**(`AuctionSource` 인터페이스만 열려 있는 상태).
 4. **프롬프트가 1단계 수준이다.** 시세·등기부·권리관계·임차인 정보 없이 물건 JSON 한 덩어리만 보고 쓴 요약이다.
@@ -622,7 +852,10 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
    `ItemFilterForm`(`src/app/_components/item-filter-form.tsx`)으로 붙어 있다. 다만
    `analyzed`(분석 여부)는 URL로는 받아 유지하지만 폼에 입력칸이 없고, `needsAnalysis`는
    analyzer 전용이라 애초에 사람이 쓸 UI가 없다.
-7. **인증/권한이 없다.** 서버를 띄우면 접근 가능한 누구나 전체를 볼 수 있다. 로컬/내부망 전제다.
+7. **인증/권한이 없다.** 서버를 띄우면 접근 가능한 누구나 전체를 볼 수 있다. 로컬/내부망
+   전제다. **특히 `POST /api/worker-runs`/`PATCH /api/worker-runs/[id]`(§5, §7.4)는 인증
+   없는 쓰기 API라 외부에 노출되면 누구나 임의의 회차 기록을 주입해 `/status` 화면과
+   집계를 속일 수 있다** — 인증 도입 시 반드시 포함해야 할 엔드포인트다.
 8. **가짜 변경(노이즈)을 걸러내는 규칙이 없다.** 소스가 같은 물건을 다른 값으로 표기하는
    사례가 이미 관측됐다(`유찰횟수`와 `최저매각가격`이 어긋나는 행 — `openspec/changes/archive/
    2026-09-07-auction-pipeline-mvp/design.md`). 그런 노이즈도 지금은 감시 필드의 "실제
@@ -630,7 +863,7 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
    24시간)가 **비용의 상한**(물건당 하루 최대 1회 재분석)은 실질적으로 막아 주지만, 노이즈
    자체를 감지·거부하거나 이력에서 지우지는 않는다. 즉 잘못된 값이 하루 한 번씩은 계속
    "실제 변경"으로 기록되고 화면에도 그대로 보인다 — 쿨다운은 지혈이지 치료가 아니다.
-   필터링 규칙 자체는 여전히 미정이다(`openspec/changes/add-price-change-history/design.md`
+   필터링 규칙 자체는 여전히 미정이다(`openspec/changes/archive/2026-09-07-add-price-change-history/design.md`
    Open Questions) — 실제 변경 이력을 며칠 관측한 뒤에 정할 예정이다.
 9. **"최근 변동" 기준 7일이 검증된 값은 아니다.** 매각기일 주기(보통 1개월 이상)를 감안하면
    더 길어야 할 수 있다. `src/app/_lib/change-history.ts`의 `RECENT_CHANGE_DAYS` 상수 하나만

@@ -39,4 +39,4 @@
 - [x] 6.1 `npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint` 전부 통과
 - [x] 6.2 실제 워커로 확인: 짧은 주기로 collector를 띄워 성공 회차가 기록되고 `/status`가 ok를 표시 → 중첩을 유발해 skipped(overlap) 기록 → 차단 오류를 주입해 blocked 기록과 `/status`의 차단 표시 → 백오프 중 skipped(backoff) 기록. 각 단계의 실제 출력을 제시
 - [x] 6.3 analyzer를 서버와 함께 띄워 분석 회차가 API로 기록되는 것과, 서버를 내린 상태에서도 analyzer가 죽지 않는 것을 확인
-- [ ] 6.4 README에 상태 페이지·회차 기록 API·새 설정을 추가하고, **쓰기 API에 인증이 없어 외부 노출 시 임의 기록 주입이 가능하다는 점**을 명시(design D3)
+- [x] 6.4 README에 상태 페이지·회차 기록 API·새 설정을 추가하고, **쓰기 API에 인증이 없어 외부 노출 시 임의 기록 주입이 가능하다는 점**을 명시(design D3)
