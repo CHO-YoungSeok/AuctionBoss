@@ -402,7 +402,44 @@ describe("CourtAuctionAdapter — 정규화", () => {
       // 코드표 미확인(UNVERIFIED, design.md D4) — 해석하지 않고 원문 그대로 보존된다.
       statusCode: "0002100001",
       itemStatusCode: "01",
+      // ---- 상세 조회 식별자 (add-item-photos stage A, task A.1/A.3) ----
+      // REAL_ROW의 saNo/boCd 실측값. caseNo("2011타경28497", 표시용 srnSaNo)와는
+      // 형식부터 다른 별개의 값이다 — 같다고 가정하지 않는다(NOTES §10.1).
+      internalCaseNo: "20110130028497",
+      courtCode: "B000210",
     });
+  });
+
+  it(
+    "internalCaseNo(saNo)는 표시용 caseNo(srnSaNo)와 다른 별개의 값으로 보존된다 " +
+      "(task A.1 — case_no에 saNo를 재사용하지 않는다는 판단의 회귀 테스트)",
+    async () => {
+      const { adapter } = makeAdapter([validBody({ rows: [REAL_ROW] })]);
+      const {
+        items: [item],
+      } = await adapter.fetchActiveItems(SCOPE);
+      expect(item.caseNo).toBe("2011타경28497"); // 표시용(srnSaNo)
+      expect(item.internalCaseNo).toBe("20110130028497"); // 내부(saNo)
+      expect(item.caseNo).not.toBe(item.internalCaseNo);
+    },
+  );
+
+  it("courtCode(boCd)는 REAL_ROW의 실측값으로 매핑된다 (task A.1/A.3)", async () => {
+    const { adapter } = makeAdapter([validBody({ rows: [REAL_ROW] })]);
+    const {
+      items: [item],
+    } = await adapter.fetchActiveItems(SCOPE);
+    expect(item.courtCode).toBe("B000210");
+  });
+
+  it("saNo/boCd가 행에 없으면 상세 조회 식별자도 null이다 (값을 지어내지 않는다)", async () => {
+    const row = { ...REAL_ROW, saNo: undefined, boCd: undefined };
+    const { adapter } = makeAdapter([validBody({ rows: [row] })]);
+    const {
+      items: [item],
+    } = await adapter.fetchActiveItems(SCOPE);
+    expect(item.internalCaseNo).toBeNull();
+    expect(item.courtCode).toBeNull();
   });
 
   it("차수별 3·4차 최저가·2차 최저가율·좌표수준도 원문 그대로 매핑한다 (NOTES §3.1, task 3.3)", async () => {
@@ -563,6 +600,12 @@ describe("CourtAuctionAdapter — 정규화", () => {
     expect(item.courtPhone).toBeNull();
     expect(item.statusCode).toBeNull();
     expect(item.itemStatusCode).toBeNull();
+
+    // 상세 조회 식별자(add-item-photos stage A)는 §11 확장 필드 묶음과 무관하게 이
+    // 행에도 saNo/boCd가 있으므로 정상 매핑된다 — "확장 필드가 전부 비었다"는 이
+    // 두 필드까지 포함하는 뜻이 아니다(EXTENDED_FIELD_KEYS 주석 참조).
+    expect(item.internalCaseNo).toBe(NO_EXTENDED_FIELDS_ROW.saNo);
+    expect(item.courtCode).toBe(NO_EXTENDED_FIELDS_ROW.boCd);
   });
 
   it(

@@ -93,6 +93,12 @@ const auctionItemSchema = z.object({
   courtPhone: z.string().nullable().optional(),
   statusCode: z.string().nullable().optional(),
   itemStatusCode: z.string().nullable().optional(),
+
+  // 상세 조회 식별자 (add-item-photos stage A, src/lib/domain/types.ts). 위 확장 필드와
+  // 같은 이유(zod strip 결함 재발 방지)로 여기도 선언한다 — 아래 KeysEqual 검사가
+  // 이 선언을 빠뜨리면 컴파일 시점에 잡아 준다.
+  internalCaseNo: z.string().nullable().optional(),
+  courtCode: z.string().nullable().optional(),
 });
 
 // zod 스키마와 도메인 타입이 어긋나면 컴파일 시점에 잡는다(config.ts와 같은 방식).

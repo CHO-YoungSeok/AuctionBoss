@@ -115,6 +115,32 @@ function migrateItemExtendedFieldsColumns(db: Db): void {
 }
 
 /**
+ * `items`의 상세 조회 식별자 컬럼 마이그레이션 (add-item-photos stage A).
+ *
+ * `migrateItemExtendedFieldsColumns`와 같은 이유·같은 방식이다: 이 컬럼들이 추가되기
+ * 전에 만들어진 DB 파일에는 컬럼 자체가 없고, `CREATE TABLE IF NOT EXISTS`는 이미 있는
+ * 테이블에 컬럼을 추가해 주지 않으므로 `ALTER TABLE ... ADD COLUMN`으로 직접 추가한다.
+ * 새로 만드는 DB는 `SCHEMA_SQL`이 이미 이 컬럼들을 갖고 테이블을 만들므로 이 함수는
+ * 조용히 아무 것도 하지 않는다.
+ *
+ * 전부 nullable이라 백필이 없다 — 기존 행은 그대로 NULL로 남고 다음 수집 때 채워진다.
+ */
+function migrateItemDetailIdentifierColumns(db: Db): void {
+  const columns = db.pragma("table_info(items)") as Array<{ name: string }>;
+  const existing = new Set(columns.map((column) => column.name));
+
+  const detailIdentifierColumns: Array<[name: string, ddl: string]> = [
+    ["internal_case_no", "TEXT"],
+    ["court_code", "TEXT"],
+  ];
+
+  for (const [name, ddl] of detailIdentifierColumns) {
+    if (existing.has(name)) continue;
+    db.exec(`ALTER TABLE items ADD COLUMN ${name} ${ddl}`);
+  }
+}
+
+/**
  * DB 파일을 열고 pragma·스키마를 적용한 새 연결을 돌려준다.
  * 테스트는 이 함수에 임시 경로나 `":memory:"`를 직접 넘겨 env에 의존하지 않는다.
  */
@@ -129,6 +155,7 @@ export function openDatabase(dbPath: string): Db {
   db.exec(SCHEMA_SQL);
   migrateItemChangesKindColumn(db);
   migrateItemExtendedFieldsColumns(db);
+  migrateItemDetailIdentifierColumns(db);
   return db;
 }
 
