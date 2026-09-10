@@ -560,6 +560,12 @@ export class CourtAuctionAdapter implements AuctionSource {
       // 코드표 미확인(UNVERIFIED, design.md D4) — 해석 없이 원문 그대로.
       statusCode: text(head.jinstatCd),
       itemStatusCode: text(head.mulStatcd),
+
+      // ---- 상세 조회 식별자 (add-item-photos stage A, NOTES.md §10.1) ----
+      // domain/types.ts의 주석 참조: dspslGdsSeq는 대응 소스 필드가 확인되지 않아
+      // 의도적으로 매핑하지 않는다.
+      internalCaseNo: text(head.saNo),
+      courtCode: text(head.boCd),
     };
   }
 }
@@ -567,6 +573,14 @@ export class CourtAuctionAdapter implements AuctionSource {
 /**
  * `toItem`이 채우는 확장 필드 이름 전부(design.md D1, NOTES.md §11).
  * "행은 왔는데 확장 필드가 전부 비었다" 경고(task 3.5)를 판정하는 데만 쓴다.
+ *
+ * ⚠️ `internalCaseNo`/`courtCode`(add-item-photos stage A)는 **여기 넣지 않는다.**
+ * 이 상수는 §11에서 도입된 확장 필드 묶음이 통째로 사라지는 것(사이트의 필드명 변경)을
+ * 잡기 위한 것이고, `internalCaseNo`/`courtCode`는 그보다 오래전부터 dedupe 키로 쓰던
+ * `saNo`/`boCd`를 도메인에 노출한 것뿐이라 성격이 다르다. 넣으면
+ * `NO_EXTENDED_FIELDS_ROW`(saNo/boCd는 있고 §11 필드만 없는 고정 fixture)에서
+ * `hasAnyExtendedField`가 true가 되어, "확장 필드가 전부 비었다" 경고 테스트(task 3.5)가
+ * 조용히 깨진다.
  */
 const EXTENDED_FIELD_KEYS = [
   "minArea",
