@@ -238,3 +238,61 @@ export const runClaudeHeadless: RunClaude = async ({
     rmSync(workDir, { recursive: true, force: true });
   }
 };
+
+export async function runClaudeViaApi(
+  options: RunClaudeOptions,
+  apiKey: string,
+  fetchFn = fetch
+): Promise<ClaudeResult> {
+  const model = options.model ?? "claude-3-5-sonnet-20241022";
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_CLAUDE_TIMEOUT_MS);
+
+  try {
+    const response = await fetchFn("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 8192,
+        messages: [{ role: "user", content: options.prompt }],
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new ClaudeInvocationError(`Anthropic API 오류: ${response.status} ${response.statusText} ${text}`);
+    }
+
+    const data = await response.json() as { content?: Array<{ type: string; text?: string }>; model?: string };
+    const text = data.content?.find((c) => c.type === "text")?.text;
+    if (!text) {
+      throw new ClaudeInvocationError("Anthropic API 응답에 텍스트가 없습니다");
+    }
+
+    return { text, model: data.model ?? model };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new ClaudeInvocationError(`API 호출이 ${options.timeoutMs ?? DEFAULT_CLAUDE_TIMEOUT_MS}ms 안에 끝나지 않아 종료했습니다`);
+    }
+    if (error instanceof ClaudeInvocationError) {
+      throw error;
+    }
+    throw new ClaudeInvocationError(`API 호출 중 오류 발생: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export const runClaude: RunClaude = async (options) => {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (apiKey) {
+    return runClaudeViaApi(options, apiKey);
+  }
+  return runClaudeHeadless(options);
+};
