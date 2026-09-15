@@ -611,30 +611,45 @@ page 1(40행) 분포: `R` 24행 / `A` 16행. §3의 주소 선택 규칙을 그�
 목록 응답만 쓰는 현재 구현을 넘어 상세 데이터를 가져올 수 있는지 판단하기 위한 조사.
 정적 화면 정의 XML만 GET 했고 검색 API는 호출하지 않았다. 차단 징후 없었다.
 
-### 10.1 상세 엔드포인트 — **CONFIRMED** (XML 실물)
+### 10.1 상세 엔드포인트 — **CONFIRMED** (XML 실물 + 2026-09-11 실측 호출)
 
 §6.2 row 8의 추정이 **정확히 일치했다.**
 
 ```
 POST /pgj/pgj15B/selectAuctnCsSrchRslt.on
-요청 (dma_srchGdsDtlSrch): { csNo, cortOfcCd, dspslGdsSeq, pgmId, srchInfo }
+요청 (dma_srchGdsDtlSrch): { csNo, cortOfcCd, dspslGdsSeq, pgmId: "PGJ15BM01" }
 응답 바인딩: data.dma_result
 ```
 
-`dma_result`의 키 구성 (**CONFIRMED**, `PGJ15BM01.xml` L56-71):
+2026-09-11 실측 프로브(사건: 2026타경101037, 서울중앙지방법원) 결과 **CONFIRMED**:
+- `csNo`: 14자리 내부사건번호(`saNo`, 예: `"20260130101037"`)로 정상 조회됨 (**CONFIRMED**). 표시용 사건번호(`userCsNo`, 예: `"2026타경101037"`)는 응답의 `csBaseInfo.userCsNo`에 매핑되어 돌아온다.
+- `cortOfcCd`: 법원코드(`boCd`, 예: `"B000210"`)로 정상 동작 (**CONFIRMED**).
+- `dspslGdsSeq`: 빈 문자열(`""`)로 전송해도 필수값 누락 오류 없이 전체 물건/사진 목록이 정상 반환됨 (**CONFIRMED**). 별도 매핑이나 추가 파라미터 필요 없음.
+
+`dma_result`의 키 구성 (**CONFIRMED**, `PGJ15BM01.xml` L56-71 및 실측 응답):
 `csBaseInfo`(사건기본정보), `dstrtDemnInfo`(배당요구종기일), `dspslGdsDxdyInfo`(매각물건정보),
 `picDvsIndvdCnt`/`csPicLst`(사진), `gdsDspslDxdyLst`(매각기일), `gdsDspslObjctLst`(매각목적물),
 `rgltLandLstAll`(대지권토지), `bldSdtrDtlLstAll`(건물표제부), `gdsNotSugtBldLsstAll`(제시외건물),
 `gdsRletStLtnoLstAll`(부동산소재지번), `aeeWevlMnpntLst`(감정평가요항표).
 
-### 10.2 사진은 상세 응답에 base64로 이미 들어 있다 — **DERIVED** (신뢰도 높음)
+### 10.2 사진은 상세 응답에 base64로 이미 들어 있다 — **CONFIRMED** (2026-09-11 실측)
 
-`csPicLst[i].picFile`이 이미지 URL이 아니라 **base64 PNG 원본**이다.
-`PGJ15BM01.xml` L577: `setSrc("data:image/png;base64," + csPicLst[i].picFile)`.
+`csPicLst[i].picFile`이 이미지 URL이 아니라 **base64 이미지 원본**이다.
+실측 일자: 2026-09-11, 실측 케이스: 2026타경101037 (서울중앙지방법원).
 
-→ **사진을 받기 위한 추가 요청이 필요 없다.** 확대 팝업(`PGJ15BP06.xml`)도 이미 받은
-데이터를 다시 보여주는 UI일 뿐 재조회하지 않는다(L1408-1424).
-실제 응답을 받아본 것은 아니므로 엄밀히 DERIVED이나, 코드가 명확한 문자열 조합이다.
+★ **실측 핵심 발견사항 (DERIVED → CONFIRMED 및 정정)**:
+1. **이미지 포맷: PNG가 아닌 GIF89a**
+   - XML(`PGJ15BM01.xml` L577)에는 `setSrc("data:image/png;base64," + csPicLst[i].picFile)`로 적혀 있었고, `picTitlNm`도 `"B000210202601301010371.jpg"`처럼 확장자가 `.jpg`로 표시되어 있으나,
+   - 실제 base64 바이너리를 디코딩한 첫 6바이트 매직 바이트는 전부 `GIF89a`(base64 접두사: `R0lGODlh`)인 **GIF 포맷**이다.
+   - 브라우저는 Data URL의 MIME 타입과 상관없이 실제 바이너리 매직 바이트를 보고 렌더링하므로 화면에서는 정상 표시되지만, 서버/로컬 파일시스템 저장 시 확장자를 `.gif`로 저장하거나 매직 바이트 기반으로 결정해야 한다.
+2. **사진 장수 및 용량**:
+   - 실측 케이스에서 총 **15장** 반환 (`csPicLst.length === 15`).
+   - 장당 바이너리 크기: **100~200KB** (실측: 99KB ~ 203KB, 평균 약 136KB).
+   - 물건당 사진 전체 바이너리 합계: 약 **2.04MB** (base64 인코딩 시 JSON 상에서 약 2.7MB).
+   - 389건 전량 수집 가정 시 디스크 용량은 약 **800~850MB** 수준.
+
+→ **사진을 받기 위한 추가 요청이 필요 없다.** 상세 응답 1회로 15장 전량이 base64로 한 번에 수신된다.
+확대 팝업(`PGJ15BP06.xml`)도 이미 받은 데이터를 다시 보여주는 UI일 뿐 재조회하지 않는다.
 
 ### 10.3 권리관계·임차인·등기 데이터는 **없다** — **CONFIRMED (부재)**
 

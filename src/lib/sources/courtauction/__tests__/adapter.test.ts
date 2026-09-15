@@ -20,24 +20,32 @@ import type { Logger } from "../../types";
 import {
   CourtAuctionAdapter,
   DEFAULT_PAGE_SIZE,
+  DETAIL_PATH,
   MAX_PAGE_SIZE,
   SEARCH_PATH,
   SESSION_BOOTSTRAP_PATH,
   USER_AGENT,
+  detectImageExtension,
+  parseDetailResponse,
   parseSearchResponse,
 } from "../adapter";
 import { SEOUL_CENTRAL_DISTRICT_COURT_CODE } from "../courts";
 import {
   BUNDLE_ROWS,
+  DETAIL_MISSING_RESULT_BODY,
+  DETAIL_SCHEMA_VIOLATION_BODY,
   MISSING_KEY_ROW,
   MISSING_PAGE_INFO_BODY,
   NO_EXTENDED_FIELDS_ROW,
+  REAL_DETAIL_BASE_INFO,
+  REAL_DETAIL_PICS,
   REAL_ROW,
   ROAD_ONLY_ROW,
   ROBOT_BLOCKED_BODY,
   SCHEMA_VIOLATION_BODY,
   WAF_BLOCKED_BODY,
   validBody,
+  validDetailBody,
 } from "./fixtures";
 
 const SCOPE: CollectScope = {
@@ -787,5 +795,110 @@ describe("CourtAuctionAdapter — 실패 처리 (spec 수집 실패 처리)", ()
     });
     await expect(adapter.fetchActiveItems(SCOPE)).rejects.toBeInstanceOf(SourceRequestError);
     expect(searched).toBe(false);
+  });
+});
+
+// ------------------------------------------------------------- 상세 응답 및 사진 검증 (Stage B.4)
+
+describe("parseDetailResponse 및 GIF base64 검증 (Stage B.4)", () => {
+  it("DETAIL_PATH는 selectAuctnCsSrchRslt.on 경로다", () => {
+    expect(DETAIL_PATH).toBe("/pgj/pgj15B/selectAuctnCsSrchRslt.on");
+  });
+
+  it("정상 상세 응답은 csBaseInfo와 csPicLst를 파싱한다", () => {
+    const raw = validDetailBody();
+    const data = parseDetailResponse(raw);
+
+    // csBaseInfo 핵심 필드 검증 (2026-09-11 실측 2026타경101037)
+    expect(data.dma_result.csBaseInfo).toBeDefined();
+    expect(data.dma_result.csBaseInfo.cortOfcCd).toBe(REAL_DETAIL_BASE_INFO.cortOfcCd);
+    expect(data.dma_result.csBaseInfo.csNo).toBe(REAL_DETAIL_BASE_INFO.csNo);
+    expect(data.dma_result.csBaseInfo.userCsNo).toBe(REAL_DETAIL_BASE_INFO.userCsNo);
+    expect(data.dma_result.csBaseInfo.cortOfcNm).toBe(REAL_DETAIL_BASE_INFO.cortOfcNm);
+    expect(data.dma_result.csBaseInfo.csNm).toBe(REAL_DETAIL_BASE_INFO.csNm);
+
+    // csPicLst 배열 및 사진 항목 필드 검증
+    expect(Array.isArray(data.dma_result.csPicLst)).toBe(true);
+    expect(data.dma_result.csPicLst).toHaveLength(2);
+
+    const firstPic = data.dma_result.csPicLst[0];
+    expect(firstPic.picTitlNm).toBe("B000210202601301010371.jpg");
+    expect(firstPic.cortAuctnPicSeq).toBe("1");
+    expect(firstPic.cortAuctnPicDvsCd).toBe("000244");
+    expect(firstPic.cortOfcCd).toBe("B000210");
+    expect(firstPic.csNo).toBe("20260130101037");
+    expect(typeof firstPic.picFile).toBe("string");
+    expect(firstPic.picFile?.length).toBeGreaterThan(100_000);
+  });
+
+  it("본문이 JSON이 아니면 WafBlockedError (HTTP 200이어도)", () => {
+    expect(() => parseDetailResponse(WAF_BLOCKED_BODY)).toThrow(WafBlockedError);
+  });
+
+  it("data.ipcheck !== true 면 RobotDetectedError + 소스 메시지 보존", () => {
+    try {
+      parseDetailResponse(ROBOT_BLOCKED_BODY);
+      expect.unreachable("throw했어야 한다");
+    } catch (err) {
+      expect(err).toBeInstanceOf(RobotDetectedError);
+      expect(err).toBeInstanceOf(SourceBlockedError);
+      expect((err as RobotDetectedError).sourceMessage).toContain("차단되었습니다");
+    }
+  });
+
+  it("csPicLst가 배열이 아니면 ResponseSchemaError", () => {
+    try {
+      parseDetailResponse(DETAIL_SCHEMA_VIOLATION_BODY);
+      expect.unreachable("throw했어야 한다");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ResponseSchemaError);
+      const issues = (err as ResponseSchemaError).issues.join("\n");
+      expect(issues).toContain("csPicLst");
+    }
+  });
+
+  it("dma_result가 통째로 없으면 ResponseSchemaError", () => {
+    expect(() => parseDetailResponse(DETAIL_MISSING_RESULT_BODY)).toThrow(ResponseSchemaError);
+  });
+
+  it("JSON이지만 data가 없으면 ResponseSchemaError", () => {
+    expect(() => parseDetailResponse('{"status":200,"message":"ok"}')).toThrow(ResponseSchemaError);
+  });
+
+  it("실측 사진 바이너리는 파일명이 .jpg여도 GIF89a 매직 바이트를 가진다 (Stage B 실측 핵심 발견)", () => {
+    // 실측 데이터 2장 모두 파일명은 .jpg이지만 바이너리는 GIF89a
+    for (const pic of REAL_DETAIL_PICS) {
+      expect(pic.picTitlNm).toMatch(/\.jpg$/i);
+      expect(pic.picFile).toBeDefined();
+
+      // base64 앞머리가 R0lGODlh (GIF89a의 base64 인코딩)
+      expect(pic.picFile.startsWith("R0lGODlh")).toBe(true);
+
+      // 바이너리 디코딩 시 첫 6바이트 매직 바이트가 "GIF89a"
+      const buf = Buffer.from(pic.picFile, "base64");
+      const magic = buf.subarray(0, 6).toString("ascii");
+      expect(magic).toBe("GIF89a");
+
+      // 확장자 감지 함수로 "gif" 판별 확인
+      expect(detectImageExtension(pic.picFile)).toBe("gif");
+      expect(detectImageExtension(buf)).toBe("gif");
+    }
+  });
+
+  it("detectImageExtension은 PNG, JPEG, 기타 바이너리를 올바르게 판별한다", () => {
+    // PNG 매직 바이트: 89 50 4E 47 0D 0A 1A 0A
+    const pngBuf = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+    expect(detectImageExtension(pngBuf)).toBe("png");
+    expect(detectImageExtension(pngBuf.toString("base64"))).toBe("png");
+
+    // JPEG 매직 바이트: FF D8 FF
+    const jpgBuf = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]);
+    expect(detectImageExtension(jpgBuf)).toBe("jpg");
+    expect(detectImageExtension(jpgBuf.toString("base64"))).toBe("jpg");
+
+    // 미식별 바이너리
+    const binBuf = Buffer.from([0x00, 0x01, 0x02, 0x03]);
+    expect(detectImageExtension(binBuf)).toBe("bin");
+    expect(detectImageExtension(binBuf.toString("base64"))).toBe("bin");
   });
 });

@@ -30,11 +30,22 @@ import {
   type Logger,
 } from "../types";
 import { courtCodeByName } from "./courts";
-import { searchDataSchema, type SearchRow } from "./schema";
+import {
+  detailDataSchema,
+  searchDataSchema,
+  type DetailBaseInfo,
+  type DetailData,
+  type DetailPicItem,
+  type DetailResult,
+  type SearchRow,
+} from "./schema";
+
+export type { DetailBaseInfo, DetailData, DetailPicItem, DetailResult };
 
 export const BASE_URL = "https://www.courtauction.go.kr";
 export const SESSION_BOOTSTRAP_PATH = "/pgj/index.on";
 export const SEARCH_PATH = "/pgj/pgjsearch/searchControllerMain.on";
+export const DETAIL_PATH = "/pgj/pgj15B/selectAuctnCsSrchRslt.on";
 
 /**
  * 브라우저 User-Agent. curl 기본 UA를 쓰면 WAF가 JSON 대신 HTML 차단 페이지를
@@ -745,4 +756,90 @@ export function parseSearchResponse(raw: string) {
     );
   }
   return result.data;
+}
+
+/**
+ * 상세 응답 본문 3단 검사 및 파싱 (Stage B.4 / NOTES §10.1, §10.2).
+ *
+ * `parseSearchResponse`와 동일한 3단 방어 체계를 거친다:
+ *  1. 본문이 `{`로 시작하지 않으면 → WAF HTML 차단 페이지 (WafBlockedError)
+ *  2. `data.ipcheck !== true` → 로봇탐지 IP 차단 (RobotDetectedError)
+ *  3. zod로 `data.dma_result.csBaseInfo` 및 `data.dma_result.csPicLst` 검증 (ResponseSchemaError)
+ */
+export function parseDetailResponse(raw: string): DetailData {
+  const trimmed = raw.trimStart();
+  if (!trimmed.startsWith("{")) {
+    throw new WafBlockedError(
+      "WAF가 JSON 대신 차단 페이지를 반환했습니다 (HTTP 200이지만 본문이 JSON이 아님)",
+      trimmed.slice(0, 200),
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (cause) {
+    throw new ResponseSchemaError(
+      "상세 응답 본문을 JSON으로 파싱하지 못했습니다",
+      [trimmed.slice(0, 200)],
+      { cause },
+    );
+  }
+
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new ResponseSchemaError("응답 최상위가 객체가 아닙니다", [typeof parsed]);
+  }
+  const envelope = parsed as { data?: unknown; message?: unknown };
+  if (typeof envelope.data !== "object" || envelope.data === null) {
+    throw new ResponseSchemaError("응답에 data 객체가 없습니다", [
+      `data = ${JSON.stringify(envelope.data)}`,
+    ]);
+  }
+
+  const data = envelope.data as { ipcheck?: unknown };
+  if (data.ipcheck !== true) {
+    throw new RobotDetectedError(
+      "로봇탐지에 걸려 차단됐습니다 (data.ipcheck !== true) — 재시도는 무의미하니 장시간 백오프가 필요합니다",
+      typeof envelope.message === "string" ? envelope.message : null,
+    );
+  }
+
+  const result = detailDataSchema.safeParse(data);
+  if (!result.success) {
+    throw new ResponseSchemaError(
+      "상세 응답 형식이 기대와 다릅니다 (사이트가 응답 구조를 바꿨을 수 있습니다)",
+      result.error.issues.map(
+        (issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`,
+      ),
+      { cause: result.error },
+    );
+  }
+  return result.data;
+}
+
+/**
+ * base64 문자열 또는 Buffer의 매직 바이트를 검사해 이미지 확장자를 반환한다.
+ *
+ * 실측 발견사항 (NOTES.md §10.2):
+ * 법원경매 사이트는 `picTitlNm`이 .jpg여도 실제 바이너리는 `GIF89a` 포맷으로 반환한다.
+ * 파일 저장 시 이 함수로 매직 바이트 기반 확장자를 결정한다.
+ */
+export function detectImageExtension(base64OrBuffer: string | Buffer): "gif" | "png" | "jpg" | "bin" {
+  let buf: Buffer;
+  if (typeof base64OrBuffer === "string") {
+    // base64 앞 32자만 디코딩해도 매직 바이트(최대 8바이트) 판별에 충분하다
+    buf = Buffer.from(base64OrBuffer.slice(0, 32), "base64");
+  } else {
+    buf = base64OrBuffer;
+  }
+  if (buf.length >= 3 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) {
+    return "gif";
+  }
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+    return "png";
+  }
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+    return "jpg";
+  }
+  return "bin";
 }

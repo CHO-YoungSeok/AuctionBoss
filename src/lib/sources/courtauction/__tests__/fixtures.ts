@@ -265,3 +265,6 @@ export const MISSING_PAGE_INFO_BODY = JSON.stringify({
   status: 200,
   data: { ipcheck: true, dlt_srchResult: [REAL_ROW] },
 });
+
+// Stage B.4 상세 응답 경량 fixture 재내보내기
+export * from "./fixtures/detail-response";
