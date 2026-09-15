@@ -38,6 +38,9 @@ yarn-error.log*
 *.db-wal
 *.db-shm
 
+# local data directory (runtime db, measured json, photo files)
+/data/
+
 # vercel
 .vercel
 

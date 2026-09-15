@@ -611,30 +611,45 @@ page 1(40행) 분포: `R` 24행 / `A` 16행. §3의 주소 선택 규칙을 그�
 목록 응답만 쓰는 현재 구현을 넘어 상세 데이터를 가져올 수 있는지 판단하기 위한 조사.
 정적 화면 정의 XML만 GET 했고 검색 API는 호출하지 않았다. 차단 징후 없었다.
 
-### 10.1 상세 엔드포인트 — **CONFIRMED** (XML 실물)
+### 10.1 상세 엔드포인트 — **CONFIRMED** (XML 실물 + 2026-09-11 실측 호출)
 
 §6.2 row 8의 추정이 **정확히 일치했다.**
 
 ```
 POST /pgj/pgj15B/selectAuctnCsSrchRslt.on
-요청 (dma_srchGdsDtlSrch): { csNo, cortOfcCd, dspslGdsSeq, pgmId, srchInfo }
+요청 (dma_srchGdsDtlSrch): { csNo, cortOfcCd, dspslGdsSeq, pgmId: "PGJ15BM01" }
 응답 바인딩: data.dma_result
 ```
 
-`dma_result`의 키 구성 (**CONFIRMED**, `PGJ15BM01.xml` L56-71):
+2026-09-11 실측 프로브(사건: 2026타경101037, 서울중앙지방법원) 결과 **CONFIRMED**:
+- `csNo`: 14자리 내부사건번호(`saNo`, 예: `"20260130101037"`)로 정상 조회됨 (**CONFIRMED**). 표시용 사건번호(`userCsNo`, 예: `"2026타경101037"`)는 응답의 `csBaseInfo.userCsNo`에 매핑되어 돌아온다.
+- `cortOfcCd`: 법원코드(`boCd`, 예: `"B000210"`)로 정상 동작 (**CONFIRMED**).
+- `dspslGdsSeq`: 빈 문자열(`""`)로 전송해도 필수값 누락 오류 없이 전체 물건/사진 목록이 정상 반환됨 (**CONFIRMED**). 별도 매핑이나 추가 파라미터 필요 없음.
+
+`dma_result`의 키 구성 (**CONFIRMED**, `PGJ15BM01.xml` L56-71 및 실측 응답):
 `csBaseInfo`(사건기본정보), `dstrtDemnInfo`(배당요구종기일), `dspslGdsDxdyInfo`(매각물건정보),
 `picDvsIndvdCnt`/`csPicLst`(사진), `gdsDspslDxdyLst`(매각기일), `gdsDspslObjctLst`(매각목적물),
 `rgltLandLstAll`(대지권토지), `bldSdtrDtlLstAll`(건물표제부), `gdsNotSugtBldLsstAll`(제시외건물),
 `gdsRletStLtnoLstAll`(부동산소재지번), `aeeWevlMnpntLst`(감정평가요항표).
 
-### 10.2 사진은 상세 응답에 base64로 이미 들어 있다 — **DERIVED** (신뢰도 높음)
+### 10.2 사진은 상세 응답에 base64로 이미 들어 있다 — **CONFIRMED** (2026-09-11 실측)
 
-`csPicLst[i].picFile`이 이미지 URL이 아니라 **base64 PNG 원본**이다.
-`PGJ15BM01.xml` L577: `setSrc("data:image/png;base64," + csPicLst[i].picFile)`.
+`csPicLst[i].picFile`이 이미지 URL이 아니라 **base64 이미지 원본**이다.
+실측 일자: 2026-09-11, 실측 케이스: 2026타경101037 (서울중앙지방법원).
 
-→ **사진을 받기 위한 추가 요청이 필요 없다.** 확대 팝업(`PGJ15BP06.xml`)도 이미 받은
-데이터를 다시 보여주는 UI일 뿐 재조회하지 않는다(L1408-1424).
-실제 응답을 받아본 것은 아니므로 엄밀히 DERIVED이나, 코드가 명확한 문자열 조합이다.
+★ **실측 핵심 발견사항 (DERIVED → CONFIRMED 및 정정)**:
+1. **이미지 포맷: PNG가 아닌 GIF89a**
+   - XML(`PGJ15BM01.xml` L577)에는 `setSrc("data:image/png;base64," + csPicLst[i].picFile)`로 적혀 있었고, `picTitlNm`도 `"B000210202601301010371.jpg"`처럼 확장자가 `.jpg`로 표시되어 있으나,
+   - 실제 base64 바이너리를 디코딩한 첫 6바이트 매직 바이트는 전부 `GIF89a`(base64 접두사: `R0lGODlh`)인 **GIF 포맷**이다.
+   - 브라우저는 Data URL의 MIME 타입과 상관없이 실제 바이너리 매직 바이트를 보고 렌더링하므로 화면에서는 정상 표시되지만, 서버/로컬 파일시스템 저장 시 확장자를 `.gif`로 저장하거나 매직 바이트 기반으로 결정해야 한다.
+2. **사진 장수 및 용량**:
+   - 실측 케이스에서 총 **15장** 반환 (`csPicLst.length === 15`).
+   - 장당 바이너리 크기: **100~200KB** (실측: 99KB ~ 203KB, 평균 약 136KB).
+   - 물건당 사진 전체 바이너리 합계: 약 **2.04MB** (base64 인코딩 시 JSON 상에서 약 2.7MB).
+   - 389건 전량 수집 가정 시 디스크 용량은 약 **800~850MB** 수준.
+
+→ **사진을 받기 위한 추가 요청이 필요 없다.** 상세 응답 1회로 15장 전량이 base64로 한 번에 수신된다.
+확대 팝업(`PGJ15BP06.xml`)도 이미 받은 데이터를 다시 보여주는 UI일 뿐 재조회하지 않는다.
 
 ### 10.3 권리관계·임차인·등기 데이터는 **없다** — **CONFIRMED (부재)**
 
@@ -1050,3 +1065,82 @@ cycle 10은 이전 세션이 분석 워커를 죽이며 우연히 고아 행(`wo
 발생 빈도 — 셋 다 "더 오래, 또는 다른 조건으로 실제로 돌려 보는 것" 외에 다른
 검증 방법이 없다. 이번 사이클이 준 것은 정확한 측정 인프라(`worker_runs`,
 `pagesRequested`, `changed`)뿐이고, 그 인프라로 답을 얻으려면 시간이 더 필요하다.
+
+---
+
+## 15. 상세 조회 식별자 매핑 (add-item-photos stage A, 2026-09-11)
+
+§10.1의 상세 엔드포인트(`selectAuctnCsSrchRslt.on`)는 `{csNo, cortOfcCd, dspslGdsSeq}`를
+요구한다. 이 셋을 검색 응답 행의 필드와 대응시키는 작업(추가 HTTP 요청 0건, 코드 변경만).
+**새로 호출을 보내 확인한 것은 없다** — §2.2/§3.1/§11의 기존 CONFIRMED/DERIVED 표기를
+그대로 인용한다.
+
+### 15.1 `csNo` ↔ `saNo` — DERIVED (정황 근거, 미검증)
+
+검색 요청 자체의 필터 파라미터 목록(§2.2)에 이미 `csNo`가 있고("사건번호"), 응답 행의
+`saNo`("내부 사건번호")가 그 값을 돌려주는 것으로 보인다 — 같은 개념을 요청/응답 양쪽에서
+같은 문자열로 부르는 흔한 패턴이다. 다만 **실제 상세 요청으로 `saNo` 값을 `csNo`에 넣어
+호출해 본 적은 없다** — stage B가 확정해야 한다.
+
+domain 필드명은 `internalCaseNo`로 뒀다. **`case_no`(표시용 `srnSaNo`, 예:
+`"2011타경28497"`)와 같은 값인지는 여전히 UNVERIFIED다** — 형식부터 다르다(`saNo`는
+`"20110130028497"`처럼 순수 숫자열). `case_no`를 재사용하지 않고 별도 컬럼
+(`internal_case_no`)에 원문 그대로 저장한다.
+
+### 15.2 `cortOfcCd` ↔ `boCd` — DERIVED (정황 근거, 미검증)
+
+검색 요청 바디의 `dma_srchGdsDtlSrchInfo.cortOfcCd`(§2.2)가 이미 법원코드 파라미터고,
+응답 행의 `boCd`가 같은 코드 체계(`"B000210"` 형식, §4.1)다. 검색 요청 자체가 이 값을
+그대로 왕복시키는 구조라 `csNo`/`saNo`보다는 신뢰도가 조금 높지만, 이것도 상세 엔드포인트로
+직접 검증된 적은 없다.
+
+domain 필드명은 `courtCode`로 뒀다.
+
+### 15.3 `dspslGdsSeq` — **대응 필드 미확인, 매핑하지 않음**
+
+NOTES.md 전체를 다시 훑었다 — §2.2(검색 요청 파라미터 전체 목록), §3.1(필드 매핑표),
+§11(확장 필드 확정표) 중 어디에도 검색 응답 행의 필드가 `dspslGdsSeq`에 대응한다는
+근거가 없다. `dspslGdsSeq`라는 이름 자체가 언급되는 곳은 상세 엔드포인트의 요청
+파라미터 이름을 나열하는 §2.2/§6.2/§10.1 세 곳뿐이고, 셋 다 검색 응답 필드와 연결짓지
+않는다.
+
+이름으로 추측하면 `maemulSer`(물건번호, item 단위)나 `mokmulSer`(목적물번호, 일괄매각의
+개별 목적물 단위)가 후보다. 하지만:
+- 물건당 1요청(proposal.md 전제)이 맞다면 물건 단위 식별자(`maemulSer`)일 가능성이
+  높은데, 그건 이미 `itemNo`로 저장되고 있어 새 필드가 딱히 필요 없다는 뜻이 된다.
+- `mokmulSer`라면 일괄매각 물건은 목적물마다 다른 값을 가지므로 물건 하나에 여러
+  상세 요청이 필요하다는 뜻이 되어 "물건당 1요청" 전제와 충돌한다.
+
+두 후보가 서로 다른 결론(스킵 가능 vs. 추가 요청 필요)으로 갈리는데 이름 유사성 외에는
+아무 근거가 없다 — 여기서 하나를 찍어 코드에 넣으면 stage B가 **틀린 값으로 상세 요청을
+보내면서도 그 사실을 눈치채지 못할 수 있다**(요청 자체는 200으로 응답할 가능성이 높고,
+엉뚱한 물건의 상세를 받아와도 파싱은 성공한다). 그래서 이 change에서는 domain 모델에
+`dspslGdsSeq`에 대응하는 필드를 **추가하지 않았다**(NOTES §11 "포함하지 않은 필드"의
+원칙 — 근거 없는 필드를 추가하지 않는다 — 을 그대로 따름).
+
+**stage B가 반드시 먼저 할 일**: 실제 상세 요청 1건을 보내기 전에, 이 값이 무엇인지부터
+정해야 한다. 가장 안전한 방법은 `dspslGdsSeq`를 생략하거나 빈 값으로 보내 서버가 필수
+파라미터 누락 오류를 돌려주는지 확인하는 것 — 에러 메시지가 힌트를 줄 수 있다. 그래도
+안 되면 `maemulSer`/`mokmulSer` 중 하나로 추정 호출하되, 받은 `dma_result.csBaseInfo`
+등에서 사건번호·물건번호가 요청한 물건과 실제로 일치하는지 반드시 대조해야 한다(엉뚱한
+물건의 상세를 받고도 "성공"으로 착각하지 않기 위함).
+
+### 15.4 구현 반영
+
+- `src/lib/domain/types.ts`: `AuctionItemInput.internalCaseNo`(← `saNo`),
+  `AuctionItemInput.courtCode`(← `boCd`) 추가. 둘 다 optional + `| null`(§11 확장 필드와
+  같은 이유 — `workers/**`의 기존 리터럴이 이 필드를 몰라도 계속 컴파일되어야 한다).
+- `src/lib/sources/courtauction/adapter.ts`: `toItem()`에서 매핑. `saNo`/`boCd`는
+  `schema.ts`에 이미 선언돼 있었다(행 접기 dedupe 키로 쓰던 필드라 이번에 새로 추가한
+  것은 zod 스키마가 아니라 domain 매핑 쪽이다). `EXTENDED_FIELD_KEYS`(§11 확장 필드
+  묶음이 통째로 사라지는 것을 감지하는 경고용 목록)에는 **포함하지 않았다** — 이
+  둘은 §11보다 훨씬 이전부터 존재한 핵심 dedupe 필드라 성격이 다르고, 넣으면
+  `NO_EXTENDED_FIELDS_ROW` fixture(saNo/boCd는 있고 §11 필드만 없는 고정 시나리오)에서
+  "확장 필드가 전부 비었다" 경고 테스트가 깨진다.
+- `src/lib/db/schema.ts` / `client.ts` / `repository.ts`: `items.internal_case_no`,
+  `items.court_code` 컬럼 추가 + 기존 DB 파일 마이그레이션(`migrateItemDetailIdentifierColumns`).
+- `workers/lib/api.ts`: `auctionItemSchema`(zod)에도 두 필드를 추가했다 — 이 파일의
+  `KeysEqual` 컴파일타임 단언(§12.4에서 발견된 "32개 필드가 zod에서 조용히 strip되던"
+  결함의 재발 방지 장치)이 없으면 `npx tsc --noEmit`을 실패시키기 때문이다. 워커가 이
+  두 필드를 실제로 쓰는 로직은 없다 — 여전히 stage A의 범위는 `src/lib/**`뿐이고, 이건
+  기존 가드를 통과시키기 위한 최소 선언일 뿐이다.

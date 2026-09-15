@@ -30,11 +30,22 @@ import {
   type Logger,
 } from "../types";
 import { courtCodeByName } from "./courts";
-import { searchDataSchema, type SearchRow } from "./schema";
+import {
+  detailDataSchema,
+  searchDataSchema,
+  type DetailBaseInfo,
+  type DetailData,
+  type DetailPicItem,
+  type DetailResult,
+  type SearchRow,
+} from "./schema";
+
+export type { DetailBaseInfo, DetailData, DetailPicItem, DetailResult };
 
 export const BASE_URL = "https://www.courtauction.go.kr";
 export const SESSION_BOOTSTRAP_PATH = "/pgj/index.on";
 export const SEARCH_PATH = "/pgj/pgjsearch/searchControllerMain.on";
+export const DETAIL_PATH = "/pgj/pgj15B/selectAuctnCsSrchRslt.on";
 
 /**
  * 브라우저 User-Agent. curl 기본 UA를 쓰면 WAF가 JSON 대신 HTML 차단 페이지를
@@ -560,6 +571,12 @@ export class CourtAuctionAdapter implements AuctionSource {
       // 코드표 미확인(UNVERIFIED, design.md D4) — 해석 없이 원문 그대로.
       statusCode: text(head.jinstatCd),
       itemStatusCode: text(head.mulStatcd),
+
+      // ---- 상세 조회 식별자 (add-item-photos stage A, NOTES.md §10.1) ----
+      // domain/types.ts의 주석 참조: dspslGdsSeq는 대응 소스 필드가 확인되지 않아
+      // 의도적으로 매핑하지 않는다.
+      internalCaseNo: text(head.saNo),
+      courtCode: text(head.boCd),
     };
   }
 }
@@ -567,6 +584,14 @@ export class CourtAuctionAdapter implements AuctionSource {
 /**
  * `toItem`이 채우는 확장 필드 이름 전부(design.md D1, NOTES.md §11).
  * "행은 왔는데 확장 필드가 전부 비었다" 경고(task 3.5)를 판정하는 데만 쓴다.
+ *
+ * ⚠️ `internalCaseNo`/`courtCode`(add-item-photos stage A)는 **여기 넣지 않는다.**
+ * 이 상수는 §11에서 도입된 확장 필드 묶음이 통째로 사라지는 것(사이트의 필드명 변경)을
+ * 잡기 위한 것이고, `internalCaseNo`/`courtCode`는 그보다 오래전부터 dedupe 키로 쓰던
+ * `saNo`/`boCd`를 도메인에 노출한 것뿐이라 성격이 다르다. 넣으면
+ * `NO_EXTENDED_FIELDS_ROW`(saNo/boCd는 있고 §11 필드만 없는 고정 fixture)에서
+ * `hasAnyExtendedField`가 true가 되어, "확장 필드가 전부 비었다" 경고 테스트(task 3.5)가
+ * 조용히 깨진다.
  */
 const EXTENDED_FIELD_KEYS = [
   "minArea",
@@ -731,4 +756,90 @@ export function parseSearchResponse(raw: string) {
     );
   }
   return result.data;
+}
+
+/**
+ * 상세 응답 본문 3단 검사 및 파싱 (Stage B.4 / NOTES §10.1, §10.2).
+ *
+ * `parseSearchResponse`와 동일한 3단 방어 체계를 거친다:
+ *  1. 본문이 `{`로 시작하지 않으면 → WAF HTML 차단 페이지 (WafBlockedError)
+ *  2. `data.ipcheck !== true` → 로봇탐지 IP 차단 (RobotDetectedError)
+ *  3. zod로 `data.dma_result.csBaseInfo` 및 `data.dma_result.csPicLst` 검증 (ResponseSchemaError)
+ */
+export function parseDetailResponse(raw: string): DetailData {
+  const trimmed = raw.trimStart();
+  if (!trimmed.startsWith("{")) {
+    throw new WafBlockedError(
+      "WAF가 JSON 대신 차단 페이지를 반환했습니다 (HTTP 200이지만 본문이 JSON이 아님)",
+      trimmed.slice(0, 200),
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (cause) {
+    throw new ResponseSchemaError(
+      "상세 응답 본문을 JSON으로 파싱하지 못했습니다",
+      [trimmed.slice(0, 200)],
+      { cause },
+    );
+  }
+
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new ResponseSchemaError("응답 최상위가 객체가 아닙니다", [typeof parsed]);
+  }
+  const envelope = parsed as { data?: unknown; message?: unknown };
+  if (typeof envelope.data !== "object" || envelope.data === null) {
+    throw new ResponseSchemaError("응답에 data 객체가 없습니다", [
+      `data = ${JSON.stringify(envelope.data)}`,
+    ]);
+  }
+
+  const data = envelope.data as { ipcheck?: unknown };
+  if (data.ipcheck !== true) {
+    throw new RobotDetectedError(
+      "로봇탐지에 걸려 차단됐습니다 (data.ipcheck !== true) — 재시도는 무의미하니 장시간 백오프가 필요합니다",
+      typeof envelope.message === "string" ? envelope.message : null,
+    );
+  }
+
+  const result = detailDataSchema.safeParse(data);
+  if (!result.success) {
+    throw new ResponseSchemaError(
+      "상세 응답 형식이 기대와 다릅니다 (사이트가 응답 구조를 바꿨을 수 있습니다)",
+      result.error.issues.map(
+        (issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`,
+      ),
+      { cause: result.error },
+    );
+  }
+  return result.data;
+}
+
+/**
+ * base64 문자열 또는 Buffer의 매직 바이트를 검사해 이미지 확장자를 반환한다.
+ *
+ * 실측 발견사항 (NOTES.md §10.2):
+ * 법원경매 사이트는 `picTitlNm`이 .jpg여도 실제 바이너리는 `GIF89a` 포맷으로 반환한다.
+ * 파일 저장 시 이 함수로 매직 바이트 기반 확장자를 결정한다.
+ */
+export function detectImageExtension(base64OrBuffer: string | Buffer): "gif" | "png" | "jpg" | "bin" {
+  let buf: Buffer;
+  if (typeof base64OrBuffer === "string") {
+    // base64 앞 32자만 디코딩해도 매직 바이트(최대 8바이트) 판별에 충분하다
+    buf = Buffer.from(base64OrBuffer.slice(0, 32), "base64");
+  } else {
+    buf = base64OrBuffer;
+  }
+  if (buf.length >= 3 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) {
+    return "gif";
+  }
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+    return "png";
+  }
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+    return "jpg";
+  }
+  return "bin";
 }

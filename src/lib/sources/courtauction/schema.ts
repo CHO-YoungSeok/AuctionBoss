@@ -147,3 +147,118 @@ export const searchDataSchema = z.object({
 });
 
 export type SearchData = z.infer<typeof searchDataSchema>;
+
+// ---------------------------------------------------------------------------
+// 상세 조회 응답 스키마 (Stage B.4, POST /pgj/pgj15B/selectAuctnCsSrchRslt.on)
+// 출처: NOTES.md §10.1, §10.2 (CONFIRMED — 2026-09-11 실측)
+// ---------------------------------------------------------------------------
+
+/**
+ * 개별 사진 항목 스키마 (`dma_result.csPicLst` 배열의 각 원소).
+ */
+export const detailPicItemSchema = z.object({
+  /** 사진 상대 경로 URL (예: "/nas_e_image_pgj/kp/2026/0629/") */
+  picFileUrl: textish,
+  /** 사진 제목/파일명. 예: "B000210202601301010371.jpg" */
+  picTitlNm: textish,
+  /** 사진 구분 코드 (예: "000244") */
+  cortAuctnPicDvsCd: textish,
+  /** 사진 순번 (문자열 또는 숫자) */
+  cortAuctnPicSeq: numericish,
+  /** 페이지 순번 */
+  pageSeq: numericish,
+  /** 법원코드 (예: "B000210") */
+  cortOfcCd: textish,
+  /** 내부 사건번호 (14자리 숫자열, 예: "20260130101037") */
+  csNo: textish,
+  /**
+   * base64 인코딩된 바이너리 이미지 문자열.
+   * ⚠️ XML의 setSrc("data:image/png...")와 달리 실제 바이너리는 GIF89a 매직 바이트를 가짐 (NOTES §10.2).
+   */
+  picFile: textish,
+});
+
+export type DetailPicItem = z.infer<typeof detailPicItemSchema>;
+
+/**
+ * 사건 기본정보 스키마 (`dma_result.csBaseInfo`).
+ */
+export const detailBaseInfoSchema = z.object({
+  /** 법원코드 (= boCd) */
+  cortOfcCd: textish,
+  /** 법원명 (예: "서울중앙지방법원") */
+  cortOfcNm: textish,
+  /** 법원지원명 */
+  cortSptNm: textish,
+  /** 내부 사건번호 (= saNo, 14자리 숫자열) */
+  csNo: textish,
+  /** 사건명 (예: "자동차임의경매", "부동산임의경매") */
+  csNm: textish,
+  /** 접수일자 (YYYYMMDD) */
+  csRcptYmd: textish,
+  /** 개시일자 (YYYYMMDD) */
+  csCmdcYmd: textish,
+  /** 청구금액 (숫자 또는 문자열) */
+  clmAmt: numericish,
+  /** 부동산 항고 여부 ("Y" | "N") */
+  rletApalYn: textish,
+  /** 경매 정지 상태 코드 */
+  auctnSuspStatCd: textish,
+  /** 종국 구분 코드 */
+  ultmtDvsCd: textish,
+  /** 종국 일자 */
+  csUltmtYmd: textish,
+  /** 사건 진행 상태 코드 */
+  csProgStatCd: textish,
+  /** 판사/사법보좌관 명 */
+  jdgeAojAsstnNm: textish,
+  /** 경매 중복 병합 구분 코드 */
+  auctnDpcnMrgDvsCd: textish,
+  /** 사건 진행 정지 사유 */
+  csProgSuspRsn: textish,
+  /** 동산 사건번호 */
+  mvprpCsNo: textish,
+  /** 동산/부동산 구분 코드 (예: "00031R") */
+  mvprpRletDvsCd: textish,
+  /** 담당계 코드 (예: "1021") */
+  jdbnCd: textish,
+  /** 담당계 명칭 (예: "경매21계") */
+  cortAuctnJdbnNm: textish,
+  /** 담당계 전화번호 */
+  jdbnTelno: textish,
+  /** 집행관 전화번호 */
+  execrCsTelno: textish,
+  /** 법원 유형 코드 */
+  cortTypCd: textish,
+  /** 이전 사건번호 */
+  expCsNo: textish,
+  /** 최선 구분 코드 */
+  lwstDvsCd: textish,
+  /** 표시용 사건번호 (예: "2026타경101037") */
+  userCsNo: textish,
+});
+
+export type DetailBaseInfo = z.infer<typeof detailBaseInfoSchema>;
+
+/**
+ * 상세 응답의 핵심 결과 객체 (`data.dma_result`).
+ *
+ * 설계 의도:
+ * - `csBaseInfo`와 `csPicLst`의 존재와 배열 형태는 필수로 둔다.
+ *   이게 없거나 깨지면 상세 응답 구조가 바뀐 것이므로 ResponseSchemaError로 처리한다.
+ * - 반면 `csPicLst` 배열 내의 필드나 `csBaseInfo`의 각 필드는 optional(textish/numericish)로
+ *   두어 특정 부가 필드 누락으로 전체 상세 조회가 실패하지 않도록 방어한다.
+ */
+export const detailResultSchema = z.object({
+  csBaseInfo: detailBaseInfoSchema,
+  csPicLst: z.array(detailPicItemSchema),
+});
+
+export type DetailResult = z.infer<typeof detailResultSchema>;
+
+/** 로봇탐지 통과(`ipcheck === true`) 이후의 상세 `data` 본문. */
+export const detailDataSchema = z.object({
+  dma_result: detailResultSchema,
+});
+
+export type DetailData = z.infer<typeof detailDataSchema>;

@@ -55,6 +55,11 @@ CREATE TABLE IF NOT EXISTS items (
   court_phone               TEXT,
   status_code               TEXT,
   item_status_code          TEXT,
+  -- ↓ 상세 조회 식별자 (add-item-photos stage A). nullable — 기존 행은 NULL로 남고
+  -- 다음 수집 때 채워진다. 새 DB는 여기서 만들어지고, 기존 DB 파일은 client.ts의
+  -- migrateItemDetailIdentifierColumns가 ALTER TABLE로 같은 컬럼을 추가한다.
+  internal_case_no          TEXT,
+  court_code                TEXT,
   UNIQUE (court, case_no, item_no)
 );
 
