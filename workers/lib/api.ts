@@ -99,6 +99,11 @@ const auctionItemSchema = z.object({
   // 이 선언을 빠뜨리면 컴파일 시점에 잡아 준다.
   internalCaseNo: z.string().nullable().optional(),
   courtCode: z.string().nullable().optional(),
+
+  // 사진 수집 (add-item-photos)
+  photoStatus: z.enum(["uncollected", "collected", "empty", "failed"]).optional(),
+  photoCount: z.number().optional(),
+  photoCollectedAt: z.string().nullable().optional(),
 });
 
 // zod 스키마와 도메인 타입이 어긋나면 컴파일 시점에 잡는다(config.ts와 같은 방식).

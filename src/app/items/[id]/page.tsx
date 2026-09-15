@@ -46,6 +46,7 @@ import {
   listRoundPrices,
 } from "../../_lib/item-extensions";
 import { NOTE_FLAG_LABELS, detectNoteFlags } from "../../_lib/note-flags";
+import { getPhotoDisplayState, getPhotoDisplayMessage } from "../../_lib/photo-display";
 
 export const dynamic = "force-dynamic";
 
@@ -157,6 +158,9 @@ export default async function ItemDetailPage({
   // 같은 이유.
   const unreadCount = getUnreadCount();
 
+  const photoState = getPhotoDisplayState(item);
+  const photos = photoState === "collected" ? repository.getItemPhotos(item.id) : [];
+
   return (
     <main className="page">
       <p className="breadcrumb">
@@ -249,6 +253,25 @@ export default async function ItemDetailPage({
             {formatMismatchDescription(mismatch)}
           </p>
         ) : null}
+      </section>
+
+      {/* 사진 정보 */}
+      <section className="card">
+        <h2>사진</h2>
+        {photoState === "collected" ? (
+          <div className="photo-gallery">
+            {photos.map(photo => (
+              <img 
+                key={photo.seq} 
+                src={`/api/photos/${item.id}/${photo.seq}`} 
+                alt={`${item.address} 사진 ${photo.seq}`}
+                className="photo-item"
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="muted">{getPhotoDisplayMessage(photoState)}</p>
+        )}
       </section>
 
       {/*

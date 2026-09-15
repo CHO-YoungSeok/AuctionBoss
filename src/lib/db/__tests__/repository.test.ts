@@ -1704,3 +1704,78 @@ describe("countAnalyses", () => {
     expect(repo.countAnalyses(999_999)).toBe(0);
   });
 });
+
+describe("Item Photos & getPendingPhotoItems", () => {
+  it("물건 사진 저장(saveItemPhotos), 조회(getItemPhotos), 상태 변경(updateItemPhotoStatus)을 지원한다", () => {
+    repo.upsertItems([
+      makeItem({
+        itemNo: "1",
+        internalCaseNo: "20250130001234",
+        courtCode: "B000001",
+      }),
+    ]);
+    const item = repo.listItems().items[0]!;
+
+    expect(repo.getItemPhotos(item.id)).toEqual([]);
+
+    repo.saveItemPhotos(
+      item.id,
+      [
+        { seq: 1, filePath: "1/1.jpg", fileSize: 1024, mimeType: "image/jpeg" },
+        { seq: 2, filePath: "1/2.jpg", fileSize: 2048, mimeType: "image/jpeg" },
+      ],
+      "collected",
+    );
+
+    const photos = repo.getItemPhotos(item.id);
+    expect(photos).toHaveLength(2);
+    expect(photos[0].seq).toBe(1);
+    expect(photos[0].filePath).toBe("1/1.jpg");
+    expect(photos[1].seq).toBe(2);
+
+    const updatedItem = repo.getItemById(item.id)!;
+    expect(updatedItem.photoStatus).toBe("collected");
+    expect(updatedItem.photoCount).toBe(2);
+
+    repo.updateItemPhotoStatus(item.id, "failed");
+    expect(repo.getItemById(item.id)!.photoStatus).toBe("failed");
+  });
+
+  it("getPendingPhotoItems는 photo_status가 NULL이거나 uncollected인 물건을 failed인 물건보다 우선 선택한다", () => {
+    repo.upsertItems([
+      makeItem({ itemNo: "1", internalCaseNo: "case1", courtCode: "c1" }),
+      makeItem({ itemNo: "2", internalCaseNo: "case2", courtCode: "c2" }),
+      makeItem({ itemNo: "3", internalCaseNo: "case3", courtCode: "c3" }),
+      makeItem({ itemNo: "4", internalCaseNo: "case4", courtCode: "c4" }),
+    ]);
+
+    const items = repo.listItems({ pageSize: 10 }).items;
+    const item1 = items.find((i) => i.itemNo === "1")!;
+    const item2 = items.find((i) => i.itemNo === "2")!;
+    const item3 = items.find((i) => i.itemNo === "3")!;
+    const item4 = items.find((i) => i.itemNo === "4")!;
+
+    // 1번: failed 로 설정
+    repo.updateItemPhotoStatus(item1.id, "failed");
+    // 2번: uncollected 로 설정
+    repo.updateItemPhotoStatus(item2.id, "uncollected");
+    // 3번: photo_status 는 NULL 유지
+    // 4번: collected 로 설정 (대기열 대상 아님)
+    repo.saveItemPhotos(item4.id, [], "collected");
+
+    const pending = repo.getPendingPhotoItems(10);
+    // pending에는 item4(collected)는 포함되지 않고, item2(uncollected), item3(null), item1(failed)만 포함됨.
+    // 또한 uncollected / null 인 item2, item3가 failed 인 item1보다 앞에 정렬되어야 한다!
+    const pendingItemNos = pending.map((i) => i.itemNo);
+    expect(pendingItemNos).toHaveLength(3);
+    expect(pendingItemNos).toContain("1");
+    expect(pendingItemNos).toContain("2");
+    expect(pendingItemNos).toContain("3");
+    expect(pendingItemNos).not.toContain("4");
+
+    // item1(failed)은 맨 마지막이어야 함
+    expect(pendingItemNos[2]).toBe("1");
+    // 앞의 두 개는 2(uncollected)와 3(null)
+    expect(pendingItemNos.slice(0, 2).sort()).toEqual(["2", "3"]);
+  });
+});
