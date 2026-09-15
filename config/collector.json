@@ -1,10 +1,11 @@
 {
   "scope": {
     "courts": [
-      {
-        "name": "서울중앙지방법원",
-        "courtCode": "B000210"
-      }
+      { "name": "서울중앙지방법원", "courtCode": "B000210" },
+      { "name": "서울동부지방법원", "courtCode": "B000211" },
+      { "name": "서울남부지방법원", "courtCode": "B000212" },
+      { "name": "서울서부지방법원", "courtCode": "B000215" },
+      { "name": "서울북부지방법원", "courtCode": "B000213" }
     ],
     "maxCourtsPerRun": 1,
     "maxRequestsPerRun": 13
