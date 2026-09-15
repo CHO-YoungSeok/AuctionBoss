@@ -35,7 +35,7 @@ import {
   type FetchFn,
   type FinishWorkerRunInput,
 } from "./lib/api";
-import { DEFAULT_CLAUDE_TIMEOUT_MS, runClaudeHeadless, type RunClaude } from "./lib/claude";
+import { DEFAULT_CLAUDE_TIMEOUT_MS, runClaude as defaultRunClaude, type RunClaude } from "./lib/claude";
 import { PROMPT_VERSION, loadPromptTemplate, renderItemPrompt } from "./lib/prompt";
 
 export interface Logger {
@@ -142,7 +142,7 @@ export async function runAnalysisOnce(options: AnalysisRunOptions): Promise<Anal
     promptVersion = PROMPT_VERSION,
     model = null,
     timeoutMs = DEFAULT_CLAUDE_TIMEOUT_MS,
-    runClaude = runClaudeHeadless,
+    runClaude = defaultRunClaude,
     fetchFn = ((input, init) => fetch(input, init)) as FetchFn,
     logger = consoleLogger,
   } = options;
