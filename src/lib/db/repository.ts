@@ -25,6 +25,8 @@ import {
   type SortDirection,
   type SortKey,
   type WatchedField,
+  type ItemPhoto,
+  type PhotoStatus,
 } from "@/lib/domain";
 
 import { getDb, type Db } from "./client";
@@ -110,6 +112,9 @@ interface ItemRow {
   // 않는다 — toAuctionItem이 camelCase 도메인 타입으로 변환한다.
   internal_case_no: string | null;
   court_code: string | null;
+  photo_status: PhotoStatus | null;
+  photo_count: number | null;
+  photo_collected_at: string | null;
 }
 
 interface AnalysisRow {
@@ -201,6 +206,9 @@ function toAuctionItem(
     itemStatusCode: row.item_status_code,
     internalCaseNo: row.internal_case_no,
     courtCode: row.court_code,
+    photoStatus: row.photo_status ?? undefined,
+    photoCount: row.photo_count ?? undefined,
+    photoCollectedAt: row.photo_collected_at,
   };
 }
 
@@ -710,6 +718,11 @@ export interface AuctionRepository {
   countAnalyses(itemId: number): number;
   /** 물건의 변경 이력을 시간순으로 돌려준다. 이력이 없으면 빈 배열이다(오류가 아니다). */
   listItemChanges(itemId: number): ItemChange[];
+  
+  getItemPhotos(itemId: number): ItemPhoto[];
+  saveItemPhotos(itemId: number, photos: Array<{ seq: number; filePath: string; fileSize: number; mimeType: string }>, status: PhotoStatus): void;
+  updateItemPhotoStatus(itemId: number, status: PhotoStatus): void;
+  getPendingPhotoItems(limit?: number): AuctionItem[];
 }
 
 interface ExistingItemRow {
@@ -1037,6 +1050,60 @@ export function createRepository(db: Db): AuctionRepository {
     },
   );
 
+  const selectItemPhotos = db.prepare<
+    { itemId: number },
+    ItemPhoto
+  >(`
+    SELECT id, item_id as itemId, seq, file_path as filePath, file_size as fileSize, mime_type as mimeType, collected_at as collectedAt
+    FROM item_photos WHERE item_id = @itemId ORDER BY seq ASC
+  `);
+
+  const insertItemPhoto = db.prepare(`
+    INSERT INTO item_photos (item_id, seq, file_path, file_size, mime_type, collected_at)
+    VALUES (@itemId, @seq, @filePath, @fileSize, @mimeType, @collectedAt)
+    ON CONFLICT (item_id, seq) DO UPDATE SET
+      file_path = excluded.file_path,
+      file_size = excluded.file_size,
+      mime_type = excluded.mime_type,
+      collected_at = excluded.collected_at
+  `);
+
+  const updateItemPhotoStatusStmt = db.prepare(`
+    UPDATE items SET photo_status = @status, photo_count = @count, photo_collected_at = @collectedAt
+    WHERE id = @itemId
+  `);
+
+  const updateItemPhotoStatusOnlyStmt = db.prepare(`
+    UPDATE items SET photo_status = @status WHERE id = @itemId
+  `);
+
+  const selectPendingPhotoItems = db.prepare<
+    { limit: number },
+    ItemRow
+  >(`
+    SELECT
+      id, court, case_no, item_no, address, usage_type, appraisal_price,
+      min_bid_price, auction_date, failed_bid_count, status, first_seen_at, last_seen_at,
+      min_area, max_area, building_description,
+      min_bid_price_round1, min_bid_price_round2, min_bid_price_round3, min_bid_price_round4,
+      min_bid_price_rate_round1, min_bid_price_rate_round2,
+      usage_code_large, usage_code_medium, usage_code_small,
+      sido, sigungu, dong, lot_number, building_name, building_unit,
+      coordinate_x, coordinate_y, coordinate_level,
+      auction_time, auction_place, auction_decision_date, auction_round,
+      note, duplicate_case_no, merged_case_no, court_department, court_phone,
+      status_code, item_status_code, internal_case_no, court_code,
+      photo_status, photo_count, photo_collected_at
+    FROM items
+    WHERE (photo_status IS NULL OR photo_status = 'uncollected' OR photo_status = 'failed')
+      AND internal_case_no IS NOT NULL
+      AND court_code IS NOT NULL
+    ORDER BY
+      CASE WHEN (photo_status IS NULL OR photo_status = 'uncollected') THEN 0 ELSE 1 END,
+      id DESC
+    LIMIT @limit
+  `);
+
   return {
     upsertItems(items, options) {
       if (items.length === 0) return { inserted: 0, updated: 0, changed: 0 };
@@ -1118,6 +1185,41 @@ export function createRepository(db: Db): AuctionRepository {
 
     listItemChanges(itemId) {
       return selectItemChanges.all({ itemId }).map(toItemChange);
+    },
+
+    getItemPhotos(itemId) {
+      return selectItemPhotos.all({ itemId });
+    },
+
+    saveItemPhotos(itemId, photos, status) {
+      const collectedAt = new Date().toISOString();
+      const saveTransaction = db.transaction(() => {
+        for (const photo of photos) {
+          insertItemPhoto.run({
+            itemId,
+            seq: photo.seq,
+            filePath: photo.filePath,
+            fileSize: photo.fileSize,
+            mimeType: photo.mimeType,
+            collectedAt,
+          });
+        }
+        updateItemPhotoStatusStmt.run({
+          itemId,
+          status,
+          count: photos.length,
+          collectedAt,
+        });
+      });
+      saveTransaction();
+    },
+
+    updateItemPhotoStatus(itemId, status) {
+      updateItemPhotoStatusOnlyStmt.run({ itemId, status });
+    },
+
+    getPendingPhotoItems(limit = 10) {
+      return selectPendingPhotoItems.all({ limit }).map(row => toAuctionItem(row));
     },
 
     insertAnalysis(input, options) {
@@ -1219,4 +1321,20 @@ export function countAnalyses(itemId: number): number {
 
 export function listItemChanges(itemId: number): ItemChange[] {
   return getRepository().listItemChanges(itemId);
+}
+
+export function getItemPhotos(itemId: number): ItemPhoto[] {
+  return getRepository().getItemPhotos(itemId);
+}
+
+export function saveItemPhotos(itemId: number, photos: Array<{ seq: number; filePath: string; fileSize: number; mimeType: string }>, status: PhotoStatus): void {
+  return getRepository().saveItemPhotos(itemId, photos, status);
+}
+
+export function updateItemPhotoStatus(itemId: number, status: PhotoStatus): void {
+  return getRepository().updateItemPhotoStatus(itemId, status);
+}
+
+export function getPendingPhotoItems(limit?: number): AuctionItem[] {
+  return getRepository().getPendingPhotoItems(limit);
 }

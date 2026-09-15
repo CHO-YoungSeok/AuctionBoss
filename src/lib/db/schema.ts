@@ -60,6 +60,11 @@ CREATE TABLE IF NOT EXISTS items (
   -- migrateItemDetailIdentifierColumns가 ALTER TABLE로 같은 컬럼을 추가한다.
   internal_case_no          TEXT,
   court_code                TEXT,
+  -- ↓ 사진 수집 (add-item-photos). nullable — 기존 행은 NULL로 남고
+  -- 다음 수집/처리 때 채워진다. client.ts의 migrateItemPhotoColumns가 ALTER TABLE로 추가.
+  photo_status              TEXT,
+  photo_count               INTEGER,
+  photo_collected_at        TEXT,
   UNIQUE (court, case_no, item_no)
 );
 
@@ -165,5 +170,17 @@ CREATE TABLE IF NOT EXISTS collector_state (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,
   updated_at TEXT NOT NULL
+);
+
+-- 물건별 사진 정보 (add-item-photos).
+CREATE TABLE IF NOT EXISTS item_photos (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id       INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+  seq           INTEGER NOT NULL,
+  file_path     TEXT NOT NULL,
+  file_size     INTEGER NOT NULL,
+  mime_type     TEXT NOT NULL,
+  collected_at  TEXT NOT NULL,
+  UNIQUE (item_id, seq)
 );
 `;
