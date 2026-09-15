@@ -612,9 +612,29 @@ function buildFilter(query: ItemQuery, nowIso: string): Filter {
 
   const keyword = query.addressKeyword?.trim();
   if (keyword !== undefined && keyword !== "") {
-    conditions.push("items.address LIKE @addressKeyword ESCAPE @likeEscape");
-    params.addressKeyword = `%${escapeLikePattern(keyword)}%`;
+    conditions.push(
+      "(items.address LIKE @qPattern ESCAPE @likeEscape OR items.case_no LIKE @qPattern ESCAPE @likeEscape OR (items.building_name IS NOT NULL AND items.building_name LIKE @qPattern ESCAPE @likeEscape))"
+    );
+    params.qPattern = `%${escapeLikePattern(keyword)}%`;
     params.likeEscape = LIKE_ESCAPE_CHAR;
+  }
+
+  if (query.court !== undefined) {
+    conditions.push("items.court = @court");
+    params.court = query.court;
+  }
+
+  if (query.minDiscountRate !== undefined) {
+    conditions.push(
+      "(items.appraisal_price > 0 AND (CAST(items.appraisal_price - items.min_bid_price AS REAL) / items.appraisal_price * 100) >= @minDiscountRate)"
+    );
+    params.minDiscountRate = query.minDiscountRate;
+  }
+
+  if (query.hasPhotos === true) {
+    conditions.push("items.photo_status = 'collected'");
+  } else if (query.hasPhotos === false) {
+    conditions.push("(items.photo_status IS NULL OR items.photo_status != 'collected')");
   }
 
   // 지역 필터(ux-overhaul-phase2 design.md, tasks.md 1.1) — `sido`/`sigungu`는 소스가
@@ -699,6 +719,8 @@ export interface AuctionRepository {
    * 사용자가 "오피스텔"만 고를 수 없다.
    */
   listUsageTypes(): string[];
+  /** 저장된 물건에 실제로 존재하는 법원 목록. 중복 없이 정렬해서 돌려준다. */
+  listCourtValues(): string[];
   /** 저장된 물건에 실제로 존재하는 시/도 목록. 중복 없이 정렬해서 돌려준다(tasks.md 1.2). */
   listSidoValues(): string[];
   /** 저장된 물건에 실제로 존재하는 시/군/구 목록. 중복 없이 정렬해서 돌려준다(tasks.md 1.2). */
@@ -877,6 +899,10 @@ export function createRepository(db: Db): AuctionRepository {
   // 정렬해 봐야 토큰 순서와 무관하다).
   const selectUsageTypes = db.prepare<[], { usage_type: string }>(`
     SELECT DISTINCT usage_type FROM items WHERE usage_type IS NOT NULL
+  `);
+
+  const selectCourtValues = db.prepare<[], { court: string }>(`
+    SELECT DISTINCT court FROM items WHERE court IS NOT NULL ORDER BY court
   `);
 
   const selectSidoValues = db.prepare<[], { sido: string }>(`
@@ -1163,6 +1189,10 @@ export function createRepository(db: Db): AuctionRepository {
       return row ? toAuctionItem(row, row.last_changed_at, row.bookmarked) : null;
     },
 
+    listCourtValues() {
+      return selectCourtValues.all().map((row) => row.court);
+    },
+
     listUsageTypes() {
       // 복합 문자열을 쉼표로 쪼개 개별 토큰만 남기고 중복 제거·정렬한다(design.md D2).
       const tokens = new Set<string>();
@@ -1290,6 +1320,10 @@ export function getItemById(id: number): AuctionItem | null {
 
 export function listUsageTypes(): string[] {
   return getRepository().listUsageTypes();
+}
+
+export function listCourtValues(): string[] {
+  return getRepository().listCourtValues();
 }
 
 export function listSidoValues(): string[] {
