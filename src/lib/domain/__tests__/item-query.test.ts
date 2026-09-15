@@ -145,6 +145,20 @@ describe("parseItemQuery (strict)", () => {
     expect(fields(fail(parseItemQuery({ analyzed: "1" })))).toEqual(["analyzed"]);
   });
 
+  it("court, minDiscountRate, hasPhotos 필드를 파싱한다", () => {
+    const q = ok(parseItemQuery({ court: "서울중앙", minDiscountRate: "30", hasPhotos: "true" }));
+    expect(q.court).toBe("서울중앙");
+    expect(q.minDiscountRate).toBe(30);
+    expect(q.hasPhotos).toBe(true);
+
+    // minDiscountRate는 0~100 사이
+    expect(fields(fail(parseItemQuery({ minDiscountRate: "-1" })))).toEqual(["minDiscountRate"]);
+    expect(fields(fail(parseItemQuery({ minDiscountRate: "101" })))).toEqual(["minDiscountRate"]);
+    
+    // hasPhotos는 true/false 문자열
+    expect(fields(fail(parseItemQuery({ hasPhotos: "yes" })))).toEqual(["hasPhotos"]);
+  });
+
   describe("needsAnalysis / promptVersion (design.md D4)", () => {
     it("[회귀] needsAnalysis 파라미터가 새로 생겨도 analyzed=false 단독 호출은 그대로 통과한다", () => {
       // 분석 워커의 기존 계약(analyzed=false&pageSize=N)이 이 변경으로 깨지면 안 된다.

@@ -69,6 +69,7 @@ export default async function ItemListPage({
   const usageTypes = repository.listUsageTypes();
   const sidoValues = repository.listSidoValues();
   const sigunguValues = repository.listSigunguValues();
+  const courtOptions = repository.listCourtValues();
   const { items, total, page, pageSize } = repository.listItems(query);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -174,6 +175,7 @@ export default async function ItemListPage({
             usageTypes={usageTypes}
             sidoValues={sidoValues}
             sigunguValues={sigunguValues}
+            courtOptions={courtOptions}
           />
         </>
       )}

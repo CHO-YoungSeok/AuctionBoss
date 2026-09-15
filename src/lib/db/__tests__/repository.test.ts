@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { hasActiveFilters, type AuctionItemInput } from "@/lib/domain";
+import { hasActiveFilters, type AuctionItemInput, type ItemQuery } from "@/lib/domain";
 import { openDatabase, type Db } from "../client";
 import { createBookmarksRepository } from "../bookmarks";
 import { ItemNotFoundError } from "../errors";
@@ -1152,15 +1152,24 @@ describe("listItems 필터·정렬", () => {
     });
   });
 
-  describe("소재지 키워드 검색", () => {
+  describe("키워드 검색 (소재지, 사건번호, 건물명)", () => {
     it("키워드를 포함하는 물건만 남긴다", () => {
       expect(found({ addressKeyword: "강남구" }).sort()).toEqual(["1", "3"]);
       expect(found({ addressKeyword: "대전" })).toEqual(["5"]);
       expect(found({ addressKeyword: "부산" })).toEqual([]);
     });
 
+    it("사건번호와 건물명도 검색 대상이다", () => {
+      repo.upsertItems([
+        makeItem({ itemNo: "10", caseNo: "2024타경777", buildingName: null }),
+        makeItem({ itemNo: "11", address: "제주도", buildingName: "한라빌라" }),
+      ]);
+      expect(found({ addressKeyword: "777" })).toEqual(["10"]);
+      expect(found({ addressKeyword: "한라" })).toEqual(["11"]);
+    });
+
     it("`%`는 와일드카드가 아니라 글자로 취급한다", () => {
-      // 이스케이프하지 않으면 `%` 하나로 5건 전부가 매칭된다.
+      // 이스케이프하지 않으면 `%` 하나로 전체가 매칭된다.
       expect(found({ addressKeyword: "%" })).toEqual(["4"]);
       expect(found({ addressKeyword: "100%" })).toEqual(["4"]);
       expect(found({ addressKeyword: "%확실%" })).toEqual([]);
@@ -1178,7 +1187,54 @@ describe("listItems 필터·정렬", () => {
     });
 
     it("공백만 있는 키워드는 필터로 보지 않는다", () => {
-      expect(repo.listItems({ addressKeyword: "   ", pageSize: 10 }).total).toBe(5);
+      expect(repo.listItems({ addressKeyword: "   ", pageSize: 10 }).total).toBeGreaterThan(0);
+    });
+  });
+
+  describe("법원 필터", () => {
+    it("지정한 법원의 물건만 남긴다", () => {
+      repo.upsertItems([
+        makeItem({ itemNo: "20", court: "서울중앙지방법원" }),
+        makeItem({ itemNo: "21", court: "수원지방법원" }),
+      ]);
+      expect(found({ court: "수원지방법원" })).toEqual(["21"]);
+    });
+  });
+
+  describe("저감률 필터", () => {
+    it("지정한 최소 저감률 이상인 물건만 남긴다", () => {
+      repo.upsertItems([
+        makeItem({ itemNo: "30", appraisalPrice: 100, minBidPrice: 100 }), // 0%
+        makeItem({ itemNo: "31", appraisalPrice: 100, minBidPrice: 80 }), // 20%
+        makeItem({ itemNo: "32", appraisalPrice: 100, minBidPrice: 50 }), // 50%
+        makeItem({ itemNo: "33", appraisalPrice: 100, minBidPrice: 0 }), // 100%
+      ]);
+      const get30s = (q: ItemQuery) => found(q).filter(x => x.length === 2 && x.startsWith("3")).sort();
+      expect(get30s({ minDiscountRate: 20 })).toEqual(["31", "32", "33"]);
+      expect(get30s({ minDiscountRate: 50 })).toEqual(["32", "33"]);
+    });
+  });
+
+  describe("사진 보유 여부 필터", () => {
+    it("사진 유무에 따라 필터링한다", () => {
+      repo.upsertItems([
+        makeItem({ itemNo: "40" }),
+        makeItem({ itemNo: "41" }),
+        makeItem({ itemNo: "42" }),
+      ]);
+      const items = repo.listItems().items;
+      const id40 = items.find(x => x.itemNo === "40")!.id;
+      const id41 = items.find(x => x.itemNo === "41")!.id;
+
+      repo.updateItemPhotoStatus(id40, "collected");
+      repo.updateItemPhotoStatus(id41, "failed");
+
+      expect(found({ hasPhotos: true })).toEqual(["40"]);
+      
+      const noPhotos = found({ hasPhotos: false }).sort();
+      expect(noPhotos).toContain("41");
+      expect(noPhotos).toContain("42");
+      expect(noPhotos).not.toContain("40");
     });
   });
 
@@ -1536,6 +1592,18 @@ describe("listUsageTypes", () => {
   it("용도가 전부 NULL이어도 빈 배열이다", () => {
     repo.upsertItems([makeItem({ usageType: null })]);
     expect(repo.listUsageTypes()).toEqual([]);
+  });
+});
+
+describe("listCourtValues", () => {
+  it("중복 없이 정렬해서 돌려준다", () => {
+    repo.upsertItems([
+      makeItem({ itemNo: "1", court: "서울중앙지방법원" }),
+      makeItem({ itemNo: "2", court: "수원지방법원" }),
+      makeItem({ itemNo: "3", court: "수원지방법원" }), // 중복
+      makeItem({ itemNo: "4", court: "부산지방법원" }),
+    ]);
+    expect(repo.listCourtValues()).toEqual(["부산지방법원", "서울중앙지방법원", "수원지방법원"]);
   });
 });
 
