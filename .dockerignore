@@ -1,0 +1,10 @@
+.git
+.next
+node_modules
+data
+*.db*
+*.local
+dist
+out
+*.log
+.agents
