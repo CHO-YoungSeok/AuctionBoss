@@ -25,6 +25,8 @@ export type {
   WorkerStatus,
   WorkerStatusState,
   Won,
+  ItemPhoto,
+  PhotoStatus,
 } from "./types";
 
 export {
@@ -33,6 +35,7 @@ export {
   WATCHED_FIELDS,
   WORKER_KINDS,
   WORKER_STATUS_STATES,
+  PHOTO_STATUSES,
 } from "./types";
 
 export {

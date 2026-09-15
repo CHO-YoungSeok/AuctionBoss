@@ -64,8 +64,9 @@ export function describeWorkerState(state: WorkerStatusState): WorkerStateDispla
 
 /** 워커 종류의 화면 표시 이름. */
 export const WORKER_LABELS: Record<WorkerKind, string> = {
-  collector: "수집",
-  analyzer: "분석",
+  collector: "정보 수집",
+  analyzer: "AI 분석",
+  photos: "사진 수집",
 };
 
 /** `RunsSummary.successRate`(성공률)를 표시 문자열로. `null`은 "완료된 회차가 아직

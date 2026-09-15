@@ -141,6 +141,25 @@ function migrateItemDetailIdentifierColumns(db: Db): void {
 }
 
 /**
+ * `items`의 사진 관련 컬럼 마이그레이션 (add-item-photos).
+ */
+function migrateItemPhotoColumns(db: Db): void {
+  const columns = db.pragma("table_info(items)") as Array<{ name: string }>;
+  const existing = new Set(columns.map((column) => column.name));
+
+  const photoColumns: Array<[name: string, ddl: string]> = [
+    ["photo_status", "TEXT"],
+    ["photo_count", "INTEGER"],
+    ["photo_collected_at", "TEXT"],
+  ];
+
+  for (const [name, ddl] of photoColumns) {
+    if (existing.has(name)) continue;
+    db.exec(`ALTER TABLE items ADD COLUMN ${name} ${ddl}`);
+  }
+}
+
+/**
  * DB 파일을 열고 pragma·스키마를 적용한 새 연결을 돌려준다.
  * 테스트는 이 함수에 임시 경로나 `":memory:"`를 직접 넘겨 env에 의존하지 않는다.
  */
@@ -156,6 +175,7 @@ export function openDatabase(dbPath: string): Db {
   migrateItemChangesKindColumn(db);
   migrateItemExtendedFieldsColumns(db);
   migrateItemDetailIdentifierColumns(db);
+  migrateItemPhotoColumns(db);
   return db;
 }
 
