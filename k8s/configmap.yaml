@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auctionboss-config
+  namespace: auctionboss
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  AUCTIONBOSS_DB: "/app/data/auctionboss.db"
