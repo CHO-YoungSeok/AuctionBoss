@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auctionboss-analyzer
+  namespace: auctionboss
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auctionboss
+      component: analyzer
+  template:
+    metadata:
+      labels:
+        app: auctionboss
+        component: analyzer
+    spec:
+      containers:
+        - name: analyzer
+          image: auctionboss:latest
+          imagePullPolicy: IfNotPresent
+          command: ["npm", "run", "analyzer"]
+          envFrom:
+            - configMapRef:
+                name: auctionboss-config
+            - secretRef:
+                name: auctionboss-secret
+          env:
+            - name: BASE_URL
+              value: "http://auctionboss-service:3000"
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

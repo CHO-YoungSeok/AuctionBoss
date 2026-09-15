@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auctionboss-web-collector
+  namespace: auctionboss
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auctionboss
+      component: web-collector
+  template:
+    metadata:
+      labels:
+        app: auctionboss
+        component: web-collector
+    spec:
+      containers:
+        - name: web
+          image: auctionboss:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: auctionboss-config
+            - secretRef:
+                name: auctionboss-secret
+          volumeMounts:
+            - name: data-volume
+              mountPath: /app/data
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+              
+        - name: collector
+          image: auctionboss:latest
+          imagePullPolicy: IfNotPresent
+          command: ["npm", "run", "collector"]
+          envFrom:
+            - configMapRef:
+                name: auctionboss-config
+            - secretRef:
+                name: auctionboss-secret
+          volumeMounts:
+            - name: data-volume
+              mountPath: /app/data
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+      volumes:
+        - name: data-volume
+          persistentVolumeClaim:
+            claimName: auctionboss-data-pvc
