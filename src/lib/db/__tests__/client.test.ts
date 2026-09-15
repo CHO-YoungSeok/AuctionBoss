@@ -645,6 +645,208 @@ describe("openDatabase — items 확장 컬럼 마이그레이션 (enrich-item-f
   });
 });
 
+describe("openDatabase — items 상세 조회 식별자 컬럼 마이그레이션 (add-item-photos stage A.2)", () => {
+  /**
+   * 마이그레이션 경로 확인(8, add-item-photos task A.2): `items`의 상세 조회 식별자
+   * 컬럼(`internal_case_no`/`court_code`)이 추가되기 **직전** 스키마(이 change 이전의
+   * 최신 스키마 — 확장 컬럼·bookmarks/feed_reads·collector_state까지는 있지만 상세 조회
+   * 식별자 컬럼은 없다)로 물건·이력·분석·관심 등록을 채운 DB 파일을 새 코드로 열었을 때,
+   * 오류 없이 새 컬럼만 추가되고 기존 데이터가 그대로 보존되며 새 컬럼이 전부 NULL인지
+   * 확인한다.
+   */
+  it("상세 조회 식별자 컬럼 추가 전 스키마로 만든 기존 DB 파일에 새 컬럼이 그대로 적용되고 기존 데이터가 보존된다", () => {
+    const PRE_DETAIL_IDENTIFIER_SCHEMA_SQL = `
+      CREATE TABLE IF NOT EXISTS items (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        court             TEXT    NOT NULL,
+        case_no           TEXT    NOT NULL,
+        item_no           TEXT    NOT NULL,
+        address           TEXT,
+        usage_type        TEXT,
+        appraisal_price   INTEGER,
+        min_bid_price     INTEGER,
+        auction_date      TEXT,
+        failed_bid_count  INTEGER,
+        status            TEXT,
+        first_seen_at     TEXT    NOT NULL,
+        last_seen_at      TEXT    NOT NULL,
+        min_area                  INTEGER,
+        max_area                  INTEGER,
+        building_description      TEXT,
+        min_bid_price_round1      INTEGER,
+        min_bid_price_round2      INTEGER,
+        min_bid_price_round3      INTEGER,
+        min_bid_price_round4      INTEGER,
+        min_bid_price_rate_round1 INTEGER,
+        min_bid_price_rate_round2 INTEGER,
+        usage_code_large          TEXT,
+        usage_code_medium         TEXT,
+        usage_code_small          TEXT,
+        sido                      TEXT,
+        sigungu                   TEXT,
+        dong                      TEXT,
+        lot_number                TEXT,
+        building_name             TEXT,
+        building_unit             TEXT,
+        coordinate_x              TEXT,
+        coordinate_y              TEXT,
+        coordinate_level          TEXT,
+        auction_time              TEXT,
+        auction_place             TEXT,
+        auction_decision_date     TEXT,
+        auction_round             INTEGER,
+        note                      TEXT,
+        duplicate_case_no         TEXT,
+        merged_case_no            TEXT,
+        court_department          TEXT,
+        court_phone               TEXT,
+        status_code               TEXT,
+        item_status_code          TEXT,
+        UNIQUE (court, case_no, item_no)
+      );
+      CREATE INDEX IF NOT EXISTS idx_items_auction_date ON items (auction_date);
+      CREATE INDEX IF NOT EXISTS idx_items_usage_type ON items (usage_type);
+      CREATE INDEX IF NOT EXISTS idx_items_min_bid_price ON items (min_bid_price);
+      CREATE TABLE IF NOT EXISTS analyses (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id        INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+        body           TEXT    NOT NULL,
+        model          TEXT,
+        prompt_version TEXT    NOT NULL,
+        analyzed_at    TEXT    NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_analyses_item_id ON analyses (item_id, analyzed_at DESC);
+      CREATE TABLE IF NOT EXISTS item_changes (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id    INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+        field      TEXT    NOT NULL,
+        old_value  TEXT,
+        new_value  TEXT,
+        changed_at TEXT    NOT NULL,
+        kind       TEXT    NOT NULL DEFAULT 'change'
+      );
+      CREATE INDEX IF NOT EXISTS idx_item_changes_item_id ON item_changes (item_id, changed_at DESC);
+      CREATE TABLE IF NOT EXISTS worker_runs (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        worker        TEXT    NOT NULL,
+        started_at    TEXT    NOT NULL,
+        finished_at   TEXT,
+        outcome       TEXT    NOT NULL,
+        error_kind    TEXT,
+        error_message TEXT,
+        detail        TEXT,
+        items_changed INTEGER,
+        created_at    TEXT    NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_worker_runs_worker_started_at ON worker_runs (worker, started_at DESC);
+      CREATE TABLE IF NOT EXISTS bookmarks (
+        item_id    INTEGER PRIMARY KEY REFERENCES items (id) ON DELETE CASCADE,
+        created_at TEXT    NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS feed_reads (
+        id           INTEGER PRIMARY KEY CHECK (id = 1),
+        last_read_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS collector_state (
+        key        TEXT PRIMARY KEY,
+        value      TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `;
+
+    const dbPath = path.join(workDir, "pre-detail-identifiers.db");
+    const legacy = new Database(dbPath);
+    legacy.exec(PRE_DETAIL_IDENTIFIER_SCHEMA_SQL);
+    legacy
+      .prepare(
+        `INSERT INTO items (id, court, case_no, item_no, usage_type, min_bid_price,
+                            min_area, status_code, first_seen_at, last_seen_at)
+         VALUES (1, '서울중앙지방법원', '2011타경28497', '1', '아파트', 711000000,
+                 84, '0002100001', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+      )
+      .run();
+    legacy
+      .prepare(
+        `INSERT INTO item_changes (item_id, field, old_value, new_value, changed_at, kind)
+         VALUES (1, 'minBidPrice', NULL, '711000000', '2026-01-01T00:00:00.000Z', 'baseline')`,
+      )
+      .run();
+    legacy
+      .prepare(
+        `INSERT INTO analyses (item_id, body, model, prompt_version, analyzed_at)
+         VALUES (1, '분석 본문', 'claude', 'v1', '2026-01-02T00:00:00.000Z')`,
+      )
+      .run();
+    legacy
+      .prepare(`INSERT INTO bookmarks (item_id, created_at) VALUES (1, '2026-01-03T00:00:00.000Z')`)
+      .run();
+    const legacyColumns = legacy
+      .prepare<[], { name: string }>("PRAGMA table_info(items)")
+      .all()
+      .map((row) => row.name);
+    legacy.close();
+
+    // 사전 조건: 옛 DB의 items에는 상세 조회 식별자 컬럼이 없다.
+    expect(legacyColumns).not.toContain("internal_case_no");
+    expect(legacyColumns).not.toContain("court_code");
+    // 사전 조건: 기존 확장 컬럼은 이미 있다(이 마이그레이션보다 먼저 적용된 상태).
+    expect(legacyColumns).toContain("min_area");
+    expect(legacyColumns).toContain("status_code");
+
+    // 새 코드로 다시 열기 = 마이그레이션. 던지지 않아야 한다.
+    const upgraded = openDatabase(dbPath);
+    try {
+      const columns = upgraded
+        .prepare<[], { name: string }>("PRAGMA table_info(items)")
+        .all()
+        .map((row) => row.name);
+      expect(columns).toContain("internal_case_no");
+      expect(columns).toContain("court_code");
+
+      // 기존 물건·이력·분석·관심 등록 데이터가 전부 그대로 살아 있다.
+      const repo = createRepository(upgraded);
+      const result = repo.listItems({ pageSize: 10 });
+      expect(result.total).toBe(1);
+      const item = result.items[0]!;
+      expect(item.caseNo).toBe("2011타경28497");
+      expect(item.minBidPrice).toBe(711000000);
+      expect(item.minArea).toBe(84); // 기존 확장 컬럼 데이터도 그대로.
+      expect(item.statusCode).toBe("0002100001");
+      expect(item.bookmarked).toBe(true);
+      expect(repo.listItemChanges(item.id)).toHaveLength(1);
+      expect(repo.countAnalyses(item.id)).toBe(1);
+      expect(repo.getLatestAnalysis(item.id)?.body).toBe("분석 본문");
+
+      // 새 컬럼은 전부 NULL이다 — 이 마이그레이션은 값을 소급하지 않는다.
+      expect(item.internalCaseNo).toBeNull();
+      expect(item.courtCode).toBeNull();
+
+      // 새 컬럼에 정상적으로 쓰고 읽을 수 있다(다음 수집으로 채워지는 경로).
+      repo.upsertItems([
+        {
+          court: "서울중앙지방법원",
+          caseNo: "2011타경28497",
+          itemNo: "1",
+          address: null,
+          usageType: "아파트",
+          appraisalPrice: null,
+          minBidPrice: 711000000,
+          auctionDate: null,
+          failedBidCount: null,
+          status: null,
+          internalCaseNo: "20110130028497",
+          courtCode: "B000210",
+        },
+      ]);
+      const updated = repo.getItemById(item.id)!;
+      expect(updated.internalCaseNo).toBe("20110130028497");
+      expect(updated.courtCode).toBe("B000210");
+    } finally {
+      upgraded.close();
+    }
+  });
+});
+
 describe("resolveDbPath", () => {
   const originalEnv = process.env.AUCTIONBOSS_DB;
 

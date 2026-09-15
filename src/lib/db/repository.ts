@@ -106,6 +106,10 @@ interface ItemRow {
   court_phone: string | null;
   status_code: string | null;
   item_status_code: string | null;
+  // ↓ 상세 조회 식별자 (add-item-photos stage A). snake_case는 이 파일 밖으로 새지
+  // 않는다 — toAuctionItem이 camelCase 도메인 타입으로 변환한다.
+  internal_case_no: string | null;
+  court_code: string | null;
 }
 
 interface AnalysisRow {
@@ -195,6 +199,8 @@ function toAuctionItem(
     courtPhone: row.court_phone,
     statusCode: row.status_code,
     itemStatusCode: row.item_status_code,
+    internalCaseNo: row.internal_case_no,
+    courtCode: row.court_code,
   };
 }
 
@@ -743,6 +749,7 @@ export function createRepository(db: Db): AuctionRepository {
       auction_time, auction_place, auction_decision_date, auction_round,
       note, duplicate_case_no, merged_case_no, court_department, court_phone,
       status_code, item_status_code,
+      internal_case_no, court_code,
       first_seen_at, last_seen_at
     ) VALUES (
       @court, @caseNo, @itemNo, @address, @usageType, @appraisalPrice,
@@ -756,6 +763,7 @@ export function createRepository(db: Db): AuctionRepository {
       @auctionTime, @auctionPlace, @auctionDecisionDate, @auctionRound,
       @note, @duplicateCaseNo, @mergedCaseNo, @courtDepartment, @courtPhone,
       @statusCode, @itemStatusCode,
+      @internalCaseNo, @courtCode,
       @now, @now
     )
     ON CONFLICT (court, case_no, item_no) DO UPDATE SET
@@ -798,6 +806,8 @@ export function createRepository(db: Db): AuctionRepository {
       court_phone               = excluded.court_phone,
       status_code               = excluded.status_code,
       item_status_code          = excluded.item_status_code,
+      internal_case_no          = excluded.internal_case_no,
+      court_code                = excluded.court_code,
       last_seen_at              = excluded.last_seen_at
   `);
 
@@ -962,6 +972,10 @@ export function createRepository(db: Db): AuctionRepository {
           courtPhone: item.courtPhone ?? null,
           statusCode: item.statusCode ?? null,
           itemStatusCode: item.itemStatusCode ?? null,
+          // 상세 조회 식별자(add-item-photos stage A) — 확장 필드와 같은 이유로 optional +
+          // `?? null`(AuctionItemInput에서 optional인 이유는 위 확장 필드 주석과 동일).
+          internalCaseNo: item.internalCaseNo ?? null,
+          courtCode: item.courtCode ?? null,
           now,
         });
 
