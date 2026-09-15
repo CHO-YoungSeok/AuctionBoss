@@ -218,6 +218,10 @@ export interface AuctionItem extends AuctionItemInput {
    * 매번 명시적으로 채워 넣게 강제하지 않기 위함이다.
    */
   bookmarked?: boolean;
+  
+  photoStatus?: PhotoStatus;
+  photoCount?: number;
+  photoCollectedAt?: string | null;
 }
 
 /**
@@ -272,6 +276,19 @@ export interface AnalysisInput {
 export interface Analysis extends AnalysisInput {
   id: number;
   analyzedAt: IsoDateTime;
+}
+
+export const PHOTO_STATUSES = ["uncollected", "collected", "empty", "failed"] as const;
+export type PhotoStatus = (typeof PHOTO_STATUSES)[number];
+
+export interface ItemPhoto {
+  id: number;
+  itemId: number;
+  seq: number;
+  filePath: string;
+  fileSize: number;
+  mimeType: string;
+  collectedAt: string;
 }
 
 /** 수집 대상 법원 한 곳. */
@@ -368,7 +385,7 @@ export interface CollectorConfig {
 // ---------------------------------------------------------------------------
 
 /** 회차를 기록하는 워커 종류. */
-export const WORKER_KINDS = ["collector", "analyzer"] as const;
+export const WORKER_KINDS = ["collector", "analyzer", "photos"] as const;
 export type WorkerKind = (typeof WORKER_KINDS)[number];
 
 /**

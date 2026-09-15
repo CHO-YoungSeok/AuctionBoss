@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "collector": "tsx workers/collector.ts",
-    "analyzer": "tsx workers/analyzer.ts"
+    "analyzer": "tsx workers/analyzer.ts",
+    "photos": "tsx workers/photos.ts"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
