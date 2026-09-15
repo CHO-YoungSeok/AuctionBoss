@@ -49,6 +49,9 @@ export function itemQuerySearchParams(query: ItemQuery): URLSearchParams {
     params.set("excludePast", String(query.excludePastAuctions));
   }
   if (query.bookmarked !== undefined) params.set("bookmarked", String(query.bookmarked));
+  if (query.court !== undefined) params.set("court", query.court);
+  if (query.minDiscountRate !== undefined) params.set("minDiscountRate", String(query.minDiscountRate));
+  if (query.hasPhotos !== undefined) params.set("hasPhotos", String(query.hasPhotos));
   if (query.sort !== undefined) params.set("sort", query.sort);
   if (query.direction !== undefined) params.set("dir", query.direction);
   // 페이지에는 UI가 없지만 URL로 들어온 값은 유지한다 — 링크를 눌렀다고 조건이

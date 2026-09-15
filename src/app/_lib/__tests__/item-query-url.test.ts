@@ -66,6 +66,9 @@ describe("itemListHref → parseItemQueryLenient 라운드트립", () => {
         auctionDateTo: "2026-12-31",
         excludePastAuctions: true,
         bookmarked: true,
+        court: "서울중앙지방법원",
+        minDiscountRate: 50,
+        hasPhotos: false,
         sort: "bidRatio",
         direction: "asc",
       },
@@ -117,6 +120,9 @@ describe("itemListHref → parseItemQueryLenient 라운드트립", () => {
       ["지난 기일 제외", { ...DEFAULTS, excludePastAuctions: true }],
       ["관심만 보기", { ...DEFAULTS, bookmarked: true }],
       ["용도 토큰", { ...DEFAULTS, usageTypes: ["오피스텔"] }],
+      ["법원", { ...DEFAULTS, court: "서울중앙지방법원" }],
+      ["최소 저감률", { ...DEFAULTS, minDiscountRate: 30 }],
+      ["사진 보유 여부", { ...DEFAULTS, hasPhotos: true }],
     ];
 
     for (const [label, query] of filterCases) {

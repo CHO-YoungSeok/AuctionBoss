@@ -135,6 +135,12 @@ export interface ItemQuery {
    * 관심 표시(`AuctionItem.bookmarked`, 스칼라 서브쿼리)와는 별개의 `WHERE` 조건이다
    * (design.md D4 — `BOOKMARKED_EXPR`는 필터에 관여하지 않는 보장을 유지한다). */
   bookmarked?: boolean;
+  /** 법원명 일치 조건 */
+  court?: string;
+  /** 저감률 하한 (0~100) */
+  minDiscountRate?: number;
+  /** 사진 보유 여부 (수집 완료된 사진) */
+  hasPhotos?: boolean;
   /** 생략하면 매각기일 정렬(기존 기본 동작). */
   sort?: SortKey;
   /** 생략하면 오름차순. */
@@ -169,6 +175,9 @@ export const ITEM_QUERY_PARAMS = [
   "dateTo",
   "excludePast",
   "bookmarked",
+  "court",
+  "minDiscountRate",
+  "hasPhotos",
 ] as const;
 
 export type ItemQueryParam = (typeof ITEM_QUERY_PARAMS)[number];
@@ -221,6 +230,9 @@ interface RawItemQueryParams {
   dateTo?: string;
   excludePast?: string;
   bookmarked?: string;
+  court?: string;
+  minDiscountRate?: string;
+  hasPhotos?: string;
 }
 
 /**
@@ -429,6 +441,16 @@ const itemQueryParamsSchema = z
       })
       .transform((value) => value === "true")
       .optional(),
+    court: z.string().min(1, "court 값은 비어 있을 수 없습니다").optional(),
+    minDiscountRate: integerParam("minDiscountRate")
+      .refine((val) => val >= 0 && val <= 100, "minDiscountRate는 0에서 100 사이여야 합니다")
+      .optional(),
+    hasPhotos: z
+      .enum(["true", "false"], {
+        errorMap: () => ({ message: "hasPhotos는 true 또는 false여야 합니다" }),
+      })
+      .transform((value) => value === "true")
+      .optional(),
   })
   .superRefine((params, ctx) => {
     // needsAnalysis=true는 항상 promptVersion과 함께 와야 한다(design.md D4) — 판정
@@ -570,6 +592,9 @@ function toItemQuery(params: ParsedItemQueryParams): ItemQuery {
   if (params.dateTo !== undefined) query.auctionDateTo = params.dateTo;
   if (params.excludePast !== undefined) query.excludePastAuctions = params.excludePast;
   if (params.bookmarked !== undefined) query.bookmarked = params.bookmarked;
+  if (params.court !== undefined) query.court = params.court;
+  if (params.minDiscountRate !== undefined) query.minDiscountRate = params.minDiscountRate;
+  if (params.hasPhotos !== undefined) query.hasPhotos = params.hasPhotos;
   if (params.sort !== undefined) query.sort = params.sort;
   if (params.dir !== undefined) query.direction = params.dir;
   return query;
@@ -677,7 +702,10 @@ export function hasActiveFilters(query: ItemQuery): boolean {
     query.auctionDateFrom !== undefined ||
     query.auctionDateTo !== undefined ||
     query.excludePastAuctions !== undefined ||
-    query.bookmarked !== undefined
+    query.bookmarked !== undefined ||
+    query.court !== undefined ||
+    query.minDiscountRate !== undefined ||
+    query.hasPhotos !== undefined
   );
 }
 

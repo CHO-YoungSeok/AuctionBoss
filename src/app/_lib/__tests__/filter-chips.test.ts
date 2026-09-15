@@ -78,6 +78,37 @@ describe("buildFilterChips", () => {
     });
   });
 
+  it("법원, 저감률, 사진 보유 필터도 칩으로 만들어진다", () => {
+    const chips = buildFilterChips({
+      ...BASE,
+      court: "서울중앙지방법원",
+      minDiscountRate: 20,
+      hasPhotos: true,
+    });
+    expect(chips).toContainEqual({
+      key: "court",
+      label: "법원: 서울중앙지방법원",
+      clear: { court: undefined },
+    });
+    expect(chips).toContainEqual({
+      key: "minDiscountRate",
+      label: "저감률: 20% 이상",
+      clear: { minDiscountRate: undefined },
+    });
+    expect(chips).toContainEqual({
+      key: "hasPhotos",
+      label: "사진 있음",
+      clear: { hasPhotos: undefined },
+    });
+
+    const falseChips = buildFilterChips({ ...BASE, hasPhotos: false });
+    expect(falseChips).toContainEqual({
+      key: "hasPhotos",
+      label: "사진 없음",
+      clear: { hasPhotos: undefined },
+    });
+  });
+
   it("여러 필터가 동시에 있으면 각각 별도 칩이고, 하나를 해제해도 나머지 override는 영향받지 않는다", () => {
     const query: ItemQuery = {
       ...BASE,
