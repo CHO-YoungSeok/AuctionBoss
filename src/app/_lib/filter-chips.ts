@@ -116,6 +116,27 @@ export function buildFilterChips(query: ItemQuery): FilterChip[] {
       clear: { analyzed: undefined },
     });
   }
+  if (query.court !== undefined) {
+    chips.push({
+      key: "court",
+      label: `법원: ${query.court}`,
+      clear: { court: undefined },
+    });
+  }
+  if (query.minDiscountRate !== undefined) {
+    chips.push({
+      key: "minDiscountRate",
+      label: `저감률: ${query.minDiscountRate}% 이상`,
+      clear: { minDiscountRate: undefined },
+    });
+  }
+  if (query.hasPhotos !== undefined) {
+    chips.push({
+      key: "hasPhotos",
+      label: query.hasPhotos ? "사진 있음" : "사진 없음",
+      clear: { hasPhotos: undefined },
+    });
+  }
 
   return chips;
 }

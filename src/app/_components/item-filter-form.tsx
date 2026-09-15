@@ -43,6 +43,7 @@ export function ItemFilterForm({
   usageTypes,
   sidoValues,
   sigunguValues,
+  courtOptions,
 }: {
   /** lenient 파서가 만든 현재 조건. 폼의 초기값이 된다. */
   query: ItemQuery;
@@ -52,6 +53,8 @@ export function ItemFilterForm({
   sidoValues: string[];
   /** 저장된 데이터에서 도출된 시/군/구 목록(`listSigunguValues()`). */
   sigunguValues: string[];
+  /** 저장된 데이터에서 도출된 법원 목록 */
+  courtOptions: string[];
 }) {
   const selectedUsage = new Set(query.usageTypes ?? []);
   const selectedSido = new Set(query.sidoValues ?? []);
@@ -176,7 +179,40 @@ export function ItemFilterForm({
           </div>
         </fieldset>
 
+        <fieldset className="filter-group">
+          <legend>최소 저감률</legend>
+          <div className="checkbox-list">
+            <label className="checkbox">
+              <input type="radio" name="minDiscountRate" value="" defaultChecked={query.minDiscountRate === undefined} />
+              <span>전체</span>
+            </label>
+            <label className="checkbox">
+              <input type="radio" name="minDiscountRate" value="20" defaultChecked={query.minDiscountRate === 20} />
+              <span>20% 이상</span>
+            </label>
+            <label className="checkbox">
+              <input type="radio" name="minDiscountRate" value="30" defaultChecked={query.minDiscountRate === 30} />
+              <span>30% 이상</span>
+            </label>
+            <label className="checkbox">
+              <input type="radio" name="minDiscountRate" value="50" defaultChecked={query.minDiscountRate === 50} />
+              <span>50% 이상</span>
+            </label>
+          </div>
+        </fieldset>
+
         <div className="filter-row">
+          <label className="filter-field">
+            <span>법원</span>
+            <select name="court" defaultValue={query.court ?? ""}>
+              <option value="">전체</option>
+              {courtOptions.map((court) => (
+                <option key={court} value={court}>
+                  {court}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="filter-field">
             <span>유찰횟수 최소</span>
             <input
@@ -217,6 +253,15 @@ export function ItemFilterForm({
               defaultChecked={query.excludePastAuctions === true}
             />
             <span>지난 기일 제외</span>
+          </label>
+          <label className="checkbox filter-field">
+            <input
+              type="checkbox"
+              name="hasPhotos"
+              value="true"
+              defaultChecked={query.hasPhotos === true}
+            />
+            <span>사진 있음</span>
           </label>
           <label className="filter-field">
             <span>관심 물건</span>
