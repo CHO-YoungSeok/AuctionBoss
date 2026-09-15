@@ -36,6 +36,7 @@ import {
   formatWon,
 } from "../../_lib/format";
 import { buildCourtVerifyLink } from "../../_lib/court-verify";
+import { buildKakaoMapUrl, buildNaverMapUrl } from "../../_lib/map-links";
 import {
   computePricePerArea,
   formatAreaRange,
@@ -60,7 +61,7 @@ export const dynamic = "force-dynamic";
  */
 const MAX_ANALYSES_FETCHED = 11; // 최신 1건 + 이전 10건
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="field">
       <dt>{label}</dt>
@@ -160,6 +161,9 @@ export default async function ItemDetailPage({
 
   const photoState = getPhotoDisplayState(item);
   const photos = photoState === "collected" ? repository.getItemPhotos(item.id) : [];
+
+  const kakaoMapUrl = buildKakaoMapUrl(item.address);
+  const naverMapUrl = buildNaverMapUrl(item.address);
 
   return (
     <main className="page">
@@ -290,7 +294,28 @@ export default async function ItemDetailPage({
         <dl className="fields">
           <Field label="용도" value={formatText(item.usageType)} />
           <Field label="면적" value={areaText} />
-          <Field label="소재지" value={formatText(item.address)} />
+          <Field 
+            label="소재지" 
+            value={
+              <>
+                {formatText(item.address)}
+                {(kakaoMapUrl || naverMapUrl) && (
+                  <span style={{ marginLeft: "8px", fontSize: "0.9em" }}>
+                    {kakaoMapUrl && (
+                      <a href={kakaoMapUrl} target="_blank" rel="noopener noreferrer" style={{ marginRight: "4px", color: "#0056b3", textDecoration: "underline" }}>
+                        카카오맵
+                      </a>
+                    )}
+                    {naverMapUrl && (
+                      <a href={naverMapUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#0056b3", textDecoration: "underline" }}>
+                        네이버지도
+                      </a>
+                    )}
+                  </span>
+                )}
+              </>
+            } 
+          />
           <Field label="소재지 상세" value={structuredAddressText} />
           <Field label="매각기일" value={formatDate(item.auctionDate)} />
           {/* ux-overhaul-phase1 tasks.md 5.3, spec: "매각기일 시각 표시" — 저장 계층은
