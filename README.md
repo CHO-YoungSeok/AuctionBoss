@@ -138,7 +138,7 @@ flowchart LR
 
 ## 실행 방법
 
-Node.js 20 이상이 필요합니다.
+Node.js 22 이상이 필요합니다.
 
 ```bash
 git clone https://github.com/CHO-YoungSeok/AuctionBoss.git
@@ -180,5 +180,6 @@ k8s/                # Kubernetes 매니페스트
 
 ## 더 보기
 
-- [상세 문서](docs/REFERENCE.md): API 명세, 설정 항목, 설계 결정 기록
+- [레퍼런스](docs/REFERENCE.md): 설정, 환경 변수, REST API, 데이터 모델, 워커 동작
 - [기능 스펙](openspec/specs/): 기능별 요구사항
+- [개발 기록](docs/DEVELOPMENT_NOTES.md): 개발 중 사이클마다 남긴 실측 수치와 설계 판단
