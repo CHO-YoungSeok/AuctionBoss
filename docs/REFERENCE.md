@@ -100,7 +100,7 @@ AuctionBoss의 실행 구성, 설정, API, 데이터 모델을 정리한 문서�
 | `sido`, `sigungu`, `court` | 지역과 법원 |
 | `usage` | 용도. 여러 번 줄 수 있습니다 |
 | `minPrice`, `maxPrice` | 최저매각가격 범위 (원) |
-| `minFailed`, `minDiscountRate` | 최소 유찰횟수, 최소 저감률 |
+| `minFailed`, `minDiscountRate` | 최소 유찰횟수, 최소 저감률. 저감률은 0~100 사이 정수입니다. 예를 들어 30은 감정가보다 30% 이상 내려간 물건입니다 |
 | `dateFrom`, `dateTo`, `excludePast` | 매각기일 범위, 지난 기일 제외 |
 | `bookmarked`, `hasPhotos`, `analyzed` | 관심 물건, 사진 유무, 분석 유무 |
 | `needsAnalysis`, `promptVersion` | 분석 워커 전용. 재분석이 필요한 물건만 조회 |
