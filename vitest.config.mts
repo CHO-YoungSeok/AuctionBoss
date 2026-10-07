@@ -21,6 +21,8 @@ export default defineConfig({
       "src/**/__tests__/**/*.test.ts",
       // 워커(collector/analyzer)도 같은 러너로 돈다.
       "workers/**/*.test.ts",
+      // 시드 내보내기 스크립트(가림 처리 등).
+      "scripts/**/*.test.ts",
     ],
   },
 });

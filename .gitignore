@@ -50,3 +50,10 @@ next-env.d.ts
 
 # untracked docs
 /docs/untracked
+
+# backend (Spring Boot / Gradle)
+backend/build/
+backend/.gradle/
+backend/.idea/
+backend/out/
+backend/*.iml

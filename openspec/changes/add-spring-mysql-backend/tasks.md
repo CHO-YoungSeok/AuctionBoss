@@ -1,24 +1,24 @@
 ## 1. 백엔드 골격과 버전 확인
 
-- [ ] 1.1 `backend/`에 Gradle Wrapper(Kotlin DSL), Java 21, Spring Boot 4.x 프로젝트를 만들고 `./gradlew build`가 통과하는지 확인한다
-- [ ] 1.2 QueryDSL 포크(`io.github.openfeign.querydsl`) APT를 설정하고, 임시 엔티티 하나로 Q클래스 생성과 조회 쿼리 실행이 되는지 확인한다. 실패하면 Spring Boot 3.5.x로 고정하고 그 결정을 design.md D1에 기록한다
-- [ ] 1.3 프로필(`local`, `seed`, `test`)과 MySQL 접속 설정을 환경 변수 기반으로 구성하고, 시간대를 UTC로 고정한다. `local` 프로필로 로컬 MySQL에 접속해 기동되는지 확인한다
+- [x] 1.1 `backend/`에 Gradle Wrapper(Kotlin DSL), Java 21, Spring Boot 4.x 프로젝트를 만들고 `./gradlew build`가 통과하는지 확인한다
+- [x] 1.2 QueryDSL 포크(`io.github.openfeign.querydsl`) APT를 설정하고, 임시 엔티티 하나로 Q클래스 생성과 조회 쿼리 실행이 되는지 확인한다. 실패하면 Spring Boot 3.5.x로 고정하고 그 결정을 design.md D1에 기록한다
+- [x] 1.3 프로필(`local`, `seed`, `test`)과 MySQL 접속 설정을 환경 변수 기반으로 구성하고, 시간대를 UTC로 고정한다. `local` 프로필로 로컬 MySQL에 접속해 기동되는지 확인한다
 
 ## 2. MySQL 스키마 (Flyway)
 
-- [ ] 2.1 `db/migration/V1__baseline.sql`에 테이블 8개를 design.md D3의 타입 매핑대로 작성한다(고유 제약, 외래 키 CASCADE, CHECK, 인덱스 6개 포함). 빈 MySQL에서 기동해 테이블과 `flyway_schema_history`가 생기는지 Testcontainers 테스트로 확인한다
-- [ ] 2.2 적용된 마이그레이션 파일을 바꾸면 기동이 실패하는지(checksum 불일치) 테스트로 확인한다
-- [ ] 2.3 같은 법원·사건번호·물건번호 중복 저장이 거부되는지, 물건 삭제 시 하위 행이 삭제되는지 테스트로 확인한다
+- [x] 2.1 `db/migration/V1__baseline.sql`에 테이블 8개를 design.md D3의 타입 매핑대로 작성한다(고유 제약, 외래 키 CASCADE, CHECK, 인덱스 6개 포함). 빈 MySQL에서 기동해 테이블과 `flyway_schema_history`가 생기는지 Testcontainers 테스트로 확인한다
+- [x] 2.2 적용된 마이그레이션 파일을 바꾸면 기동이 실패하는지(checksum 불일치) 테스트로 확인한다
+- [x] 2.3 같은 법원·사건번호·물건번호 중복 저장이 거부되는지, 물건 삭제 시 하위 행이 삭제되는지 테스트로 확인한다
 
 ## 3. 엔티티와 저장소
 
-- [ ] 3.1 테이블 8개의 JPA 엔티티를 만든다. `Item`은 `@Embedded` 값 객체로 컬럼을 묶는다. `ddl-auto=validate`로 기동해 스키마와 엔티티가 일치하는지 확인한다
-- [ ] 3.2 시각 컬럼(`DATETIME(3)` UTC)과 금액 컬럼(`BIGINT`) 매핑을 검증한다. 51,005,255,120원 저장·조회 테스트와, JVM 시간대를 바꿔도 같은 시각 문자열이 나오는 테스트를 추가한다
-- [ ] 3.3 물건 단건, 최신 분석, 변경 이력, 용도 목록 조회를 Spring Data JPA로 구현하고 저장소 테스트로 확인한다
+- [x] 3.1 테이블 8개의 JPA 엔티티를 만든다. `Item`은 `@Embedded` 값 객체로 컬럼을 묶는다. `ddl-auto=validate`로 기동해 스키마와 엔티티가 일치하는지 확인한다
+- [x] 3.2 시각 컬럼(`DATETIME(3)` UTC)과 금액 컬럼(`BIGINT`) 매핑을 검증한다. 51,005,255,120원 저장·조회 테스트와, JVM 시간대를 바꿔도 같은 시각 문자열이 나오는 테스트를 추가한다
+- [x] 3.3 물건 단건, 최신 분석, 변경 이력, 용도 목록 조회를 Spring Data JPA로 구현하고 저장소 테스트로 확인한다
 
 ## 4. 시드 데이터
 
-- [ ] 4.1 개인 이름 가림 함수를 `scripts/seed/`에 TS로 만들고 vitest 단위 테스트로 고정한다(이름 패턴 가림, 기관명 보존, 비고를 인용한 분석 본문 가림)
+- [x] 4.1 개인 이름 가림 함수를 `scripts/seed/`에 TS로 만들고 vitest 단위 테스트로 고정한다(이름 패턴 가림, 기관명 보존, 비고를 인용한 분석 본문 가림)
 - [ ] 4.2 `scripts/seed/export-seed.ts`를 만든다. `data/auctionboss.db`를 읽어 가림 처리 후 MySQL `INSERT` SQL을 `backend/src/main/resources/db/seed/`에 쓰고, 바꾼 건수와 남은 의심 문구 보고서를 출력한다. 실행 결과 물건 809건, 변경 이력 4,008건, 분석 12건이 SQL에 들어갔는지 확인한다
 - [ ] 4.3 보고서를 사람이 검토해 남은 실명이 없음을 확인한 뒤 시드 생성물을 커밋한다. 검토 결과(가림 건수, 예외)를 tasks 하단 메모에 남긴다
 - [ ] 4.4 `seed` 프로필에서만 동작하고 `items`가 비어 있을 때만 시드를 적재하는 로더를 만든다. 첫 기동 적재, 재기동 시 중복 없음, `seed` 없는 프로필에서 0건을 테스트로 확인한다

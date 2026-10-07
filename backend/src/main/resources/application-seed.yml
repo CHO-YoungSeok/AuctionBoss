@@ -1,0 +1,4 @@
+# 시드 로더는 4장에서 구현한다. 지금은 켜기 플래그만 둔다.
+auctionboss:
+  seed:
+    enabled: true

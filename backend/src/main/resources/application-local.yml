@@ -1,0 +1,9 @@
+spring:
+  # 저장소 루트의 .env(git 미추적)에서 DB_* 값을 읽는다. 없으면 아래 기본값을 쓴다.
+  # bootRun은 backend/에서, IDE는 저장소 루트에서 실행될 수 있어 두 경로를 모두 둔다.
+  config:
+    import: "optional:file:../.env[.properties],optional:file:.env[.properties]"
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:auctionboss}?characterEncoding=utf8
+    username: ${DB_USER:auctionboss}
+    password: ${DB_PASSWORD:auctionboss}

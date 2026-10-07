@@ -1,0 +1,27 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: backend
+  datasource:
+    hikari:
+      # 시간대는 세 층에서 UTC로 고정한다: JVM(BackendApplication), Hibernate(jdbc.time_zone),
+      # JDBC 드라이버(여기). 드라이버 설정을 프로필별 URL이 아니라 공통에 두어야
+      # Testcontainers(@ServiceConnection) 접속에도 똑같이 적용된다.
+      data-source-properties:
+        connectionTimeZone: UTC
+        forceConnectionTimeZoneToSession: true
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+  jackson:
+    # 시각 직렬화기는 5장에서 따로 정한다. 지금은 Jackson 기본값을 따른다.
+    default-property-inclusion: always

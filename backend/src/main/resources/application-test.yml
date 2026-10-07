@@ -1,0 +1,4 @@
+# Testcontainers용. @ServiceConnection이 접속 정보를 주입하므로 datasource URL은 두지 않는다.
+spring:
+  jpa:
+    open-in-view: false
