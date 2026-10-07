@@ -1,4 +1,4 @@
-# 시드 로더는 4장에서 구현한다. 지금은 켜기 플래그만 둔다.
+# 시드 로더(SeedLoader)를 켠다. 이 프로필이 없으면 로더 빈이 만들어지지 않는다.
 auctionboss:
   seed:
     enabled: true
