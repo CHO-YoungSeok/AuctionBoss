@@ -84,4 +84,16 @@ describe("GET /api/worker-runs/summary", () => {
     const body = (await response.json()) as { totalRuns: number };
     expect(body.totalRuns).toBe(1);
   });
+
+  it("since의 시간대 오프셋은 같은 순간의 Z 표기와 같은 결과를 낸다", async () => {
+    const run = startRun("collector", { now: "2026-10-08T00:00:05.000Z" });
+    finishRun(run, { outcome: "success" }, { now: "2026-10-08T00:01:00.000Z" });
+
+    const zulu = (await GET(request("since=2026-10-08T00:00:02.000Z")).json()) as { totalRuns: number };
+    const offset = (await GET(request("since=2026-10-08T09:00:02.000%2B09:00")).json()) as {
+      totalRuns: number;
+    };
+    expect(zulu.totalRuns).toBe(1);
+    expect(offset).toEqual(zulu);
+  });
 });

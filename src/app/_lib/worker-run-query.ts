@@ -131,6 +131,8 @@ export function parseWorkerRunSummaryQuery(
 
   const query: WorkerRunSummaryQuery = {};
   if (result.data.worker !== undefined) query.worker = result.data.worker;
-  if (result.data.since !== undefined) query.since = result.data.since;
+  // 오프셋(+09:00) 표기를 UTC 밀리초 ISO로 맞춘다 — 저장된 started_at과 SQLite에서 문자열로
+  // 비교하므로 같은 순간이 다른 문자열이면 결과가 갈린다. 허용 범위(위 refine)는 그대로다.
+  if (result.data.since !== undefined) query.since = new Date(result.data.since).toISOString();
   return { success: true, query };
 }

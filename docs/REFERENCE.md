@@ -127,7 +127,7 @@ AuctionBoss의 실행 구성, 설정, API, 데이터 모델을 정리한 문서�
 | GET | `/api/worker-runs` | 워커 실행 기록 목록 |
 | POST | `/api/worker-runs` | 실행 시작 기록 |
 | PATCH | `/api/worker-runs/:id` | 실행 종료 기록 (결과, 처리 건수, 오류) |
-| GET | `/api/worker-runs/summary` | 최근 기간의 성공률 · 차단 횟수 집계 |
+| GET | `/api/worker-runs/summary` | 최근 기간의 성공률 · 차단 횟수 집계 (`since`의 시간대 오프셋은 UTC로 정규화해 비교) |
 
 **관심 물건과 피드**
 
