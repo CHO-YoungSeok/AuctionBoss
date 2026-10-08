@@ -162,4 +162,50 @@ describe("물건 상세 페이지 렌더링 (hardening-round1 task 3)", () => {
       /NEXT_HTTP_ERROR_FALLBACK|NEXT_NOT_FOUND/,
     );
   });
+  it("이전 분석은 최근 10건만 본문으로 그리고 나머지는 건수로만 알린다(MAX_ANALYSES_FETCHED)", async () => {
+    const repo = getRepository();
+    repo.upsertItems([makeItem()]);
+    const item = repo.getItemById(1)!;
+    const total = 13;
+    for (let n = 1; n <= total; n += 1) {
+      repo.insertAnalysis({
+        itemId: item.id,
+        body: `[[BODY-${String(n).padStart(2, "0")}]]`,
+        model: null,
+        promptVersion: "v3",
+      });
+    }
+
+    const html = await renderItemPage(String(item.id));
+    const bodyTag = (n: number) => `[[BODY-${String(n).padStart(2, "0")}]]`;
+
+    // 최신 1건 + 이전 10건(12..03)만 본문으로 나온다.
+    for (let n = 3; n <= total; n += 1) expect(html).toContain(bodyTag(n));
+    // 가장 오래된 2건(01, 02)은 본문이 렌더되지 않는다.
+    expect(html).not.toContain(bodyTag(1));
+    expect(html).not.toContain(bodyTag(2));
+    // 표제는 잘리지 않은 실제 전체 건수, 숨긴 건수는 별도 안내.
+    expect(html).toContain("이전 분석 12건 보기");
+    expect(html).toContain("그 외 2건은 표시하지 않습니다(최근 10건만");
+  });
+
+  it("이전 분석이 10건 이하면 숨김 안내 없이 전부 본문으로 나온다", async () => {
+    const repo = getRepository();
+    repo.upsertItems([makeItem()]);
+    const item = repo.getItemById(1)!;
+    for (let n = 1; n <= 11; n += 1) {
+      repo.insertAnalysis({
+        itemId: item.id,
+        body: `[[BODY-${String(n).padStart(2, "0")}]]`,
+        model: null,
+        promptVersion: "v3",
+      });
+    }
+
+    const html = await renderItemPage(String(item.id));
+
+    for (let n = 1; n <= 11; n += 1) expect(html).toContain(`[[BODY-${String(n).padStart(2, "0")}]]`);
+    expect(html).toContain("이전 분석 10건 보기");
+    expect(html).not.toContain("표시하지 않습니다");
+  });
 });
