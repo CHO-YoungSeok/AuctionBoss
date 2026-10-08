@@ -49,7 +49,7 @@
 - [x] 7.4 게이트 5종(`npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint`, `./gradlew check`)이 모두 통과하는지 확인한다. TS 테스트 개수가 0.1 대비 늘었는지 확인하고, 1.3에서 삭제한 테스트 수와 옮긴 수를 함께 보고한다
 - [x] 7.5 `regression-verifier` 서브에이전트로 회귀 검증을 받는다. 특히 백오프 공유(양방향), 재시도 간격, 차단 감지, 배포 환경 변수 이름이 테스트로 막혀 있는지 판정받는다
 - [x] 7.6 커밋하고 푸시한다
-- [ ] 7.7 `openspec validate fix-photo-worker-and-deploy-config --strict`를 통과시킨 뒤 아카이브한다. `align-specs-with-code`가 아직 아카이브되지 않았다면 design.md D9의 요구사항 목록이 그대로인지 다시 확인한다
+- [x] 7.7 `openspec validate fix-photo-worker-and-deploy-config --strict`를 통과시킨 뒤 아카이브한다. `align-specs-with-code`가 아직 아카이브되지 않았다면 design.md D9의 요구사항 목록이 그대로인지 다시 확인한다
 
 
 ---
