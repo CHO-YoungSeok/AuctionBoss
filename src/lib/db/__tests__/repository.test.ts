@@ -1605,6 +1605,49 @@ describe("listCourtValues", () => {
     ]);
     expect(repo.listCourtValues()).toEqual(["부산지방법원", "서울중앙지방법원", "수원지방법원"]);
   });
+
+  // switch-web-to-data-port 3.2: Spring(MySQL utf8mb4_0900_bin)이 같은 결과를 내야 하는 기준 사례.
+  it("문자 그대로 구분한다 — 대소문자·뒤쪽 공백·빈 문자열은 서로 다른 값이다", () => {
+    repo.upsertItems([
+      makeItem({ itemNo: "1", court: "A법원" }),
+      makeItem({ itemNo: "2", court: "a법원" }),
+      makeItem({ itemNo: "3", court: "A법원 " }),
+      makeItem({ itemNo: "4", court: "" }),
+      makeItem({ itemNo: "5", court: "A법원" }), // 중복
+    ]);
+    expect(repo.listCourtValues()).toEqual(["", "A법원", "A법원 ", "a법원"]);
+  });
+
+  it("바이트(코드 포인트) 순으로 정렬한다 — 보충 문자가 BMP 고위 문자보다 뒤다", () => {
+    repo.upsertItems([
+      makeItem({ itemNo: "1", court: "\u{1F600}법원" }),
+      makeItem({ itemNo: "2", court: "\uF900법원" }),
+      makeItem({ itemNo: "3", court: "한법원" }),
+      makeItem({ itemNo: "4", court: "Z법원" }),
+    ]);
+    expect(repo.listCourtValues()).toEqual(["Z법원", "한법원", "\uF900법원", "\u{1F600}법원"]);
+  });
+});
+
+describe("listSidoValues / listSigunguValues", () => {
+  it("NULL을 빼고, 문자 그대로 중복을 없애 정렬한다(빈 문자열은 값이다)", () => {
+    repo.upsertItems([
+      makeItem({ itemNo: "1", sido: "서울특별시", sigungu: "관악구" }),
+      makeItem({ itemNo: "2", sido: "경기도", sigungu: "관악구" }), // 시군구 중복
+      makeItem({ itemNo: "3", sido: "Seoul", sigungu: "a구" }),
+      makeItem({ itemNo: "4", sido: "seoul", sigungu: "A구" }),
+      makeItem({ itemNo: "5", sido: "seoul ", sigungu: "A구 " }),
+      makeItem({ itemNo: "6", sido: "", sigungu: "" }),
+      makeItem({ itemNo: "7", sido: null, sigungu: null }),
+    ]);
+    expect(repo.listSidoValues()).toEqual(["", "Seoul", "seoul", "seoul ", "경기도", "서울특별시"]);
+    expect(repo.listSigunguValues()).toEqual(["", "A구", "A구 ", "a구", "관악구"]);
+  });
+
+  it("물건이 없으면 빈 배열이다", () => {
+    expect(repo.listSidoValues()).toEqual([]);
+    expect(repo.listSigunguValues()).toEqual([]);
+  });
 });
 
 describe("getItemById", () => {

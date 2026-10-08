@@ -3,7 +3,9 @@ package com.auctionboss.item;
 import java.util.List;
 import java.util.Map;
 
+import com.auctionboss.analysis.AnalysisHistoryResponse;
 import com.auctionboss.history.ItemChangeResponse;
+import com.auctionboss.photo.PhotoMetaResponse;
 import com.auctionboss.item.dto.ItemDetailResponse;
 import com.auctionboss.item.search.ItemPage;
 import org.springframework.util.MultiValueMap;
@@ -35,6 +37,11 @@ public class ItemController {
 		return Map.of("usageTypes", service.usageTypes());
 	}
 
+	@GetMapping("/filter-options")
+	FilterOptionsResponse filterOptions() {
+		return service.filterOptions();
+	}
+
 	@GetMapping("/{id}")
 	ItemDetailResponse detail(@PathVariable String id) {
 		return service.detail(id);
@@ -43,6 +50,16 @@ public class ItemController {
 	@GetMapping("/{id}/changes")
 	Map<String, List<ItemChangeResponse>> changes(@PathVariable String id) {
 		return Map.of("changes", service.changes(id));
+	}
+
+	@GetMapping("/{id}/analyses")
+	AnalysisHistoryResponse analyses(@PathVariable String id, @RequestParam MultiValueMap<String, String> params) {
+		return service.analysisHistory(id, params);
+	}
+
+	@GetMapping("/{id}/photos")
+	Map<String, List<PhotoMetaResponse>> photos(@PathVariable String id) {
+		return Map.of("photos", service.photos(id));
 	}
 
 }

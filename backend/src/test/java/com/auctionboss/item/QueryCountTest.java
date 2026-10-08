@@ -64,6 +64,8 @@ class QueryCountTest extends AbstractMySqlTest {
 	EntityManagerFactory emf;
 	@Autowired
 	TransactionTemplate tx;
+	@Autowired
+	com.auctionboss.support.MutableClock clock;
 
 	/** 요청 한 번이 준비시킨 SQL 문 수와 응답 행 수. */
 	private record Measured(long statements, int rows) {
@@ -76,6 +78,7 @@ class QueryCountTest extends AbstractMySqlTest {
 	private List<Item> seed(int n) {
 		jdbc.update("DELETE FROM items");
 		jdbc.update("DELETE FROM worker_runs");
+		jdbc.update("DELETE FROM collector_state");
 		List<Item> out = new java.util.ArrayList<>();
 		for (int i = 0; i < n; i++) {
 			Item it = items.save(item("2026타경" + (i + 1), "1").usageType(i % 2 == 0 ? "아파트" : "다세대주택")
@@ -102,6 +105,16 @@ class QueryCountTest extends AbstractMySqlTest {
 					java.sql.Timestamp.from(OLD.plusSeconds(i)), java.sql.Timestamp.from(OLD.plusSeconds(i + 1)),
 					i % 5 == 0 ? "failed" : "success", i % 2 == 0 ? i : null, java.sql.Timestamp.from(OLD.plusSeconds(i)));
 		}
+		// 사진 목록·분석 이력 측정용: i%3==0은 사진 2건. 로테이션 위치 기록 1건.
+		for (int i = 0; i < n; i += 3) {
+			for (int seq = 1; seq <= 2; seq++) {
+				jdbc.update("INSERT INTO item_photos (item_id, seq, file_path, file_size, mime_type, collected_at) "
+						+ "VALUES (?, ?, ?, 10, 'image/png', ?)", out.get(i).getId(), seq, i + "/" + seq + ".png",
+						java.sql.Timestamp.from(OLD));
+			}
+		}
+		jdbc.update("INSERT INTO collector_state (`key`, value, updated_at) VALUES "
+				+ "('collector.rotation.nextCourtCode', 'B000211', ?)", java.sql.Timestamp.from(OLD));
 		return out;
 	}
 
@@ -115,7 +128,9 @@ class QueryCountTest extends AbstractMySqlTest {
 		int rows = node.has("items") ? node.get("items").size()
 				: node.has("changes") ? node.get("changes").size()
 				: node.has("entries") ? node.get("entries").size()
-				: node.has("runs") ? node.get("runs").size() : 1;
+				: node.has("runs") ? node.get("runs").size()
+				: node.has("analyses") ? node.get("analyses").size()
+				: node.has("photos") ? node.get("photos").size() : 1;
 		return new Measured(statements, rows);
 	}
 
@@ -190,6 +205,45 @@ class QueryCountTest extends AbstractMySqlTest {
 		assertConstant("회차 목록", "/api/worker-runs?pageSize=50", 2, 4, 30);
 		assertThat(measure("/api/worker-runs?pageSize=50").rows()).isEqualTo(30);
 		assertConstant("회차 집계", "/api/worker-runs/summary", 1, 4, 30);
+	}
+
+	@Test
+	void filterOptionsIsFourStatements() throws Exception {
+		// 측정값 4: 용도(토큰화 전 값 목록), 시도, 시군구, 법원. 행 수와 무관하다.
+		assertConstant("필터 선택지", "/api/items/filter-options", 4, 4, 30);
+	}
+
+	@Test
+	void analysisHistoryIsExistsPlusListPlusCount() throws Exception {
+		// 측정값 3: (1) 물건 존재 확인, (2) 이력 목록(LIMIT), (3) 전체 건수.
+		assertConstant("분석 이력", "/api/items/{id}/analyses?limit=11", 3, 4, 30);
+		assertConstant("분석 이력(기본)", "/api/items/{id}/analyses", 3, 4, 30);
+		assertThat(measure("/api/items/" + seed(30).get(0).getId() + "/analyses?limit=1").rows()).isEqualTo(1);
+	}
+
+	@Test
+	void photoListIsExistsPlusSelect() throws Exception {
+		// 측정값 2: (1) 물건 존재 확인, (2) 사진 목록.
+		assertConstant("사진 목록", "/api/items/{id}/photos", 2, 4, 30);
+		assertThat(measure("/api/items/" + seed(30).get(0).getId() + "/photos").rows()).isEqualTo(2);
+	}
+
+	@Test
+	void workerStatusIsLastRunPlusLastSuccessPlusLastCompleted() throws Exception {
+		// 측정값 3: (1) 마지막 회차, (2) 마지막 성공, (3) 마지막 완료. 미실행이면 (3)은 건너뛰므로 시계를 회차 직후로 맞춘다.
+		clock.set(OLD.plusSeconds(100));
+		try {
+			assertConstant("워커 상태(collector)", "/api/worker-runs/status?worker=collector", 3, 4, 30);
+			assertConstant("워커 상태(analyzer)", "/api/worker-runs/status?worker=analyzer", 3, 4, 30);
+		}
+		finally {
+			clock.set(FixedClockConfig.DEFAULT_NOW);
+		}
+	}
+
+	@Test
+	void rotationIsOneStatement() throws Exception {
+		assertConstant("로테이션", "/api/collector-state/rotation", 1, 4, 30);
 	}
 
 }

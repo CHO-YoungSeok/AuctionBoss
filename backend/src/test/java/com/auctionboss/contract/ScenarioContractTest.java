@@ -54,7 +54,8 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <ul>
  * <li>시나리오마다 쓰기 대상 테이블을 비우고 시드를 다시 적재한 뒤 AUTO_INCREMENT를 재설정한다(id 정렬).</li>
- * <li>단계 i의 서버 시각은 {@code clock.start + i * stepMs}로 {@link MutableClock}을 맞춘다.</li>
+ * <li>단계 i의 서버 시각은 {@code clock.start + i * stepMs}에 단계 0..i의 {@code advanceMs} 누적합을 더한 값으로
+ * {@link MutableClock}을 맞춘다(생성기 {@code stepTimeMs}와 같은 식).</li>
  * <li>골든의 {@code config}는 설정 파일 사본으로 만들어 설정 빈이 읽게 한다(원본이 AUCTIONBOSS_CONFIG를 쓰는 것과 같다).</li>
  * <li>2xx는 {@link ContractTest#diff} 엄격 비교, 400은 {@code error}와 {@code details[].field}, 404는 {@code error},
  * 사진 200은 Content-Type·Cache-Control·SHA-256, 텍스트는 상태와 본문.</li>
@@ -101,14 +102,14 @@ class ScenarioContractTest {
 	@TestFactory
 	Stream<DynamicTest> 시나리오_골든과_같다() throws IOException {
 		Resource[] files = new PathMatchingResourcePatternResolver().getResources("classpath:contracts/scenarios/*.json");
-		assertThat(files).as("시나리오 파일").hasSize(7);
+		assertThat(files).as("시나리오 파일").hasSize(9);
 		int steps = 0;
 		for (Resource file : files) {
 			try (InputStream in = file.getInputStream()) {
 				steps += JSON.readTree(in).get("steps").size();
 			}
 		}
-		assertThat(steps).as("시나리오 단계 수").isEqualTo(115);
+		assertThat(steps).as("시나리오 단계 수").isEqualTo(160);
 		return Arrays.stream(files).sorted(Comparator.comparing(Resource::getFilename)).map(file -> {
 			String name = file.getFilename().replace(".json", "");
 			return DynamicTest.dynamicTest(name, () -> play(name, file));
@@ -155,6 +156,7 @@ class ScenarioContractTest {
 		assertThat(seedLoader.load()).isTrue();
 		jdbc.execute("ALTER TABLE analyses AUTO_INCREMENT = 1");
 		jdbc.execute("ALTER TABLE worker_runs AUTO_INCREMENT = 1");
+		jdbc.execute("ALTER TABLE item_photos AUTO_INCREMENT = 1");
 		applyConfig(name, scenario.get("config"));
 		preparePhotos(scenario.get("photos"));
 
@@ -162,9 +164,11 @@ class ScenarioContractTest {
 		long stepMs = scenario.get("clock").get("stepMs").asLong();
 		Map<String, String> variables = new HashMap<>();
 		JsonNode steps = scenario.get("steps");
+		long advancedMs = 0;
 		for (int i = 0; i < steps.size(); i++) {
 			JsonNode step = steps.get(i);
-			clock.set(start.plusMillis(i * stepMs));
+			advancedMs += step.has("advanceMs") ? step.get("advanceMs").asLong() : 0;
+			clock.set(start.plusMillis(i * stepMs + advancedMs));
 			String label = name + " 단계 " + i + " " + step.get("request").get("method").asString() + " "
 					+ step.get("request").get("path").asString();
 			try {
@@ -186,6 +190,13 @@ class ScenarioContractTest {
 		if (config.has("reanalysisCooldownHours")) {
 			((tools.jackson.databind.node.ObjectNode) merged.get("analysis")).put("reanalysisCooldownHours",
 					config.get("reanalysisCooldownHours").asInt());
+		}
+		if (config.has("intervalMs")) {
+			merged.put("intervalMs", config.get("intervalMs").asInt());
+		}
+		if (config.has("staleAfterIntervals")) {
+			((tools.jackson.databind.node.ObjectNode) merged.get("observability")).put("staleAfterIntervals",
+					config.get("staleAfterIntervals").asInt());
 		}
 		Path copy = Files.createTempFile(base, name + "-collector-", ".json");
 		Files.writeString(copy, JSON.writeValueAsString(merged));

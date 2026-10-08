@@ -15,6 +15,11 @@ export interface StepDef {
   rawBody?: string;
   /** 변수명 -> 응답 본문의 `$.a.b` 경로. */
   capture?: Record<string, string>;
+  /**
+   * 이 단계부터 서버 시각을 이만큼(ms) 뒤로 민다. 앞 단계들의 값과 누적된다.
+   * 시각에 따라 달라지는 판정(워커 상태의 미실행)을 비교하기 위한 필드다.
+   */
+  advanceMs?: number;
 }
 
 export interface PhotoFixture {
@@ -34,6 +39,10 @@ export interface ScenarioConfig {
   maxRunsPerWorker?: number;
   /** `analysis.reanalysisCooldownHours` 덮어쓰기. */
   reanalysisCooldownHours?: number;
+  /** 최상위 `intervalMs`(수집 워커의 기대 주기) 덮어쓰기. */
+  intervalMs?: number;
+  /** `observability.staleAfterIntervals`(미실행 판정 배수) 덮어쓰기. */
+  staleAfterIntervals?: number;
 }
 
 export interface ScenarioDef {
@@ -257,6 +266,77 @@ const photos: ScenarioDef = {
   ],
 };
 
+// ---- switch-web-to-data-port 3.4: 화면용 읽기 API 5개 ----
+
+const patch = (path: string, body: unknown): StepDef => ({ method: "PATCH", path, body });
+const advance = (step: StepDef, advanceMs: number): StepDef => ({ ...step, advanceMs });
+
+const screenReads: ScenarioDef = {
+  name: "screen-reads",
+  config: {},
+  // 사진 2건짜리 물건 1, 분석 2건짜리 물건 1(시드), 분석 없는 물건 207, 사진 없는 물건 2.
+  photos: [
+    { itemId: 1, seq: 1, filePath: "1/1.png", fileSize: 70, mimeType: "image/png", collectedAt: COLLECTED, fixture: MIN_PNG },
+    { itemId: 1, seq: 2, filePath: "1/2.jpg", fileSize: 22, mimeType: "image/jpeg", collectedAt: COLLECTED, fixture: MIN_JPG },
+  ],
+  steps: [
+    get("/api/items/filter-options"),
+    get("/api/items/1/analyses"),
+    get("/api/items/1/analyses", "limit=11"),
+    get("/api/items/1/analyses", "limit=1"),
+    get("/api/items/207/analyses"),
+    get("/api/items/999999/analyses"),
+    get("/api/items/abc/analyses"),
+    get("/api/items/1/analyses", "limit=0"),
+    get("/api/items/1/analyses", "limit=abc"),
+    get("/api/items/1/analyses", "limit=51"),
+    get("/api/items/1/analyses", "limit="),
+    save({ itemId: 1, body: `${analysisBody}\n3차`, promptVersion: "v4", model: "claude-opus-5-5" }),
+    save({ itemId: 1, body: `${analysisBody}\n4차`, promptVersion: "v4" }),
+    get("/api/items/1/analyses", "limit=11"),
+    get("/api/items/1/analyses", "limit=1"),
+    get("/api/items/1/analyses", "limit=3"),
+    get("/api/items/1/photos"),
+    get("/api/items/2/photos"),
+    get("/api/items/999999/photos"),
+    get("/api/items/abc/photos"),
+    get("/api/collector-state/rotation"),
+  ],
+};
+
+const workerStatus: ScenarioDef = {
+  name: "worker-status",
+  // 수집 워커의 기대 주기를 60초, 배수를 2로 줄여 미실행 판정을 짧은 시각 이동으로 만든다.
+  // 분석(600초)·사진(1800초) 워커는 자기 주기를 쓰므로 같은 시각에도 정상으로 남는다.
+  config: { intervalMs: 60_000, staleAfterIntervals: 2 },
+  steps: [
+    get("/api/worker-runs/status", "worker=collector"),
+    get("/api/worker-runs/status", "worker=analyzer"),
+    get("/api/worker-runs/status", "worker=photos"),
+    post("/api/worker-runs", { worker: "collector" }, { run1: "$.id" }),
+    get("/api/worker-runs/status", "worker=collector"),
+    patch("/api/worker-runs/{run1}", { outcome: "success", detail: COLLECTOR_DETAIL }),
+    get("/api/worker-runs/status", "worker=collector"),
+    post("/api/worker-runs", { worker: "analyzer" }, { run2: "$.id" }),
+    patch("/api/worker-runs/{run2}", { outcome: "success", detail: ANALYZER_DETAIL }),
+    post("/api/worker-runs", { worker: "photos" }, { run3: "$.id" }),
+    patch("/api/worker-runs/{run3}", { outcome: "success" }),
+    post("/api/worker-runs", { worker: "collector" }, { run4: "$.id" }),
+    patch("/api/worker-runs/{run4}", { outcome: "blocked", errorKind: "blocked", errorMessage: "차단 응답" }),
+    get("/api/worker-runs/status", "worker=collector"),
+    post("/api/worker-runs", { worker: "collector" }, { run5: "$.id" }),
+    get("/api/worker-runs/status", "worker=collector"),
+    patch("/api/worker-runs/{run5}", { outcome: "failed", errorKind: "network", errorMessage: "연결 실패" }),
+    get("/api/worker-runs/status", "worker=collector"),
+    advance(get("/api/worker-runs/status", "worker=collector"), 121_000),
+    get("/api/worker-runs/status", "worker=analyzer"),
+    get("/api/worker-runs/status", "worker=photos"),
+    get("/api/worker-runs/status"),
+    get("/api/worker-runs/status", "worker=foo"),
+    get("/api/worker-runs/status", "worker="),
+  ],
+};
+
 export const SCENARIOS: ScenarioDef[] = [
   workerRunsLifecycle,
   workerRunsErrors,
@@ -265,4 +345,6 @@ export const SCENARIOS: ScenarioDef[] = [
   bookmarksErrors,
   analyses,
   photos,
+  screenReads,
+  workerStatus,
 ];

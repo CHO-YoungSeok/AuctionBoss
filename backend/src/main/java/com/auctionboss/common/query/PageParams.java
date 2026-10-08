@@ -86,7 +86,7 @@ public final class PageParams {
 	 * {@code ^\d+$} 정수. 정수 형식이 아니면 그 이슈 하나로 끝나고, 형식이 맞으면 안전 정수 범위, 하한, 상한을 각각 검사한다(zod의
 	 * refine 체인처럼 앞 검사가 실패해도 뒤 검사는 계속한다). 문제가 있거나 없으면 null.
 	 */
-	private Long integer(String name, long min, Long max) {
+	public Long integer(String name, long min, Long max) {
 		String raw = read(name);
 		if (raw == null) {
 			return null;

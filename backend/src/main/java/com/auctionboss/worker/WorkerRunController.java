@@ -23,8 +23,11 @@ public class WorkerRunController {
 
 	private final WorkerRunService service;
 
-	public WorkerRunController(WorkerRunService service) {
+	private final WorkerStatusService statusService;
+
+	public WorkerRunController(WorkerRunService service, WorkerStatusService statusService) {
 		this.service = service;
+		this.statusService = statusService;
 	}
 
 	@PostMapping
@@ -47,7 +50,12 @@ public class WorkerRunController {
 		return service.list(params);
 	}
 
-	// 리터럴 경로가 {id} 패턴보다 우선한다.
+	// 리터럴 경로(summary, status)가 {id} 패턴보다 우선한다.
+	@GetMapping("/status")
+	WorkerStatusResponse status(@RequestParam MultiValueMap<String, String> params) {
+		return statusService.status(params);
+	}
+
 	@GetMapping("/summary")
 	RunsSummary summary(@RequestParam MultiValueMap<String, String> params) {
 		return service.summary(params);

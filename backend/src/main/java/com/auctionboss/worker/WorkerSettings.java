@@ -27,6 +27,19 @@ public class WorkerSettings {
 
 	private final Integer maxRunsOverride;
 
+	/** 테스트용 덮어쓰기: 워커별 기대 주기(ms)와 미실행 배수. 비어 있으면 설정 파일을 읽는다. */
+	@Value("${auctionboss.worker.collector-interval-ms:#{null}}")
+	private Integer collectorIntervalOverride;
+
+	@Value("${auctionboss.worker.analyzer-interval-ms:#{null}}")
+	private Integer analyzerIntervalOverride;
+
+	@Value("${auctionboss.worker.photos-interval-ms:#{null}}")
+	private Integer photosIntervalOverride;
+
+	@Value("${auctionboss.worker.stale-after-intervals:#{null}}")
+	private Integer staleAfterOverride;
+
 	public WorkerSettings(@Value("${auctionboss.config-path:}") String configPath,
 			@Value("${auctionboss.worker.max-runs-per-worker:#{null}}") Integer maxRunsOverride) {
 		this.configPath = configPath;
@@ -53,6 +66,60 @@ public class WorkerSettings {
 			throw new IllegalStateException("observability.maxRunsPerWorker는 1 이상의 정수여야 합니다: " + path);
 		}
 		return node.asInt();
+	}
+
+	/**
+	 * 워커별 기대 주기(ms). 원본 {@code getWorkerStatus}와 같다: 수집은 {@code intervalMs}, 분석은
+	 * {@code analysis.intervalMs}, 사진은 {@code photos.intervalMs}. 다른 워커의 주기로 판정하지 않는다.
+	 */
+	public long intervalMs(String worker) {
+		Integer override = switch (worker) {
+			case "collector" -> collectorIntervalOverride;
+			case "analyzer" -> analyzerIntervalOverride;
+			case "photos" -> photosIntervalOverride;
+			default -> throw new IllegalArgumentException("알 수 없는 워커: " + worker);
+		};
+		if (override != null) {
+			return positive(override, "기대 주기 덮어쓰기");
+		}
+		String pointer = switch (worker) {
+			case "collector" -> "/intervalMs";
+			case "analyzer" -> "/analysis/intervalMs";
+			default -> "/photos/intervalMs";
+		};
+		return positive(readNode(pointer), pointer.substring(1).replace('/', '.'));
+	}
+
+	/** 미실행 판정 배수({@code observability.staleAfterIntervals}). 1 이상의 정수. */
+	public int staleAfterIntervals() {
+		if (staleAfterOverride != null) {
+			return (int) positive(staleAfterOverride, "auctionboss.worker.stale-after-intervals");
+		}
+		return (int) positive(readNode("/observability/staleAfterIntervals"), "observability.staleAfterIntervals");
+	}
+
+	private JsonNode readNode(String pointer) {
+		Path path = resolvePath();
+		try {
+			return MAPPER.readTree(Files.readString(path)).at(pointer);
+		}
+		catch (IOException | RuntimeException e) {
+			throw new IllegalStateException("워커 설정 파일을 읽지 못했습니다: " + path, e);
+		}
+	}
+
+	private static long positive(JsonNode node, String name) {
+		if (!node.isIntegralNumber() || !node.canConvertToInt() || node.asInt() < 1) {
+			throw new IllegalStateException(name + "은(는) 1 이상의 정수여야 합니다");
+		}
+		return node.asInt();
+	}
+
+	private static long positive(int value, String name) {
+		if (value < 1) {
+			throw new IllegalStateException(name + "은(는) 1 이상의 정수여야 합니다");
+		}
+		return value;
 	}
 
 	private Path resolvePath() {

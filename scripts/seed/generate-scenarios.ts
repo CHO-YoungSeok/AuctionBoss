@@ -8,7 +8,7 @@
  *
  * 골든 형식:
  *   { clock: { start, stepMs }, config, photos?, steps: [{ request, status, body | text | photo, capture? }] }
- *   - 단계 i(0부터)의 서버 시각은 start + i * stepMs. 생성 중 전역 Date를 그 값으로 고정한다.
+ *   - 단계 i(0부터)의 서버 시각은 start + i * stepMs (+ 단계 0..i의 advanceMs 누적합). 생성 중 전역 Date를 그 값으로 고정한다.
  *   - request: { method, path, query, body? | rawBody? }. path의 `{변수}`는 앞 단계 capture로 치환한다.
  *   - capture: { 변수: "$.경로" }. 응답 본문에서 뽑은 값(숫자/문자열)을 변수로 둔다.
  *   - photo: { contentType, cacheControl, sha256 } (사진 200 응답).
@@ -45,6 +45,15 @@ export interface GoldenStep {
   text?: string;
   photo?: { contentType: string | null; cacheControl: string | null; sha256: string };
   capture?: Record<string, string>;
+  /** 이 단계부터 서버 시각을 뒤로 미는 양(ms). 있을 때만 쓴다. */
+  advanceMs?: number;
+}
+
+/** 단계 i의 서버 시각(ms). Spring 재생(ScenarioContractTest)도 같은 식을 쓴다. */
+export function stepTimeMs(startMs: number, stepMs: number, advances: readonly (number | undefined)[], i: number): number {
+  let advanced = 0;
+  for (let k = 0; k <= i; k++) advanced += advances[k] ?? 0;
+  return startMs + i * stepMs + advanced;
 }
 
 export interface Golden {
@@ -81,9 +90,12 @@ function substitute(text: string, vars: Map<string, string | number>): string {
 
 function writeConfig(file: string, config: ScenarioDef["config"]): void {
   const base = JSON.parse(readFileSync(COLLECTOR_CONFIG, "utf8")) as {
+    intervalMs: number;
     analysis: { reanalysisCooldownHours: number };
-    observability: { maxRunsPerWorker: number };
+    observability: { maxRunsPerWorker: number; staleAfterIntervals: number };
   };
+  if (config.intervalMs !== undefined) base.intervalMs = config.intervalMs;
+  if (config.staleAfterIntervals !== undefined) base.observability.staleAfterIntervals = config.staleAfterIntervals;
   if (config.maxRunsPerWorker !== undefined) base.observability.maxRunsPerWorker = config.maxRunsPerWorker;
   if (config.reanalysisCooldownHours !== undefined) base.analysis.reanalysisCooldownHours = config.reanalysisCooldownHours;
   writeFileSync(file, JSON.stringify(base, null, 2));
@@ -112,7 +124,10 @@ function preparePhotos(dbPath: string, photosDir: string, def: ScenarioDef): voi
 type Handlers = Awaited<ReturnType<typeof loadHandlers>>;
 
 async function loadHandlers() {
-  const [analyses, runs, runById, runsSummary, bookmarks, bookmarkById, feed, feedRead, photos, items, itemById] =
+  const [
+    analyses, runs, runById, runsSummary, bookmarks, bookmarkById, feed, feedRead, photos, items, itemById,
+    filterOptions, itemAnalyses, itemPhotos, runsStatus, rotation,
+  ] =
     await Promise.all([
       import("../../src/app/api/analyses/route"),
       import("../../src/app/api/worker-runs/route"),
@@ -125,8 +140,16 @@ async function loadHandlers() {
       import("../../src/app/api/photos/[itemId]/[seq]/route"),
       import("../../src/app/api/items/route"),
       import("../../src/app/api/items/[id]/route"),
+      import("../../src/app/api/items/filter-options/route"),
+      import("../../src/app/api/items/[id]/analyses/route"),
+      import("../../src/app/api/items/[id]/photos/route"),
+      import("../../src/app/api/worker-runs/status/route"),
+      import("../../src/app/api/collector-state/rotation/route"),
     ]);
-  return { analyses, runs, runById, runsSummary, bookmarks, bookmarkById, feed, feedRead, photos, items, itemById };
+  return {
+    analyses, runs, runById, runsSummary, bookmarks, bookmarkById, feed, feedRead, photos, items, itemById,
+    filterOptions, itemAnalyses, itemPhotos, runsStatus, rotation,
+  };
 }
 
 async function dispatch(h: Handlers, method: string, pathname: string, req: Request): Promise<Response> {
@@ -151,12 +174,22 @@ async function dispatch(h: Handlers, method: string, pathname: string, req: Requ
       return h.feedRead.POST();
     case "GET /api/items":
       return h.items.GET(req);
+    case "GET /api/items/filter-options":
+      return h.filterOptions.GET();
+    case "GET /api/worker-runs/status":
+      return h.runsStatus.GET(req);
+    case "GET /api/collector-state/rotation":
+      return h.rotation.GET();
   }
   let g: RegExpExecArray | null;
   if (method === "PATCH" && (g = m(/^\/api\/worker-runs\/([^/]+)$/)))
     return h.runById.PATCH(req, { params: Promise.resolve({ id: g[1] }) });
   if (method === "DELETE" && (g = m(/^\/api\/bookmarks\/([^/]+)$/)))
     return h.bookmarkById.DELETE(req, { params: Promise.resolve({ itemId: g[1] }) });
+  if (method === "GET" && (g = m(/^\/api\/items\/([^/]+)\/analyses$/)))
+    return h.itemAnalyses.GET(req, { params: Promise.resolve({ id: g[1] }) });
+  if (method === "GET" && (g = m(/^\/api\/items\/([^/]+)\/photos$/)))
+    return h.itemPhotos.GET(req, { params: Promise.resolve({ id: g[1] }) });
   if (method === "GET" && (g = m(/^\/api\/items\/([^/]+)$/)))
     return h.itemById.GET(req, { params: Promise.resolve({ id: g[1] }) });
   if (method === "GET" && (g = m(/^\/api\/photos\/([^/]+)\/([^/]+)$/)))
@@ -183,7 +216,9 @@ async function runScenario(def: ScenarioDef, work: string, baseDb: string, h: Ha
   const origError = console.error;
   try {
     for (const [i, step] of def.steps.entries()) {
-      const nowIso = new Date(startMs + i * CLOCK.stepMs).toISOString();
+      const nowIso = new Date(
+        stepTimeMs(startMs, CLOCK.stepMs, def.steps.map((d) => d.advanceMs), i),
+      ).toISOString();
       const resolvedPath = substitute(step.path, vars);
       const query = step.query ?? "";
       const url = `http://localhost${resolvedPath}${query ? `?${query}` : ""}`;
@@ -209,6 +244,7 @@ async function runScenario(def: ScenarioDef, work: string, baseDb: string, h: Ha
           ...(step.body !== undefined ? { body: step.body } : {}),
           ...(step.rawBody !== undefined ? { rawBody: step.rawBody } : {}),
         },
+        ...(step.advanceMs !== undefined ? { advanceMs: step.advanceMs } : {}),
         status: res.status,
       };
       const contentType = res.headers.get("content-type");

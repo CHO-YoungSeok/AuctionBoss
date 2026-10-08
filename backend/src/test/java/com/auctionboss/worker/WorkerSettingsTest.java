@@ -68,4 +68,39 @@ class WorkerSettingsTest {
 				.isInstanceOf(IllegalStateException.class).hasMessageContaining("none.json");
 	}
 
+	@Test
+	void readsPerWorkerIntervalsAndStaleMultiplierFromTheFile() throws Exception {
+		Path file = write("{\"intervalMs\":600000,\"analysis\":{\"intervalMs\":300000},"
+				+ "\"photos\":{\"intervalMs\":1800000},\"observability\":{\"staleAfterIntervals\":4}}");
+		WorkerSettings settings = new WorkerSettings(file.toString(), null);
+
+		assertThat(settings.intervalMs("collector")).isEqualTo(600_000);
+		assertThat(settings.intervalMs("analyzer")).isEqualTo(300_000);
+		assertThat(settings.intervalMs("photos")).isEqualTo(1_800_000);
+		assertThat(settings.staleAfterIntervals()).isEqualTo(4);
+	}
+
+	@Test
+	void rejectsMissingOrNonPositiveIntervalsAndUnknownWorkers() throws Exception {
+		Path file = write("{\"intervalMs\":0,\"analysis\":{},\"photos\":{\"intervalMs\":1.5},"
+				+ "\"observability\":{\"staleAfterIntervals\":\"3\"}}");
+		WorkerSettings settings = new WorkerSettings(file.toString(), null);
+
+		assertThatThrownBy(() -> settings.intervalMs("collector")).isInstanceOf(IllegalStateException.class);
+		assertThatThrownBy(() -> settings.intervalMs("analyzer")).isInstanceOf(IllegalStateException.class);
+		assertThatThrownBy(() -> settings.intervalMs("photos")).isInstanceOf(IllegalStateException.class);
+		assertThatThrownBy(settings::staleAfterIntervals).isInstanceOf(IllegalStateException.class);
+		assertThatThrownBy(() -> settings.intervalMs("bogus")).isInstanceOf(IllegalArgumentException.class);
+	}
+
+	@Test
+	void realRepositoryConfigHasPositiveIntervalsForEveryWorker() {
+		WorkerSettings settings = new WorkerSettings("", null);
+
+		for (String worker : WorkerKind.ALL) {
+			assertThat(settings.intervalMs(worker)).isPositive();
+		}
+		assertThat(settings.staleAfterIntervals()).isPositive();
+	}
+
 }

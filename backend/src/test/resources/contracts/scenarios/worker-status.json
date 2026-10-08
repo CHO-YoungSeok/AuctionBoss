@@ -1,0 +1,564 @@
+{
+  "clock": {
+    "start": "2026-10-08T00:00:00.000Z",
+    "stepMs": 1000
+  },
+  "config": {
+    "intervalMs": 60000,
+    "staleAfterIntervals": 2
+  },
+  "steps": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/status",
+        "query": "worker=collector"
+      },
+      "status": 200,
+      "body": {
+        "state": "stale",
+        "lastSuccessAt": "2026-10-01T18:57:20.931Z",
+        "lastRun": {
+          "id": 6,
+          "worker": "collector",
+          "startedAt": "2026-10-01T18:55:52.267Z",
+          "finishedAt": "2026-10-01T18:57:20.931Z",
+          "outcome": "success",
+          "errorKind": null,
+          "errorMessage": null,
+          "detail": {
+            "targetCourts": [
+              "서울중앙지방법원"
+            ],
+            "pagesRequested": 18,
+            "itemsFetched": 615,
+            "inserted": 420,
+            "updated": 195,
+            "changed": 195
+          },
+          "itemsChanged": 195
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/status",
+        "query": "worker=analyzer"
+      },
+      "status": 200,
+      "body": {
+        "state": "stale",
+        "lastSuccessAt": "2026-10-01T19:00:21.421Z",
+        "lastRun": {
+          "id": 7,
+          "worker": "analyzer",
+          "startedAt": "2026-10-01T18:58:15.467Z",
+          "finishedAt": "2026-10-01T19:00:21.421Z",
+          "outcome": "success",
+          "errorKind": null,
+          "errorMessage": null,
+          "detail": {
+            "newCount": 5,
+            "reanalysisCount": 2,
+            "succeeded": 7,
+            "failed": 0
+          },
+          "itemsChanged": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/status",
+        "query": "worker=photos"
+      },
+      "status": 200,
+      "body": {
+        "state": "stale",
+        "lastSuccessAt": null,
+        "lastRun": null
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": {
+          "worker": "collector"
+        }
+      },
+      "status": 201,
+      "body": {
+        "id": 8
+      },
+      "capture": {
+        "run1": "$.id"
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/status",
+        "query": "worker=collector"
+      },
+      "status": 200,
+      "body": {
+        "state": "stale",
+        "lastSuccessAt": "2026-10-01T18:57:20.931Z",
+        "lastRun": {
+          "id": 8,
+          "worker": "collector",
+          "startedAt": "2026-10-08T00:00:03.000Z",
+          "finishedAt": null,
+          "outcome": "running",
+          "errorKind": null,
+          "errorMessage": null,
+          "detail": null,
+          "itemsChanged": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run1}",
+        "query": "",
+        "body": {
+          "outcome": "success",
+          "detail": {
+            "targetCourts": [
+              "서울중앙지방법원"
+            ],
+            "pagesRequested": 12,
+            "itemsFetched": 389,
+            "inserted": 0,
+            "updated": 389,
+            "changed": 7
+          }
+        }
+      },
+      "status": 200,
+      "body": {
+        "id": 8,
+        "worker": "collector",
+        "startedAt": "2026-10-08T00:00:03.000Z",
+        "finishedAt": "2026-10-08T00:00:05.000Z",
+        "outcome": "success",
+        "errorKind": null,
+        "errorMessage": null,
+        "detail": {
+          "targetCourts": [
+            "서울중앙지방법원"
+          ],
+          "pagesRequested": 12,
+          "itemsFetched": 389,
+          "inserted": 0,
+          "updated": 389,
+          "changed": 7
+        },
+        "itemsChanged": 7
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/status",
+        "query": "worker=collector"
+      },
+      "status": 200,
+      "body": {
+        "state": "ok",
+        "lastSuccessAt": "2026-10-08T00:00:05.000Z",
+        "lastRun": {
+          "id": 8,
+          "worker": "collector",
+          "startedAt": "2026-10-08T00:00:03.000Z",
+          "finishedAt": "2026-10-08T00:00:05.000Z",
+          "outcome": "success",
+          "errorKind": null,
+          "errorMessage": null,
+          "detail": {
+            "targetCourts": [
+              "서울중앙지방법원"
+            ],
+            "pagesRequested": 12,
+            "itemsFetched": 389,
+            "inserted": 0,
+            "updated": 389,
+            "changed": 7
+          },
+          "itemsChanged": 7
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": {
+          "worker": "analyzer"
+        }
+      },
+      "status": 201,
+      "body": {
+        "id": 9
+      },
+      "capture": {
+        "run2": "$.id"
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run2}",
+        "query": "",
+        "body": {
+          "outcome": "success",
+          "detail": {
+            "newCount": 2,
+            "reanalysisCount": 1,
+            "succeeded": 3,
+            "failed": 0
+          }
+        }
+      },
+      "status": 200,
+      "body": {
+        "id": 9,
+        "worker": "analyzer",
+        "startedAt": "2026-10-08T00:00:07.000Z",
+        "finishedAt": "2026-10-08T00:00:08.000Z",
+        "outcome": "success",
+        "errorKind": null,
+        "errorMessage": null,
+        "detail": {
+          "newCount": 2,
+          "reanalysisCount": 1,
+          "succeeded": 3,
+          "failed": 0
+        },
+        "itemsChanged": null
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": {
+          "worker": "photos"
+        }
+      },
+      "status": 201,
+      "body": {
+        "id": 10
+      },
+      "capture": {
+        "run3": "$.id"
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run3}",
+        "query": "",
+        "body": {
+          "outcome": "success"
+        }
+      },
+      "status": 200,
+      "body": {
+        "id": 10,
+        "worker": "photos",
+        "startedAt": "2026-10-08T00:00:09.000Z",
+        "finishedAt": "2026-10-08T00:00:10.000Z",
+        "outcome": "success",
+        "errorKind": null,
+        "errorMessage": null,
+        "detail": null,
+        "itemsChanged": null
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": {
+          "worker": "collector"
+        }
+      },
+      "status": 201,
+      "body": {
+        "id": 11
+      },
+      "capture": {
+        "run4": "$.id"
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run4}",
+        "query": "",
+        "body": {
+          "outcome": "blocked",
+          "errorKind": "blocked",
+          "errorMessage": "차단 응답"
+        }
+      },
+      "status": 200,
+      "body": {
+        "id": 11,
+        "worker": "collector",
+        "startedAt": "2026-10-08T00:00:11.000Z",
+        "finishedAt": "2026-10-08T00:00:12.000Z",
+        "outcome": "blocked",
+        "errorKind": "blocked",
+        "errorMessage": "차단 응답",
+        "detail": null,
+        "itemsChanged": null
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/status",
+        "query": "worker=collector"
+      },
+      "status": 200,
+      "body": {
+        "state": "blocked",
+        "lastSuccessAt": "2026-10-08T00:00:05.000Z",
+        "lastRun": {
+          "id": 11,
+          "worker": "collector",
+          "startedAt": "2026-10-08T00:00:11.000Z",
+          "finishedAt": "2026-10-08T00:00:12.000Z",
+          "outcome": "blocked",
+          "errorKind": "blocked",
+          "errorMessage": "차단 응답",
+          "detail": null,
+          "itemsChanged": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": {
+          "worker": "collector"
+        }
+      },
+      "status": 201,
+      "body": {
+        "id": 12
+      },
+      "capture": {
+        "run5": "$.id"
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/status",
+        "query": "worker=collector"
+      },
+      "status": 200,
+      "body": {
+        "state": "blocked",
+        "lastSuccessAt": "2026-10-08T00:00:05.000Z",
+        "lastRun": {
+          "id": 12,
+          "worker": "collector",
+          "startedAt": "2026-10-08T00:00:14.000Z",
+          "finishedAt": null,
+          "outcome": "running",
+          "errorKind": null,
+          "errorMessage": null,
+          "detail": null,
+          "itemsChanged": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run5}",
+        "query": "",
+        "body": {
+          "outcome": "failed",
+          "errorKind": "network",
+          "errorMessage": "연결 실패"
+        }
+      },
+      "status": 200,
+      "body": {
+        "id": 12,
+        "worker": "collector",
+        "startedAt": "2026-10-08T00:00:14.000Z",
+        "finishedAt": "2026-10-08T00:00:16.000Z",
+        "outcome": "failed",
+        "errorKind": "network",
+        "errorMessage": "연결 실패",
+        "detail": null,
+        "itemsChanged": null
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/status",
+        "query": "worker=collector"
+      },
+      "status": 200,
+      "body": {
+        "state": "failed",
+        "lastSuccessAt": "2026-10-08T00:00:05.000Z",
+        "lastRun": {
+          "id": 12,
+          "worker": "collector",
+          "startedAt": "2026-10-08T00:00:14.000Z",
+          "finishedAt": "2026-10-08T00:00:16.000Z",
+          "outcome": "failed",
+          "errorKind": "network",
+          "errorMessage": "연결 실패",
+          "detail": null,
+          "itemsChanged": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/status",
+        "query": "worker=collector"
+      },
+      "advanceMs": 121000,
+      "status": 200,
+      "body": {
+        "state": "stale",
+        "lastSuccessAt": "2026-10-08T00:00:05.000Z",
+        "lastRun": {
+          "id": 12,
+          "worker": "collector",
+          "startedAt": "2026-10-08T00:00:14.000Z",
+          "finishedAt": "2026-10-08T00:00:16.000Z",
+          "outcome": "failed",
+          "errorKind": "network",
+          "errorMessage": "연결 실패",
+          "detail": null,
+          "itemsChanged": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/status",
+        "query": "worker=analyzer"
+      },
+      "status": 200,
+      "body": {
+        "state": "ok",
+        "lastSuccessAt": "2026-10-08T00:00:08.000Z",
+        "lastRun": {
+          "id": 9,
+          "worker": "analyzer",
+          "startedAt": "2026-10-08T00:00:07.000Z",
+          "finishedAt": "2026-10-08T00:00:08.000Z",
+          "outcome": "success",
+          "errorKind": null,
+          "errorMessage": null,
+          "detail": {
+            "newCount": 2,
+            "reanalysisCount": 1,
+            "succeeded": 3,
+            "failed": 0
+          },
+          "itemsChanged": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/status",
+        "query": "worker=photos"
+      },
+      "status": 200,
+      "body": {
+        "state": "ok",
+        "lastSuccessAt": "2026-10-08T00:00:10.000Z",
+        "lastRun": {
+          "id": 10,
+          "worker": "photos",
+          "startedAt": "2026-10-08T00:00:09.000Z",
+          "finishedAt": "2026-10-08T00:00:10.000Z",
+          "outcome": "success",
+          "errorKind": null,
+          "errorMessage": null,
+          "detail": null,
+          "itemsChanged": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/status",
+        "query": ""
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 요청 파라미터입니다",
+        "details": [
+          {
+            "field": "worker",
+            "message": "worker는 필수입니다"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/status",
+        "query": "worker=foo"
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 요청 파라미터입니다",
+        "details": [
+          {
+            "field": "worker",
+            "message": "worker는 collector, analyzer, photos 중 하나여야 합니다"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/status",
+        "query": "worker="
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 요청 파라미터입니다",
+        "details": [
+          {
+            "field": "worker",
+            "message": "worker는 collector, analyzer, photos 중 하나여야 합니다"
+          }
+        ]
+      }
+    }
+  ]
+}
