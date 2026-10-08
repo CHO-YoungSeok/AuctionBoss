@@ -38,6 +38,8 @@ dependencies {
 	testImplementation("org.springframework.boot:spring-boot-testcontainers")
 	testImplementation("org.testcontainers:testcontainers-junit-jupiter")
 	testImplementation("org.testcontainers:testcontainers-mysql")
+	// 소스 어댑터 테스트: 루프백 가짜 서버(외부 요청 없음). 헤더 순서·대소문자를 그대로 기록한다.
+	testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

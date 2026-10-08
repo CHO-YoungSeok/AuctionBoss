@@ -1,0 +1,113 @@
+package com.auctionboss.collect.source.courtauction;
+
+import java.util.List;
+
+import tools.jackson.databind.JsonNode;
+
+/**
+ * 검색 결과 행 하나(사건, 물건, 목적물 튜플). 소스 응답 필드명을 그대로 쓰는 어댑터 내부 형식이다. 읽는 필드만 선언하고 나머지는 버린다.
+ * 행 안쪽 필드는 전부 선택이다: 자연 키가 빠진 행은 회차를 죽이지 않고 결과에서 제외해야 하기 때문이다.
+ */
+record SearchRow(
+		String docid,
+		String boCd,
+		String saNo,
+		String maemulSer,
+		String mokmulSer,
+		String srnSaNo,
+		String jiwonNm,
+		String printSt,
+		String addrGbncd,
+		String rdNm,
+		String dspslUsgNm,
+		String maeGiil,
+		String pjbBuldList,
+		String lclsUtilCd,
+		String mclsUtilCd,
+		String sclsUtilCd,
+		String hjguSido,
+		String hjguSigu,
+		String hjguDong,
+		String daepyoLotno,
+		String buldNm,
+		String buldList,
+		String xCordi,
+		String yCordi,
+		String cordiLvl,
+		String maeHh1,
+		String maePlace,
+		String maegyuljGiil,
+		String mulBigo,
+		String dupSaNo,
+		String byungSaNo,
+		String jpDeptNm,
+		String tel,
+		String jinstatCd,
+		String mulStatcd,
+		Numericish gamevalAmt,
+		Numericish minmaePrice,
+		Numericish notifyMinmaePrice1,
+		Numericish yuchalCnt,
+		Numericish minArea,
+		Numericish maxArea,
+		Numericish notifyMinmaePrice2,
+		Numericish notifyMinmaePrice3,
+		Numericish notifyMinmaePrice4,
+		Numericish notifyMinmaePriceRate1,
+		Numericish notifyMinmaePriceRate2,
+		Numericish maeGiilCnt) {
+
+	/** 행 객체를 읽는다. 필드 타입이 어긋나면 {@code issues}에 적는다(zod의 문자열·숫자 선택 필드 규칙). */
+	static SearchRow parse(JsonNode row, String path, List<String> issues) {
+		FieldReader r = new FieldReader(row, path, issues);
+		return new SearchRow(
+				r.text("docid"),
+				r.text("boCd"),
+				r.text("saNo"),
+				r.text("maemulSer"),
+				r.text("mokmulSer"),
+				r.text("srnSaNo"),
+				r.text("jiwonNm"),
+				r.text("printSt"),
+				r.text("addrGbncd"),
+				r.text("rdNm"),
+				r.text("dspslUsgNm"),
+				r.text("maeGiil"),
+				r.text("pjbBuldList"),
+				r.text("lclsUtilCd"),
+				r.text("mclsUtilCd"),
+				r.text("sclsUtilCd"),
+				r.text("hjguSido"),
+				r.text("hjguSigu"),
+				r.text("hjguDong"),
+				r.text("daepyoLotno"),
+				r.text("buldNm"),
+				r.text("buldList"),
+				r.text("xCordi"),
+				r.text("yCordi"),
+				r.text("cordiLvl"),
+				r.text("maeHh1"),
+				r.text("maePlace"),
+				r.text("maegyuljGiil"),
+				r.text("mulBigo"),
+				r.text("dupSaNo"),
+				r.text("byungSaNo"),
+				r.text("jpDeptNm"),
+				r.text("tel"),
+				r.text("jinstatCd"),
+				r.text("mulStatcd"),
+				r.numeric("gamevalAmt"),
+				r.numeric("minmaePrice"),
+				r.numeric("notifyMinmaePrice1"),
+				r.numeric("yuchalCnt"),
+				r.numeric("minArea"),
+				r.numeric("maxArea"),
+				r.numeric("notifyMinmaePrice2"),
+				r.numeric("notifyMinmaePrice3"),
+				r.numeric("notifyMinmaePrice4"),
+				r.numeric("notifyMinmaePriceRate1"),
+				r.numeric("notifyMinmaePriceRate2"),
+				r.numeric("maeGiilCnt"));
+	}
+
+}
