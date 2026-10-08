@@ -106,6 +106,24 @@ describe("POST /api/bookmarks/toggle", () => {
     expect(location.pathname).toBe("/");
   });
 
+  // 회귀 방지: 예전 검사는 "/\\evil.example"을 통과시켰고, 라우트의 new URL(returnTo, request.url)이
+  // 이를 http://evil.example/ 로 풀어 외부로 리다이렉트했다.
+  it.each(["/\\evil.example", "/\t/evil.example"])(
+    "백슬래시·제어 문자로 외부 오리진을 노린 returnTo(%j)도 기본 경로로 되돌린다",
+    async (returnTo) => {
+      const repo = getRepository();
+      repo.upsertItems([makeItem()]);
+      const itemId = repo.listItems().items[0]!.id;
+
+      const response = await POST(formRequest({ itemId: String(itemId), bookmarked: "false", returnTo }));
+
+      expect(response.status).toBe(303);
+      const location = new URL(response.headers.get("location")!);
+      expect(location.origin).toBe("http://localhost");
+      expect(location.pathname).toBe("/");
+    },
+  );
+
   it("returnTo가 프로토콜 상대 경로(//evil.example)여도 기본 경로로 되돌린다", async () => {
     const repo = getRepository();
     repo.upsertItems([makeItem()]);

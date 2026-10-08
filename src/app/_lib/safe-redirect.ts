@@ -11,10 +11,26 @@
  * 잡아내지 못한다.
  */
 
-/** `"/"`로 시작하되 `"//"`(프로토콜 상대 경로, 브라우저가 외부 오리진으로 해석)는 아닌
- * 경로만 안전하다고 본다. */
+/** 같은 오리진인지 확인할 때 쓰는 가상의 기준 오리진. 실제로 요청하지 않는다. */
+const PROBE_ORIGIN = "http://same-origin.invalid";
+
+/**
+ * 같은 오리진 안의 상대 경로만 안전하다고 본다.
+ *
+ * `"/"`로 시작하고 `"//"`(프로토콜 상대 경로)가 아니어야 한다는 문자열 검사만으로는 부족하다.
+ * 브라우저와 URL 해석기는 백슬래시를 `/`로 바꾸고(`/\evil.example` → `//evil.example`),
+ * 탭·줄바꿈을 지운 뒤 해석하기 때문에 문자열 검사를 통과한 값이 외부 오리진이 될 수 있다
+ * (2026-10-09 3단계 계획 중 발견). 그래서 (1) 백슬래시와 제어 문자를 거부하고,
+ * (2) 실제 URL 해석기로 풀어 본 결과가 기준 오리진에 그대로 머무는지까지 확인한다.
+ */
 export function isSafeRelativePath(path: string): boolean {
-  return path.startsWith("/") && !path.startsWith("//");
+  if (!path.startsWith("/") || path.startsWith("//")) return false;
+  if (/[\\\u0000-\u001f\u007f]/.test(path)) return false;
+  try {
+    return new URL(path, PROBE_ORIGIN).origin === PROBE_ORIGIN;
+  } catch {
+    return false;
+  }
 }
 
 /** 검증에 실패하면 이 기본 경로로 돌아간다 — 물건 목록(홈)이 가장 안전한 폴백이다. */
