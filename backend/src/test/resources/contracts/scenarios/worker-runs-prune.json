@@ -1,0 +1,314 @@
+{
+  "clock": {
+    "start": "2026-10-08T00:00:00.000Z",
+    "stepMs": 1000
+  },
+  "config": {
+    "maxRunsPerWorker": 2
+  },
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": {
+          "worker": "analyzer"
+        }
+      },
+      "status": 201,
+      "body": {
+        "id": 8
+      },
+      "capture": {
+        "run1": "$.id"
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs",
+        "query": "worker=analyzer&pageSize=50"
+      },
+      "status": 200,
+      "body": {
+        "runs": [
+          {
+            "id": 8,
+            "worker": "analyzer",
+            "startedAt": "2026-10-08T00:00:00.000Z",
+            "finishedAt": null,
+            "outcome": "running",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": null,
+            "itemsChanged": null
+          },
+          {
+            "id": 7,
+            "worker": "analyzer",
+            "startedAt": "2026-10-01T18:58:15.467Z",
+            "finishedAt": "2026-10-01T19:00:21.421Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "newCount": 5,
+              "reanalysisCount": 2,
+              "succeeded": 7,
+              "failed": 0
+            },
+            "itemsChanged": null
+          }
+        ],
+        "total": 2,
+        "page": 1,
+        "pageSize": 50
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": {
+          "worker": "analyzer"
+        }
+      },
+      "status": 201,
+      "body": {
+        "id": 9
+      },
+      "capture": {
+        "run2": "$.id"
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs",
+        "query": "worker=analyzer&pageSize=50"
+      },
+      "status": 200,
+      "body": {
+        "runs": [
+          {
+            "id": 9,
+            "worker": "analyzer",
+            "startedAt": "2026-10-08T00:00:02.000Z",
+            "finishedAt": null,
+            "outcome": "running",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": null,
+            "itemsChanged": null
+          },
+          {
+            "id": 8,
+            "worker": "analyzer",
+            "startedAt": "2026-10-08T00:00:00.000Z",
+            "finishedAt": null,
+            "outcome": "running",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": null,
+            "itemsChanged": null
+          }
+        ],
+        "total": 2,
+        "page": 1,
+        "pageSize": 50
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs",
+        "query": "worker=collector&pageSize=50"
+      },
+      "status": 200,
+      "body": {
+        "runs": [
+          {
+            "id": 6,
+            "worker": "collector",
+            "startedAt": "2026-10-01T18:55:52.267Z",
+            "finishedAt": "2026-10-01T18:57:20.931Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 18,
+              "itemsFetched": 615,
+              "inserted": 420,
+              "updated": 195,
+              "changed": 195
+            },
+            "itemsChanged": 195
+          },
+          {
+            "id": 4,
+            "worker": "collector",
+            "startedAt": "2026-09-08T11:57:41.263Z",
+            "finishedAt": "2026-09-08T11:58:38.615Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 12,
+              "itemsFetched": 389,
+              "inserted": 0,
+              "updated": 389,
+              "changed": 0
+            },
+            "itemsChanged": 0
+          },
+          {
+            "id": 1,
+            "worker": "collector",
+            "startedAt": "2026-09-08T11:47:41.272Z",
+            "finishedAt": "2026-09-08T11:48:38.633Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 12,
+              "itemsFetched": 389,
+              "inserted": 389,
+              "updated": 0,
+              "changed": 0
+            },
+            "itemsChanged": 0
+          }
+        ],
+        "total": 3,
+        "page": 1,
+        "pageSize": 50
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs",
+        "query": "pageSize=50"
+      },
+      "status": 200,
+      "body": {
+        "runs": [
+          {
+            "id": 9,
+            "worker": "analyzer",
+            "startedAt": "2026-10-08T00:00:02.000Z",
+            "finishedAt": null,
+            "outcome": "running",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": null,
+            "itemsChanged": null
+          },
+          {
+            "id": 8,
+            "worker": "analyzer",
+            "startedAt": "2026-10-08T00:00:00.000Z",
+            "finishedAt": null,
+            "outcome": "running",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": null,
+            "itemsChanged": null
+          },
+          {
+            "id": 6,
+            "worker": "collector",
+            "startedAt": "2026-10-01T18:55:52.267Z",
+            "finishedAt": "2026-10-01T18:57:20.931Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 18,
+              "itemsFetched": 615,
+              "inserted": 420,
+              "updated": 195,
+              "changed": 195
+            },
+            "itemsChanged": 195
+          },
+          {
+            "id": 4,
+            "worker": "collector",
+            "startedAt": "2026-09-08T11:57:41.263Z",
+            "finishedAt": "2026-09-08T11:58:38.615Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 12,
+              "itemsFetched": 389,
+              "inserted": 0,
+              "updated": 389,
+              "changed": 0
+            },
+            "itemsChanged": 0
+          },
+          {
+            "id": 1,
+            "worker": "collector",
+            "startedAt": "2026-09-08T11:47:41.272Z",
+            "finishedAt": "2026-09-08T11:48:38.633Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 12,
+              "itemsFetched": 389,
+              "inserted": 389,
+              "updated": 0,
+              "changed": 0
+            },
+            "itemsChanged": 0
+          }
+        ],
+        "total": 5,
+        "page": 1,
+        "pageSize": 50
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/summary",
+        "query": ""
+      },
+      "status": 200,
+      "body": {
+        "totalRuns": 5,
+        "successCount": 3,
+        "failedCount": 0,
+        "blockedCount": 0,
+        "skippedCount": 0,
+        "runningCount": 2,
+        "successRate": 1,
+        "itemsChanged": 195
+      }
+    }
+  ]
+}

@@ -1,0 +1,409 @@
+{
+  "clock": {
+    "start": "2026-10-08T00:00:00.000Z",
+    "stepMs": 1000
+  },
+  "config": {},
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": {
+          "worker": "bogus"
+        }
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 회차 시작 본문입니다",
+        "details": [
+          {
+            "field": "worker",
+            "message": "Invalid enum value. Expected 'collector' | 'analyzer' | 'photos', received 'bogus'"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": {}
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 회차 시작 본문입니다",
+        "details": [
+          {
+            "field": "worker",
+            "message": "Required"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": [
+          "analyzer"
+        ]
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 회차 시작 본문입니다",
+        "details": [
+          {
+            "field": "(root)",
+            "message": "Expected object, received array"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "rawBody": "not json"
+      },
+      "status": 400,
+      "body": {
+        "error": "JSON 본문을 해석할 수 없습니다"
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": {
+          "worker": "analyzer"
+        }
+      },
+      "status": 201,
+      "body": {
+        "id": 8
+      },
+      "capture": {
+        "run1": "$.id"
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/999999",
+        "query": "",
+        "body": {
+          "outcome": "success"
+        }
+      },
+      "status": 404,
+      "body": {
+        "error": "회차를 찾을 수 없습니다: id=999999"
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/abc",
+        "query": "",
+        "body": {
+          "outcome": "success"
+        }
+      },
+      "status": 404,
+      "body": {
+        "error": "회차를 찾을 수 없습니다: id=abc"
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run1}",
+        "query": "",
+        "body": {
+          "outcome": "nope"
+        }
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 회차 종료 본문입니다",
+        "details": [
+          {
+            "field": "outcome",
+            "message": "Invalid enum value. Expected 'success' | 'failed' | 'blocked', received 'nope'"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run1}",
+        "query": "",
+        "body": {
+          "outcome": "success",
+          "errorKind": ""
+        }
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 회차 종료 본문입니다",
+        "details": [
+          {
+            "field": "errorKind",
+            "message": "String must contain at least 1 character(s)"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run1}",
+        "query": "",
+        "body": {
+          "outcome": "success",
+          "detail": {
+            "newCount": 1
+          }
+        }
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 회차 종료 본문입니다",
+        "details": [
+          {
+            "field": "detail",
+            "message": "Invalid input"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run1}",
+        "query": "",
+        "body": {
+          "outcome": "success",
+          "detail": {
+            "newCount": 2,
+            "reanalysisCount": 1,
+            "succeeded": "3",
+            "failed": 0
+          }
+        }
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 회차 종료 본문입니다",
+        "details": [
+          {
+            "field": "detail",
+            "message": "Invalid input"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run1}",
+        "query": "",
+        "body": {
+          "outcome": "success",
+          "detail": {
+            "photoTargets": 1,
+            "saved": 1
+          }
+        }
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 회차 종료 본문입니다",
+        "details": [
+          {
+            "field": "detail",
+            "message": "Invalid input"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run1}",
+        "query": "",
+        "body": {}
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 회차 종료 본문입니다",
+        "details": [
+          {
+            "field": "outcome",
+            "message": "Required"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run1}",
+        "query": "",
+        "rawBody": "{"
+      },
+      "status": 400,
+      "body": {
+        "error": "JSON 본문을 해석할 수 없습니다"
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run1}",
+        "query": "",
+        "body": {
+          "outcome": "success",
+          "extra": 1,
+          "detail": {
+            "newCount": 2,
+            "reanalysisCount": 1,
+            "succeeded": 3,
+            "failed": 0,
+            "extra": 2
+          }
+        }
+      },
+      "status": 200,
+      "body": {
+        "id": 8,
+        "worker": "analyzer",
+        "startedAt": "2026-10-08T00:00:04.000Z",
+        "finishedAt": "2026-10-08T00:00:14.000Z",
+        "outcome": "success",
+        "errorKind": null,
+        "errorMessage": null,
+        "detail": {
+          "newCount": 2,
+          "reanalysisCount": 1,
+          "succeeded": 3,
+          "failed": 0
+        },
+        "itemsChanged": null
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs",
+        "query": "worker=bogus"
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 요청 파라미터입니다",
+        "details": [
+          {
+            "field": "worker",
+            "message": "worker는 collector, analyzer, photos 중 하나여야 합니다"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs",
+        "query": "page=0"
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 요청 파라미터입니다",
+        "details": [
+          {
+            "field": "page",
+            "message": "page는 1 이상이어야 합니다"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs",
+        "query": "pageSize=201"
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 요청 파라미터입니다",
+        "details": [
+          {
+            "field": "pageSize",
+            "message": "pageSize는 200 이하여야 합니다"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs",
+        "query": "outcome=nope&page=abc"
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 요청 파라미터입니다",
+        "details": [
+          {
+            "field": "outcome",
+            "message": "outcome은 running, success, failed, blocked, skipped 중 하나여야 합니다"
+          },
+          {
+            "field": "page",
+            "message": "page은(는) 정수여야 합니다"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/summary",
+        "query": "worker=bogus"
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 요청 파라미터입니다",
+        "details": [
+          {
+            "field": "worker",
+            "message": "worker는 collector, analyzer, photos 중 하나여야 합니다"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/summary",
+        "query": "since=abc"
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 요청 파라미터입니다",
+        "details": [
+          {
+            "field": "since",
+            "message": "since는 올바른 ISO 날짜·시각이어야 합니다"
+          }
+        ]
+      }
+    }
+  ]
+}

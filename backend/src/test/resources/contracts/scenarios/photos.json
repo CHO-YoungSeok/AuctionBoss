@@ -1,0 +1,149 @@
+{
+  "clock": {
+    "start": "2026-10-08T00:00:00.000Z",
+    "stepMs": 1000
+  },
+  "config": {},
+  "photos": [
+    {
+      "itemId": 1,
+      "seq": 1,
+      "filePath": "1/1.png",
+      "fileSize": 70,
+      "mimeType": "image/png",
+      "collectedAt": "2026-10-07T00:00:00.000Z",
+      "fixture": "sample.png"
+    },
+    {
+      "itemId": 1,
+      "seq": 2,
+      "filePath": "1/2.jpg",
+      "fileSize": 22,
+      "mimeType": "image/jpeg",
+      "collectedAt": "2026-10-07T00:00:00.000Z",
+      "fixture": "sample.jpg"
+    },
+    {
+      "itemId": 1,
+      "seq": 3,
+      "filePath": "1/3.png",
+      "fileSize": 70,
+      "mimeType": "image/png",
+      "collectedAt": "2026-10-07T00:00:00.000Z",
+      "fixture": null
+    },
+    {
+      "itemId": 1,
+      "seq": 4,
+      "filePath": "../outside.png",
+      "fileSize": 70,
+      "mimeType": "image/png",
+      "collectedAt": "2026-10-07T00:00:00.000Z",
+      "fixture": "sample.png"
+    }
+  ],
+  "steps": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/photos/1/1",
+        "query": ""
+      },
+      "status": 200,
+      "photo": {
+        "contentType": "image/png",
+        "cacheControl": "public, max-age=86400, immutable",
+        "sha256": "c414cd0e204de974f73753c7e28d7638e7b3691bb8b1a2bab6b25bb7fed7ce77"
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/photos/1/2",
+        "query": ""
+      },
+      "status": 200,
+      "photo": {
+        "contentType": "image/jpeg",
+        "cacheControl": "public, max-age=86400, immutable",
+        "sha256": "d20f6ffd523b78a86cd2f916fa34af5d1918d75f7b142237c752ad6b254213ab"
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/photos/1/9",
+        "query": ""
+      },
+      "status": 404,
+      "text": "Not Found"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/photos/1/3",
+        "query": ""
+      },
+      "status": 404,
+      "text": "File Not Found"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/photos/1/4",
+        "query": ""
+      },
+      "status": 404,
+      "text": "File Not Found"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/photos/2/1",
+        "query": ""
+      },
+      "status": 404,
+      "text": "Not Found"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/photos/abc/1",
+        "query": ""
+      },
+      "status": 400,
+      "text": "Invalid ID"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/photos/1/abc",
+        "query": ""
+      },
+      "status": 400,
+      "text": "Invalid ID"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/photos/12abc/1",
+        "query": ""
+      },
+      "status": 404,
+      "text": "Not Found"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/photos/1abc/1",
+        "query": ""
+      },
+      "status": 200,
+      "photo": {
+        "contentType": "image/png",
+        "cacheControl": "public, max-age=86400, immutable",
+        "sha256": "c414cd0e204de974f73753c7e28d7638e7b3691bb8b1a2bab6b25bb7fed7ce77"
+      }
+    }
+  ]
+}

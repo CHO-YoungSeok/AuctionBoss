@@ -1,0 +1,819 @@
+{
+  "clock": {
+    "start": "2026-10-08T00:00:00.000Z",
+    "stepMs": 1000
+  },
+  "config": {},
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": {
+          "worker": "analyzer"
+        }
+      },
+      "status": 201,
+      "body": {
+        "id": 8
+      },
+      "capture": {
+        "run1": "$.id"
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run1}",
+        "query": "",
+        "body": {
+          "outcome": "success",
+          "detail": {
+            "newCount": 2,
+            "reanalysisCount": 1,
+            "succeeded": 3,
+            "failed": 0
+          }
+        }
+      },
+      "status": 200,
+      "body": {
+        "id": 8,
+        "worker": "analyzer",
+        "startedAt": "2026-10-08T00:00:00.000Z",
+        "finishedAt": "2026-10-08T00:00:01.000Z",
+        "outcome": "success",
+        "errorKind": null,
+        "errorMessage": null,
+        "detail": {
+          "newCount": 2,
+          "reanalysisCount": 1,
+          "succeeded": 3,
+          "failed": 0
+        },
+        "itemsChanged": null
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": {
+          "worker": "collector"
+        }
+      },
+      "status": 201,
+      "body": {
+        "id": 9
+      },
+      "capture": {
+        "run2": "$.id"
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run2}",
+        "query": "",
+        "body": {
+          "outcome": "success",
+          "detail": {
+            "targetCourts": [
+              "서울중앙지방법원"
+            ],
+            "pagesRequested": 12,
+            "itemsFetched": 389,
+            "inserted": 0,
+            "updated": 389,
+            "changed": 7
+          }
+        }
+      },
+      "status": 200,
+      "body": {
+        "id": 9,
+        "worker": "collector",
+        "startedAt": "2026-10-08T00:00:02.000Z",
+        "finishedAt": "2026-10-08T00:00:03.000Z",
+        "outcome": "success",
+        "errorKind": null,
+        "errorMessage": null,
+        "detail": {
+          "targetCourts": [
+            "서울중앙지방법원"
+          ],
+          "pagesRequested": 12,
+          "itemsFetched": 389,
+          "inserted": 0,
+          "updated": 389,
+          "changed": 7
+        },
+        "itemsChanged": 7
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": {
+          "worker": "analyzer"
+        }
+      },
+      "status": 201,
+      "body": {
+        "id": 10
+      },
+      "capture": {
+        "run3": "$.id"
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run3}",
+        "query": "",
+        "body": {
+          "outcome": "failed",
+          "errorKind": "cli",
+          "errorMessage": "분석 CLI가 비정상 종료했습니다"
+        }
+      },
+      "status": 200,
+      "body": {
+        "id": 10,
+        "worker": "analyzer",
+        "startedAt": "2026-10-08T00:00:04.000Z",
+        "finishedAt": "2026-10-08T00:00:05.000Z",
+        "outcome": "failed",
+        "errorKind": "cli",
+        "errorMessage": "분석 CLI가 비정상 종료했습니다",
+        "detail": null,
+        "itemsChanged": null
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": {
+          "worker": "collector"
+        }
+      },
+      "status": 201,
+      "body": {
+        "id": 11
+      },
+      "capture": {
+        "run4": "$.id"
+      }
+    },
+    {
+      "request": {
+        "method": "PATCH",
+        "path": "/api/worker-runs/{run4}",
+        "query": "",
+        "body": {
+          "outcome": "blocked",
+          "errorKind": "blocked",
+          "errorMessage": "차단 응답"
+        }
+      },
+      "status": 200,
+      "body": {
+        "id": 11,
+        "worker": "collector",
+        "startedAt": "2026-10-08T00:00:06.000Z",
+        "finishedAt": "2026-10-08T00:00:07.000Z",
+        "outcome": "blocked",
+        "errorKind": "blocked",
+        "errorMessage": "차단 응답",
+        "detail": null,
+        "itemsChanged": null
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/worker-runs",
+        "query": "",
+        "body": {
+          "worker": "analyzer"
+        }
+      },
+      "status": 201,
+      "body": {
+        "id": 12
+      },
+      "capture": {
+        "run5": "$.id"
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs",
+        "query": ""
+      },
+      "status": 200,
+      "body": {
+        "runs": [
+          {
+            "id": 12,
+            "worker": "analyzer",
+            "startedAt": "2026-10-08T00:00:08.000Z",
+            "finishedAt": null,
+            "outcome": "running",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": null,
+            "itemsChanged": null
+          },
+          {
+            "id": 11,
+            "worker": "collector",
+            "startedAt": "2026-10-08T00:00:06.000Z",
+            "finishedAt": "2026-10-08T00:00:07.000Z",
+            "outcome": "blocked",
+            "errorKind": "blocked",
+            "errorMessage": "차단 응답",
+            "detail": null,
+            "itemsChanged": null
+          },
+          {
+            "id": 10,
+            "worker": "analyzer",
+            "startedAt": "2026-10-08T00:00:04.000Z",
+            "finishedAt": "2026-10-08T00:00:05.000Z",
+            "outcome": "failed",
+            "errorKind": "cli",
+            "errorMessage": "분석 CLI가 비정상 종료했습니다",
+            "detail": null,
+            "itemsChanged": null
+          },
+          {
+            "id": 9,
+            "worker": "collector",
+            "startedAt": "2026-10-08T00:00:02.000Z",
+            "finishedAt": "2026-10-08T00:00:03.000Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 12,
+              "itemsFetched": 389,
+              "inserted": 0,
+              "updated": 389,
+              "changed": 7
+            },
+            "itemsChanged": 7
+          },
+          {
+            "id": 8,
+            "worker": "analyzer",
+            "startedAt": "2026-10-08T00:00:00.000Z",
+            "finishedAt": "2026-10-08T00:00:01.000Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "newCount": 2,
+              "reanalysisCount": 1,
+              "succeeded": 3,
+              "failed": 0
+            },
+            "itemsChanged": null
+          },
+          {
+            "id": 7,
+            "worker": "analyzer",
+            "startedAt": "2026-10-01T18:58:15.467Z",
+            "finishedAt": "2026-10-01T19:00:21.421Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "newCount": 5,
+              "reanalysisCount": 2,
+              "succeeded": 7,
+              "failed": 0
+            },
+            "itemsChanged": null
+          },
+          {
+            "id": 6,
+            "worker": "collector",
+            "startedAt": "2026-10-01T18:55:52.267Z",
+            "finishedAt": "2026-10-01T18:57:20.931Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 18,
+              "itemsFetched": 615,
+              "inserted": 420,
+              "updated": 195,
+              "changed": 195
+            },
+            "itemsChanged": 195
+          },
+          {
+            "id": 5,
+            "worker": "analyzer",
+            "startedAt": "2026-09-08T11:57:49.045Z",
+            "finishedAt": "2026-09-08T11:59:11.333Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "newCount": 5,
+              "reanalysisCount": 0,
+              "succeeded": 5,
+              "failed": 0
+            },
+            "itemsChanged": null
+          },
+          {
+            "id": 4,
+            "worker": "collector",
+            "startedAt": "2026-09-08T11:57:41.263Z",
+            "finishedAt": "2026-09-08T11:58:38.615Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 12,
+              "itemsFetched": 389,
+              "inserted": 0,
+              "updated": 389,
+              "changed": 0
+            },
+            "itemsChanged": 0
+          },
+          {
+            "id": 3,
+            "worker": "analyzer",
+            "startedAt": "2026-09-08T11:47:56.022Z",
+            "finishedAt": "2026-09-08T11:47:56.037Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "newCount": 0,
+              "reanalysisCount": 0,
+              "succeeded": 0,
+              "failed": 0
+            },
+            "itemsChanged": null
+          },
+          {
+            "id": 2,
+            "worker": "analyzer",
+            "startedAt": "2026-09-08T11:47:49.060Z",
+            "finishedAt": "2026-09-08T11:47:49.080Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "newCount": 0,
+              "reanalysisCount": 0,
+              "succeeded": 0,
+              "failed": 0
+            },
+            "itemsChanged": null
+          },
+          {
+            "id": 1,
+            "worker": "collector",
+            "startedAt": "2026-09-08T11:47:41.272Z",
+            "finishedAt": "2026-09-08T11:48:38.633Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 12,
+              "itemsFetched": 389,
+              "inserted": 389,
+              "updated": 0,
+              "changed": 0
+            },
+            "itemsChanged": 0
+          }
+        ],
+        "total": 12,
+        "page": 1,
+        "pageSize": 20
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs",
+        "query": "worker=analyzer"
+      },
+      "status": 200,
+      "body": {
+        "runs": [
+          {
+            "id": 12,
+            "worker": "analyzer",
+            "startedAt": "2026-10-08T00:00:08.000Z",
+            "finishedAt": null,
+            "outcome": "running",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": null,
+            "itemsChanged": null
+          },
+          {
+            "id": 10,
+            "worker": "analyzer",
+            "startedAt": "2026-10-08T00:00:04.000Z",
+            "finishedAt": "2026-10-08T00:00:05.000Z",
+            "outcome": "failed",
+            "errorKind": "cli",
+            "errorMessage": "분석 CLI가 비정상 종료했습니다",
+            "detail": null,
+            "itemsChanged": null
+          },
+          {
+            "id": 8,
+            "worker": "analyzer",
+            "startedAt": "2026-10-08T00:00:00.000Z",
+            "finishedAt": "2026-10-08T00:00:01.000Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "newCount": 2,
+              "reanalysisCount": 1,
+              "succeeded": 3,
+              "failed": 0
+            },
+            "itemsChanged": null
+          },
+          {
+            "id": 7,
+            "worker": "analyzer",
+            "startedAt": "2026-10-01T18:58:15.467Z",
+            "finishedAt": "2026-10-01T19:00:21.421Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "newCount": 5,
+              "reanalysisCount": 2,
+              "succeeded": 7,
+              "failed": 0
+            },
+            "itemsChanged": null
+          },
+          {
+            "id": 5,
+            "worker": "analyzer",
+            "startedAt": "2026-09-08T11:57:49.045Z",
+            "finishedAt": "2026-09-08T11:59:11.333Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "newCount": 5,
+              "reanalysisCount": 0,
+              "succeeded": 5,
+              "failed": 0
+            },
+            "itemsChanged": null
+          },
+          {
+            "id": 3,
+            "worker": "analyzer",
+            "startedAt": "2026-09-08T11:47:56.022Z",
+            "finishedAt": "2026-09-08T11:47:56.037Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "newCount": 0,
+              "reanalysisCount": 0,
+              "succeeded": 0,
+              "failed": 0
+            },
+            "itemsChanged": null
+          },
+          {
+            "id": 2,
+            "worker": "analyzer",
+            "startedAt": "2026-09-08T11:47:49.060Z",
+            "finishedAt": "2026-09-08T11:47:49.080Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "newCount": 0,
+              "reanalysisCount": 0,
+              "succeeded": 0,
+              "failed": 0
+            },
+            "itemsChanged": null
+          }
+        ],
+        "total": 7,
+        "page": 1,
+        "pageSize": 20
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs",
+        "query": "outcome=success&worker=collector"
+      },
+      "status": 200,
+      "body": {
+        "runs": [
+          {
+            "id": 9,
+            "worker": "collector",
+            "startedAt": "2026-10-08T00:00:02.000Z",
+            "finishedAt": "2026-10-08T00:00:03.000Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 12,
+              "itemsFetched": 389,
+              "inserted": 0,
+              "updated": 389,
+              "changed": 7
+            },
+            "itemsChanged": 7
+          },
+          {
+            "id": 6,
+            "worker": "collector",
+            "startedAt": "2026-10-01T18:55:52.267Z",
+            "finishedAt": "2026-10-01T18:57:20.931Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 18,
+              "itemsFetched": 615,
+              "inserted": 420,
+              "updated": 195,
+              "changed": 195
+            },
+            "itemsChanged": 195
+          },
+          {
+            "id": 4,
+            "worker": "collector",
+            "startedAt": "2026-09-08T11:57:41.263Z",
+            "finishedAt": "2026-09-08T11:58:38.615Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 12,
+              "itemsFetched": 389,
+              "inserted": 0,
+              "updated": 389,
+              "changed": 0
+            },
+            "itemsChanged": 0
+          },
+          {
+            "id": 1,
+            "worker": "collector",
+            "startedAt": "2026-09-08T11:47:41.272Z",
+            "finishedAt": "2026-09-08T11:48:38.633Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 12,
+              "itemsFetched": 389,
+              "inserted": 389,
+              "updated": 0,
+              "changed": 0
+            },
+            "itemsChanged": 0
+          }
+        ],
+        "total": 4,
+        "page": 1,
+        "pageSize": 20
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs",
+        "query": "outcome=running"
+      },
+      "status": 200,
+      "body": {
+        "runs": [
+          {
+            "id": 12,
+            "worker": "analyzer",
+            "startedAt": "2026-10-08T00:00:08.000Z",
+            "finishedAt": null,
+            "outcome": "running",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": null,
+            "itemsChanged": null
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "pageSize": 20
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs",
+        "query": "page=2&pageSize=3"
+      },
+      "status": 200,
+      "body": {
+        "runs": [
+          {
+            "id": 9,
+            "worker": "collector",
+            "startedAt": "2026-10-08T00:00:02.000Z",
+            "finishedAt": "2026-10-08T00:00:03.000Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 12,
+              "itemsFetched": 389,
+              "inserted": 0,
+              "updated": 389,
+              "changed": 7
+            },
+            "itemsChanged": 7
+          },
+          {
+            "id": 8,
+            "worker": "analyzer",
+            "startedAt": "2026-10-08T00:00:00.000Z",
+            "finishedAt": "2026-10-08T00:00:01.000Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "newCount": 2,
+              "reanalysisCount": 1,
+              "succeeded": 3,
+              "failed": 0
+            },
+            "itemsChanged": null
+          },
+          {
+            "id": 7,
+            "worker": "analyzer",
+            "startedAt": "2026-10-01T18:58:15.467Z",
+            "finishedAt": "2026-10-01T19:00:21.421Z",
+            "outcome": "success",
+            "errorKind": null,
+            "errorMessage": null,
+            "detail": {
+              "newCount": 5,
+              "reanalysisCount": 2,
+              "succeeded": 7,
+              "failed": 0
+            },
+            "itemsChanged": null
+          }
+        ],
+        "total": 12,
+        "page": 2,
+        "pageSize": 3
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/summary",
+        "query": ""
+      },
+      "status": 200,
+      "body": {
+        "totalRuns": 12,
+        "successCount": 9,
+        "failedCount": 1,
+        "blockedCount": 1,
+        "skippedCount": 0,
+        "runningCount": 1,
+        "successRate": 0.8181818181818182,
+        "itemsChanged": 202
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/summary",
+        "query": "worker=collector"
+      },
+      "status": 200,
+      "body": {
+        "totalRuns": 5,
+        "successCount": 4,
+        "failedCount": 0,
+        "blockedCount": 1,
+        "skippedCount": 0,
+        "runningCount": 0,
+        "successRate": 0.8,
+        "itemsChanged": 202
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/summary",
+        "query": "since=2026-10-01"
+      },
+      "status": 200,
+      "body": {
+        "totalRuns": 7,
+        "successCount": 4,
+        "failedCount": 1,
+        "blockedCount": 1,
+        "skippedCount": 0,
+        "runningCount": 1,
+        "successRate": 0.6666666666666666,
+        "itemsChanged": 202
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/summary",
+        "query": "since=2026-10-08T00:00:01.000Z"
+      },
+      "status": 200,
+      "body": {
+        "totalRuns": 4,
+        "successCount": 1,
+        "failedCount": 1,
+        "blockedCount": 1,
+        "skippedCount": 0,
+        "runningCount": 1,
+        "successRate": 0.3333333333333333,
+        "itemsChanged": 7
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/summary",
+        "query": "since=2026-10-08T09:00:02.000%2B09:00"
+      },
+      "status": 200,
+      "body": {
+        "totalRuns": 4,
+        "successCount": 1,
+        "failedCount": 1,
+        "blockedCount": 1,
+        "skippedCount": 0,
+        "runningCount": 1,
+        "successRate": 0.3333333333333333,
+        "itemsChanged": 7
+      }
+    }
+  ]
+}

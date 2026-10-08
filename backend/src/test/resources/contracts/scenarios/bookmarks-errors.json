@@ -1,0 +1,268 @@
+{
+  "clock": {
+    "start": "2026-10-08T00:00:00.000Z",
+    "stepMs": 1000
+  },
+  "config": {},
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/bookmarks",
+        "query": "",
+        "body": {
+          "itemId": 999999
+        }
+      },
+      "status": 404,
+      "body": {
+        "error": "물건을 찾을 수 없습니다: id=999999"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "path": "/api/bookmarks/999999",
+        "query": ""
+      },
+      "status": 404,
+      "body": {
+        "error": "물건을 찾을 수 없습니다: id=999999"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "path": "/api/bookmarks/abc",
+        "query": ""
+      },
+      "status": 404,
+      "body": {
+        "error": "물건을 찾을 수 없습니다: id=abc"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "path": "/api/bookmarks/1",
+        "query": ""
+      },
+      "status": 200,
+      "body": {
+        "itemId": 1,
+        "bookmarked": false
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/bookmarks",
+        "query": "",
+        "body": {
+          "itemId": "1"
+        }
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 관심 등록 본문입니다",
+        "details": [
+          {
+            "field": "itemId",
+            "message": "Expected number, received string"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/bookmarks",
+        "query": "",
+        "body": {
+          "itemId": 0
+        }
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 관심 등록 본문입니다",
+        "details": [
+          {
+            "field": "itemId",
+            "message": "itemId는 1 이상이어야 합니다"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/bookmarks",
+        "query": "",
+        "body": {
+          "itemId": 1.5
+        }
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 관심 등록 본문입니다",
+        "details": [
+          {
+            "field": "itemId",
+            "message": "itemId는 정수여야 합니다"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/bookmarks",
+        "query": "",
+        "body": {}
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 관심 등록 본문입니다",
+        "details": [
+          {
+            "field": "itemId",
+            "message": "Required"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/bookmarks",
+        "query": "",
+        "body": [
+          1
+        ]
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 관심 등록 본문입니다",
+        "details": [
+          {
+            "field": "(root)",
+            "message": "Expected object, received array"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/bookmarks",
+        "query": "",
+        "rawBody": "{"
+      },
+      "status": 400,
+      "body": {
+        "error": "JSON 본문을 해석할 수 없습니다"
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/bookmarks",
+        "query": "page=0"
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 요청 파라미터입니다",
+        "details": [
+          {
+            "field": "page",
+            "message": "page는 1 이상이어야 합니다"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/bookmarks",
+        "query": "pageSize=abc&page=-1"
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 요청 파라미터입니다",
+        "details": [
+          {
+            "field": "page",
+            "message": "page은(는) 정수여야 합니다"
+          },
+          {
+            "field": "pageSize",
+            "message": "pageSize은(는) 정수여야 합니다"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/feed",
+        "query": "pageSize=201"
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 요청 파라미터입니다",
+        "details": [
+          {
+            "field": "pageSize",
+            "message": "pageSize는 200 이하여야 합니다"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/feed",
+        "query": "sinceBookmarkedAt=maybe"
+      },
+      "status": 400,
+      "body": {
+        "error": "잘못된 요청 파라미터입니다",
+        "details": [
+          {
+            "field": "sinceBookmarkedAt",
+            "message": "sinceBookmarkedAt은 true 또는 false여야 합니다"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/bookmarks",
+        "query": ""
+      },
+      "status": 200,
+      "body": {
+        "items": [],
+        "total": 0,
+        "page": 1,
+        "pageSize": 20
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/feed",
+        "query": ""
+      },
+      "status": 200,
+      "body": {
+        "entries": [],
+        "total": 0,
+        "page": 1,
+        "pageSize": 20,
+        "unreadCount": 0
+      }
+    }
+  ]
+}
