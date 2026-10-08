@@ -58,6 +58,8 @@ describe("analyzer가 읽는 서버 주소 변수", () => {
     expect(names).toContain("AUCTIONBOSS_API_BASE");
     expect(names).not.toContain("BASE_URL");
     expect(envValue(env, "AUCTIONBOSS_API_BASE")).not.toMatch(/localhost|127\.0\.0\.1/);
+    // 운영 분석 워커는 Spring이 아니라 Next 서비스를 본다(add-spring-write-api: 운영 경로 유지).
+    expect(envValue(env, "AUCTIONBOSS_API_BASE")).toBe("http://auctionboss-service:3000");
   });
 });
 

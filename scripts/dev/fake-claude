@@ -1,0 +1,17 @@
+#!/usr/bin/env node
+// 개발 검증용 가짜 claude CLI. `claude --print --output-format json`과 같은 봉투를 고정 값으로 출력한다.
+// 실제 API·CLI를 호출하지 않는다. stdin(프롬프트)은 읽어서 버린다.
+process.stdin.resume();
+process.stdin.on("data", () => {});
+process.stdin.on("end", () => {
+  process.stdout.write(
+    JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "[개발 검증용 가짜 분석] 이 본문은 fake-claude가 만든 고정 문장이며 실제 분석이 아닙니다.",
+      model: "fake-claude",
+    }) + "\n",
+  );
+});
+process.stdin.on("error", () => process.exit(0));
