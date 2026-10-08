@@ -1,9 +1,11 @@
 /**
  * 워커 상태 화면(`/status`, design.md D7, 스펙 "상태 화면").
  *
- * 기존 페이지들과 같은 관례를 따른다: 서버 컴포넌트에서 저장소를 직접 호출하고
+ * 기존 페이지들과 같은 관례를 따른다: 서버 컴포넌트에서 데이터 포트를 호출하고
  * (`getWorkerStatus`/`listWorkerRuns`/`summarizeRuns`), `force-dynamic`으로 정적
- * 프리렌더를 끈다 — 워커가 새로 남긴 회차가 바로 보여야 한다.
+ * 프리렌더를 끈다 — 워커가 새로 남긴 회차가 바로 보여야 한다. 데이터는 페이지가 맨 위에서
+ * 한꺼번에(병렬로) 읽고, 하위 컴포넌트(`WorkerStatusCard`, `RotationInfo`)는 값을 props로
+ * 받아 그리기만 하는 동기 컴포넌트다(switch-web-to-data-port D4).
  *
  * 표시 판단(상태 → 라벨/심각도, 소요시간 포맷, null-vs-0 성공률)은 전부
  * `../_lib/status-display.ts`의 순수 함수로 뽑혀 있고 이 파일은 그 결과를 그대로
@@ -13,19 +15,18 @@
 import Link from "next/link";
 
 import {
-  COLLECTOR_STATE_KEYS,
-  getCollectorState,
-  getUnreadCount,
-  getWorkerStatus,
-  listWorkerRuns,
-  summarizeRuns,
-} from "@/lib/db";
+  getDataPort,
+  type RunsSummaryResult,
+  type WorkerRunListResult,
+} from "@/lib/data-port";
 import {
   computeLapDurationMs,
   loadCollectorConfig,
   WORKER_KINDS,
+  type CollectorConfig,
   type WorkerKind,
   type WorkerRun,
+  type WorkerStatus,
 } from "@/lib/domain";
 
 import { formatDateTime } from "../_lib/format";
@@ -76,24 +77,26 @@ function RunRow({ run, now }: { run: WorkerRun; now: Date }) {
  * 보러 오는 화면이다 — 설정 오류 때문에 상태 화면 전체가 깨지면 정작 봐야 할 다른
  * 정보(성공률·차단 여부 등)까지 가려진다. 그래서 여기서만 잡아 표시로 대체한다.
  */
-function RotationInfo() {
-  let config;
-  try {
-    config = loadCollectorConfig();
-  } catch (error) {
+/** 설정을 읽은 결과. 읽지 못하면 오류 안내 문구에 쓸 값을 담는다. */
+type RotationData =
+  | { ok: true; config: CollectorConfig; nextCourtCode: string | null }
+  | { ok: false; error: unknown };
+
+function RotationInfo({ rotation: data }: { rotation: RotationData }) {
+  if (!data.ok) {
     return (
       <p className="muted status-rotation-error">
-        수집 설정을 불러올 수 없어 로테이션 정보를 표시할 수 없습니다: {String(error)}
+        수집 설정을 불러올 수 없어 로테이션 정보를 표시할 수 없습니다: {String(data.error)}
       </p>
     );
   }
+  const { config, nextCourtCode } = data;
 
   const lapMs = computeLapDurationMs(
     config.scope.courts.length,
     config.scope.maxCourtsPerRun,
     config.intervalMs,
   );
-  const nextCourtCode = getCollectorState(COLLECTOR_STATE_KEYS.ROTATION_NEXT_COURT_CODE);
   const rotation = describeRotationPosition(config.scope.courts, nextCourtCode);
 
   return (
@@ -118,13 +121,25 @@ function RotationInfo() {
   );
 }
 
-function WorkerStatusCard({ worker, now }: { worker: WorkerKind; now: Date }) {
-  const nowIso = now.toISOString();
-  const status = getWorkerStatus(worker, { now: nowIso });
+interface WorkerCardData {
+  status: WorkerStatus;
+  summary: RunsSummaryResult;
+  runs: WorkerRunListResult["runs"];
+}
+
+function WorkerStatusCard({
+  worker,
+  now,
+  data,
+  rotation,
+}: {
+  worker: WorkerKind;
+  now: Date;
+  data: WorkerCardData;
+  rotation: RotationData;
+}) {
+  const { status, summary, runs } = data;
   const stateDisplay = describeWorkerState(status.state);
-  const since = new Date(now.getTime() - SUMMARY_WINDOW_MS).toISOString();
-  const summary = summarizeRuns({ worker, since });
-  const { runs } = listWorkerRuns({ worker, pageSize: RECENT_RUNS_LIMIT });
 
   return (
     <section className={`card status-card status-${stateDisplay.severity}`}>
@@ -163,7 +178,7 @@ function WorkerStatusCard({ worker, now }: { worker: WorkerKind; now: Date }) {
 
       {/* 로테이션(법원 순환)은 collector 워커에만 있는 개념이다(design.md D1~D3) —
           analyzer 카드에는 붙이지 않는다. */}
-      {worker === "collector" ? <RotationInfo /> : null}
+      {worker === "collector" ? <RotationInfo rotation={rotation} /> : null}
 
       <h3>최근 회차</h3>
       {runs.length === 0 ? (
@@ -179,14 +194,43 @@ function WorkerStatusCard({ worker, now }: { worker: WorkerKind; now: Date }) {
   );
 }
 
-export default function StatusPage() {
+/**
+ * 설정(`config/collector.json`)은 데이터베이스가 아니라 파일이라 포트 대상이 아니다. 읽지 못하면
+ * 로테이션 위치를 읽을 이유도 없으므로 포트 호출을 건너뛴다.
+ */
+async function loadRotation(port: ReturnType<typeof getDataPort>): Promise<RotationData> {
+  let config: CollectorConfig;
+  try {
+    config = loadCollectorConfig();
+  } catch (error) {
+    return { ok: false, error };
+  }
+  return { ok: true, config, nextCourtCode: await port.getRotationNextCourtCode() };
+}
+
+export default async function StatusPage() {
   // 렌더링 시작 시점 하나로 고정한다 — 표시 목적으로만 쓰이므로(목록 페이지와 같은 관례)
   // 카드마다 다시 계산하면 렌더 중 시각이 흔들려 "경과 시간" 표시가 이해하기 어려워진다.
   const now = new Date();
+  const since = new Date(now.getTime() - SUMMARY_WINDOW_MS).toISOString();
 
   // 관심 물건·변동 피드로 가는 경로에 미확인 개수를 보여준다(add-bookmarks-and-feed
   // task 4.5) — 목록/상세 페이지와 같은 이유.
-  const unreadCount = getUnreadCount();
+  const port = getDataPort();
+  const [unreadCount, rotation, workerData] = await Promise.all([
+    port.getUnreadCount(),
+    loadRotation(port),
+    Promise.all(
+      WORKER_KINDS.map(async (worker): Promise<WorkerCardData> => {
+        const [status, summary, { runs }] = await Promise.all([
+          port.getWorkerStatus(worker),
+          port.summarizeRuns({ worker, since }),
+          port.listWorkerRuns({ worker, pageSize: RECENT_RUNS_LIMIT }),
+        ]);
+        return { status, summary, runs };
+      }),
+    ),
+  ]);
 
   return (
     <main className="page">
@@ -206,8 +250,14 @@ export default function StatusPage() {
       </header>
 
       <div className="status-grid">
-        {WORKER_KINDS.map((worker) => (
-          <WorkerStatusCard key={worker} worker={worker} now={now} />
+        {WORKER_KINDS.map((worker, index) => (
+          <WorkerStatusCard
+            key={worker}
+            worker={worker}
+            now={now}
+            data={workerData[index]}
+            rotation={rotation}
+          />
         ))}
       </div>
     </main>

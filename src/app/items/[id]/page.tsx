@@ -7,7 +7,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { PROMPT_VERSION } from "@/lib/domain";
-import { getRepository, getUnreadCount } from "@/lib/db";
+import { getDataPort } from "@/lib/data-port";
 
 import { AnalysisBody } from "../../_components/analysis-body";
 import { BookmarkToggleForm } from "../../_components/bookmark-toggle-form";
@@ -95,19 +95,30 @@ export default async function ItemDetailPage({
   // 숫자가 아닌 id는 조회하지 않고 바로 404. Number("12abc")가 NaN이 되는 것에 의존하지 않는다.
   if (!/^\d+$/.test(id)) notFound();
 
-  const repository = getRepository();
-  const item = repository.getItemById(Number(id));
+  const port = getDataPort();
+  const item = await port.getItemById(Number(id));
   if (!item) notFound();
 
-  // getLatestAnalysis가 아니라 listAnalyses로 받아 최신/이전을 직접 나눈다 — "이전 분석이
-  // 몇 건 있는지"와 그 내용을 화면에서 보여줘야 하기 때문이다(spec: 재분석된 물건 상세).
+  // 물건이 있다는 것을 알았으니 나머지는 서로 독립이라 병렬로 읽는다(switch-web-to-data-port D4).
+  // 사진 목록은 사진 상태가 `collected`일 때만 읽는다 — 아닌 물건은 요청 자체를 보내지 않는다.
+  const photoState = getPhotoDisplayState(item);
+  const [analysisHistory, changes, unreadCount, photos] = await Promise.all([
+    // getLatestAnalysis가 아니라 이력으로 받아 최신/이전을 직접 나눈다 — "이전 분석이
+    // 몇 건 있는지"와 그 내용을 화면에서 보여줘야 하기 때문이다(spec: 재분석된 물건 상세).
+    // 다만 한도 없이 전체를 받지 않는다(finding 3b) — `limit`으로 렌더링 대상만 잘라 받고,
+    // "몇 건 있는지"는 같은 응답의 `total`(잘리지 않는 진짜 전체 건수)을 쓴다.
+    port.getAnalysisHistory(item.id, { limit: MAX_ANALYSES_FETCHED }),
+    port.listItemChanges(item.id),
+    // 관심 물건·변동 피드로 가는 경로에 미확인 개수를 보여준다(task 4.5) — 목록 페이지와
+    // 같은 이유.
+    port.getUnreadCount(),
+    photoState === "collected" ? port.listItemPhotos(item.id) : Promise.resolve([]),
+  ]);
+
   // 분리 판정은 순수 헬퍼(analysis-history.ts)로 뽑아 테스트로 고정했다.
-  //
-  // 다만 한도 없이 전체를 받지 않는다(finding 3b) — `limit`으로 렌더링 대상만 잘라 받고,
-  // "몇 건 있는지"는 별도로 `countAnalyses`(잘리지 않는 진짜 전체 건수)에서 가져온다.
-  const totalAnalysesCount = repository.countAnalyses(item.id);
+  const totalAnalysesCount = analysisHistory.total;
   const { latest: analysis, previous: previousAnalyses } = splitAnalysisHistory(
-    repository.listAnalyses(item.id, { limit: MAX_ANALYSES_FETCHED }),
+    analysisHistory.analyses,
   );
   // 전체 건수 대비 실제로 렌더링하는 이전 분석 건수 — 나머지는 본문을 아예 불러오지 않는다.
   const hiddenPreviousCount = Math.max(0, totalAnalysesCount - 1 - previousAnalyses.length);
@@ -115,7 +126,6 @@ export default async function ItemDetailPage({
   // 기준점(oldValue===null) 행은 화면에 표시하지 않는다 — 실제 변경만 이력으로 보여준다
   // (design.md D2). 빈 이력(레거시 물건)과 기준점만 있는 이력(신규 물건, 아직 변동 없음)은
   // hasRealChange가 똑같이 false로 판정하므로 여기서 따로 갈라 처리하지 않는다.
-  const changes = repository.listItemChanges(item.id);
   const realChanges = changes.filter(isRealChange).map(formatChangeDisplay);
 
   // 확장 정보(enrich-item-fields task 4.1) 표시 판정은 전부 순수 헬퍼(item-extensions.ts)로
@@ -155,12 +165,6 @@ export default async function ItemDetailPage({
   // 않는다.
   const courtVerifyLink = buildCourtVerifyLink(item);
 
-  // 관심 물건·변동 피드로 가는 경로에 미확인 개수를 보여준다(task 4.5) — 목록 페이지와
-  // 같은 이유.
-  const unreadCount = getUnreadCount();
-
-  const photoState = getPhotoDisplayState(item);
-  const photos = photoState === "collected" ? repository.getItemPhotos(item.id) : [];
 
   const kakaoMapUrl = buildKakaoMapUrl(item.address);
   const naverMapUrl = buildNaverMapUrl(item.address);

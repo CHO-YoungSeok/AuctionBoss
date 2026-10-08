@@ -1,15 +1,15 @@
 /**
  * 관심 물건 목록 페이지(`/bookmarks`, add-bookmarks-and-feed task 4.3).
  *
- * `/`(물건 목록)와 같은 관례를 따른다: 서버 컴포넌트가 저장소(`listBookmarkedItems`)를
- * 직접 호출하고, `force-dynamic`으로 정적 프리렌더를 끈다. 필터·정렬은 없다 — design.md
+ * `/`(물건 목록)와 같은 관례를 따른다: 서버 컴포넌트가 데이터 포트(`listBookmarkedItems`)를
+ * 호출하고, `force-dynamic`으로 정적 프리렌더를 끈다. 필터·정렬은 없다 — design.md
  * D6이 "관심 물건만 보기" 필터를 목록 쿼리(`/`)에 넣지 않고 전용 페이지로 분리한 이유가
  * 그대로 이 페이지의 존재 이유이므로, 여기에 다시 필터를 얹지 않는다. 페이지네이션만
  * 지원한다.
  */
 import Link from "next/link";
 
-import { getUnreadCount, listBookmarkedItems } from "@/lib/db";
+import { getDataPort } from "@/lib/data-port";
 
 import { BookmarkToggleForm } from "../_components/bookmark-toggle-form";
 import { formatCount, formatDate, formatText, formatWon } from "../_lib/format";
@@ -40,9 +40,13 @@ export default async function BookmarksPage({
   const params = await searchParams;
   const page = parsePage(params.page);
 
-  const { items, total, pageSize } = listBookmarkedItems({ page });
+  // 데이터는 맨 위에서 한꺼번에 읽는다(switch-web-to-data-port D4).
+  const port = getDataPort();
+  const [{ items, total, pageSize }, unreadCount] = await Promise.all([
+    port.listBookmarkedItems({ page }),
+    port.getUnreadCount(),
+  ]);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const unreadCount = getUnreadCount();
   // 각 행의 관심 해제 폼이 돌아갈 경로 — 지금 보고 있는 이 관심 목록 페이지 그대로다
   // (design.md D5와 같은 원칙: 물건을 하나 뺐다고 페이지가 초기화되면 안 된다).
   const currentHref = bookmarksHref(page);

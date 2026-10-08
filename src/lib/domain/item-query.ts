@@ -731,3 +731,67 @@ export function chooseEmptyState(total: number, query: ItemQuery): EmptyState {
   if (total > 0) return { kind: "hasItems" };
   return hasActiveFilters(query) ? { kind: "emptyFiltered" } : { kind: "emptyDatabase" };
 }
+
+/** `itemQuerySearchParams`가 표현하지 못해 던지게 하는 필드. */
+const UNSERIALIZABLE_QUERY_FIELDS = [
+  "needsAnalysis",
+  "promptVersion",
+  "reanalysisCooldownHours",
+] as const satisfies readonly (keyof ItemQuery)[];
+
+/**
+ * 조건을 URL 파라미터로 되돌린다.
+ *
+ * 기본값(1페이지, 기본 페이지 크기)은 생략해 URL을 짧게 유지한다 — 파서가 없는 값에
+ * 같은 기본값을 주므로 결과는 동일하다.
+ */
+export function itemQuerySearchParams(query: ItemQuery): URLSearchParams {
+  // 이 직렬화는 화면 URL 파라미터와 같은 이름을 쓰므로 아래 세 필드를 표현할 수 없다
+  // (`needsAnalysis`는 워커 전용, `reanalysisCooldownHours`는 URL 파라미터가 아니다).
+  // 조용히 버리면 호출자가 다른 조건으로 조회하게 되므로 던진다.
+  for (const unsupported of UNSERIALIZABLE_QUERY_FIELDS) {
+    if (query[unsupported] !== undefined) {
+      throw new Error(`ItemQuery.${unsupported}은(는) URL 파라미터로 직렬화할 수 없습니다`);
+    }
+  }
+  const params = new URLSearchParams();
+
+  for (const usageType of query.usageTypes ?? []) {
+    params.append("usage", usageType); // 값마다 하나씩 — 절대 쉼표로 합치지 않는다
+  }
+  for (const sido of query.sidoValues ?? []) {
+    params.append("sido", sido); // usage와 같은 반복 파라미터 인코딩(design.md D1)
+  }
+  for (const sigungu of query.sigunguValues ?? []) {
+    params.append("sigungu", sigungu);
+  }
+  // 억/만원(minEok/minMan 등)은 왕복하지 않는다 — ItemQuery는 합산된 원 단위 값만 갖고
+  // 있고(item-query.ts의 `effectivePriceBound`), 그게 API 계약이다(design.md D3). 링크가
+  // 항상 minPrice/maxPrice로 정규화되는 편이 lenient 파서의 다른 필드들과 일관된다.
+  if (query.minPrice !== undefined) params.set("minPrice", String(query.minPrice));
+  if (query.maxPrice !== undefined) params.set("maxPrice", String(query.maxPrice));
+  if (query.minFailedBidCount !== undefined) {
+    params.set("minFailed", String(query.minFailedBidCount));
+  }
+  if (query.addressKeyword !== undefined) params.set("q", query.addressKeyword);
+  if (query.auctionDateFrom !== undefined) params.set("dateFrom", query.auctionDateFrom);
+  if (query.auctionDateTo !== undefined) params.set("dateTo", query.auctionDateTo);
+  if (query.excludePastAuctions !== undefined) {
+    params.set("excludePast", String(query.excludePastAuctions));
+  }
+  if (query.bookmarked !== undefined) params.set("bookmarked", String(query.bookmarked));
+  if (query.court !== undefined) params.set("court", query.court);
+  if (query.minDiscountRate !== undefined) params.set("minDiscountRate", String(query.minDiscountRate));
+  if (query.hasPhotos !== undefined) params.set("hasPhotos", String(query.hasPhotos));
+  if (query.sort !== undefined) params.set("sort", query.sort);
+  if (query.direction !== undefined) params.set("dir", query.direction);
+  // 페이지에는 UI가 없지만 URL로 들어온 값은 유지한다 — 링크를 눌렀다고 조건이
+  // 조용히 바뀌면 안 된다.
+  if (query.analyzed !== undefined) params.set("analyzed", String(query.analyzed));
+  if (query.pageSize !== undefined && query.pageSize !== DEFAULT_PAGE_SIZE) {
+    params.set("pageSize", String(query.pageSize));
+  }
+  if (query.page !== undefined && query.page !== 1) params.set("page", String(query.page));
+
+  return params;
+}

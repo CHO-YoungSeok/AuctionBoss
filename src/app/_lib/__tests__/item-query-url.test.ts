@@ -134,3 +134,15 @@ describe("itemListHref → parseItemQueryLenient 라운드트립", () => {
     }
   });
 });
+
+describe("itemListHref: 워커 전용 조건은 링크에서 버린다(던지지 않는다)", () => {
+  it("needsAnalysis·promptVersion·reanalysisCooldownHours가 든 조건도 링크를 만든다", () => {
+    const query: ItemQuery = {
+      needsAnalysis: true,
+      promptVersion: "v1",
+      reanalysisCooldownHours: 24,
+      usageTypes: ["아파트"],
+    };
+    expect(itemListHref(query, { page: 2 })).toBe("/?usage=%EC%95%84%ED%8C%8C%ED%8A%B8&page=2");
+  });
+});

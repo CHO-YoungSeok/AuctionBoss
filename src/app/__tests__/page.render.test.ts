@@ -113,4 +113,10 @@ describe("물건 목록 페이지 렌더링 (hardening-round1 task 3)", () => {
     expect(html).toContain("면적당 가격");
     expect(html).toMatch(/원\/㎡/);
   });
+
+  it("워커 전용 쿼리(needsAnalysis·promptVersion)가 URL에 와도 500 없이 렌더된다", async () => {
+    // 3단계에서 직렬화가 이 필드를 던지게 바뀌었다 — 화면 링크가 먼저 걸러야 한다.
+    const html = await renderListPage({ needsAnalysis: "true", promptVersion: "v1" });
+    expect(html.length).toBeGreaterThan(0);
+  });
 });

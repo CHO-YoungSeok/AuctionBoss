@@ -6,7 +6,11 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     // tsconfig의 "@/*" -> "./src/*" 와 같은 매핑.
-    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // `server-only`는 Next가 번들러 별칭으로 처리한다. vitest(서버 환경)에서는 빈 모듈로 연결한다.
+      "server-only": "next/dist/compiled/server-only/empty",
+    },
   },
   // tsconfig.json의 jsx는 "preserve"다(Next.js가 SWC로 직접 JSX를 변환하므로). vite 7의
   // 기본 변환기(oxc)는 "preserve"를 처리하지 못해 그대로 두면 .tsx import가 파싱 오류로

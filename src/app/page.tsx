@@ -1,8 +1,9 @@
 /**
  * 물건 목록 페이지(홈).
  *
- * 서버 컴포넌트에서 저장소를 직접 읽는다 — 자기 자신의 API를 fetch하면 같은 프로세스 안에서
- * 왕복 HTTP 요청이 한 번 더 생길 뿐 얻는 게 없다.
+ * 서버 컴포넌트에서 데이터 포트(`@/lib/data-port`)로 읽는다 — 자기 자신의 API를 fetch하면
+ * 같은 프로세스 안에서 왕복 HTTP 요청이 한 번 더 생길 뿐 얻는 게 없다. 데이터는 맨 위에서
+ * 한꺼번에(병렬로) 읽고 렌더는 값만 쓴다(switch-web-to-data-port D4).
  *
  * 파라미터는 **lenient 파서**로 읽는다(`parseItemQueryLenient`). API가 잘못된 값을 400으로
  * 거절하는 것과 의도적으로 다르다 (design.md D4): 워커 같은 API 클라이언트는 오타를 알아야
@@ -11,7 +12,7 @@
  */
 import Link from "next/link";
 
-import { getRepository, getUnreadCount, getWorkerStatus } from "@/lib/db";
+import { getDataPort } from "@/lib/data-port";
 import {
   DEFAULT_SORT_DIRECTION,
   DEFAULT_SORT_KEY,
@@ -63,23 +64,35 @@ export default async function ItemListPage({
   // 정규화된 `query`에서 만들어지므로, URL의 쓰레기 값이 화면의 링크로 퍼지지 않는다.
   const query = parseItemQueryLenient(params);
 
-  const repository = getRepository();
+  const port = getDataPort();
   // 용도·지역 선택지는 저장된 데이터에서 도출한다 — 하드코딩하지 않는다(design.md D3,
   // ux-overhaul-phase2 tasks.md 1.2/5.1).
-  const usageTypes = repository.listUsageTypes();
-  const sidoValues = repository.listSidoValues();
-  const sigunguValues = repository.listSigunguValues();
-  const courtOptions = repository.listCourtValues();
-  const { items, total, page, pageSize } = repository.listItems(query);
+  //
+  // 신선도·커버리지 배너(design.md D6, tasks.md 7.1~7.2/7.4)는 새 쿼리를 만들지 않는다.
+  // 수집 워커 상태는 `/status`가 쓰는 판정을 그대로 쓰고, 분석 커버리지는
+  // `listItems({analyzed:true})`(기존 파라미터)로 얻는다. `pageSize: 1`로 행은 최소한만
+  // 받고 `total`만 쓴다. 분모(전체 건수)는 현재 화면의 필터와 무관하게 DB 전체 기준이어야
+  // "분석 N/389건"이 실제 전체 대비로 읽힌다 — 그래서 `query`가 아니라 빈 조건으로 별도
+  // 호출한다.
+  //
+  // 피드로 가는 링크에 미확인 개수를 노출한다(task 4.5) — 접근 경로가 없으면 아무도
+  // 보지 않는다는 design.md의 지적과 같은 이유.
+  const [filterOptions, { items, total, page, pageSize }, totalCountResult, analyzedCountResult, unreadCount, collectorStatus] =
+    await Promise.all([
+      port.listFilterOptions(),
+      port.listItems(query),
+      port.listItems({ pageSize: 1 }),
+      port.listItems({ analyzed: true, pageSize: 1 }),
+      port.getUnreadCount(),
+      port.getWorkerStatus("collector"),
+    ]);
+  const { usageTypes, sidoValues, sigunguValues, courtValues: courtOptions } = filterOptions;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   // 관심 토글 폼(각 행)이 제출 후 돌아갈 경로 — 지금 보고 있는 이 목록 URL 그대로다
   // (design.md D5, spec: "등록 후 화면 복귀"). `itemListHref`가 정규화된 `query` 하나에서
   // 만들어 주므로 필터·정렬·페이지가 빠지지 않는다.
   const currentListHref = itemListHref(query);
-  // 피드로 가는 링크에 미확인 개수를 노출한다(task 4.5) — 접근 경로가 없으면 아무도
-  // 보지 않는다는 design.md의 지적과 같은 이유.
-  const unreadCount = getUnreadCount();
 
   const filtersActive = hasActiveFilters(query);
   // 필터 칩(design.md D5, tasks.md 7.1/7.4) — 폼이 접혀 있어도(details) 무엇이 적용
@@ -99,19 +112,10 @@ export default async function ItemListPage({
   // (design.md D6) 오차는 무의미하지만, 렌더 중 시각이 흔들리지 않는 편이 이해하기 쉽다.
   const now = new Date();
 
-  // 신선도·커버리지 배너(design.md D6, tasks.md 7.1~7.2/7.4) — 새 쿼리를 만들지 않는다.
-  // `getWorkerStatus`는 `/status`가 이미 쓰는 함수를 그대로 재사용하고, 분석 커버리지는
-  // `listItems({analyzed:true})`(기존 파라미터)로 얻는다. `pageSize: 1`로 행은 최소한만
-  // 받고 `total`(별도 COUNT 쿼리, 필터와 무관하게 항상 계산됨)만 쓴다. 분모(전체 건수)는
-  // 현재 화면의 필터와 무관하게 DB 전체 기준이어야 "분석 N/389건"이 실제 전체 대비로
-  // 읽힌다 — 그래서 `query`가 아니라 빈 조건으로 별도 호출한다.
-  const collectorStatus = getWorkerStatus("collector", { now: now.toISOString() });
-  const totalItemCount = repository.listItems({ pageSize: 1 }).total;
-  const analyzedItemCount = repository.listItems({ analyzed: true, pageSize: 1 }).total;
   const collectionBanner = buildCollectionBanner({
     collectorStatus,
-    analyzedCount: analyzedItemCount,
-    totalCount: totalItemCount,
+    analyzedCount: analyzedCountResult.total,
+    totalCount: totalCountResult.total,
   });
   const collectionWarning = shouldWarnCollection(collectionBanner.collectorState);
 

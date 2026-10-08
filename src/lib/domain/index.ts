@@ -79,6 +79,7 @@ export {
   WON_PER_MAN,
   chooseEmptyState,
   hasActiveFilters,
+  itemQuerySearchParams,
   parseItemQuery,
   parseItemQueryLenient,
   type EmptyState,
@@ -90,3 +91,5 @@ export {
   type SortDirection,
   type SortKey,
 } from "./item-query";
+
+export { ItemNotFoundError, WorkerRunNotFoundError } from "./errors";

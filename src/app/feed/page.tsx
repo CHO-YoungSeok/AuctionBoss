@@ -1,7 +1,7 @@
 /**
  * 변동 피드 페이지(`/feed`, add-bookmarks-and-feed task 4.4).
  *
- * `/`(물건 목록)와 같은 관례: 서버 컴포넌트가 저장소(`listFeed`/`getUnreadCount`)를 직접
+ * `/`(물건 목록)와 같은 관례: 서버 컴포넌트가 데이터 포트(`listFeed`/`getUnreadCount`)를
  * 호출하고 `force-dynamic`으로 정적 프리렌더를 끈다.
  *
  * ⚠️ 이 페이지를 여는 것 자체는 읽음 처리를 하지 않는다(design.md D3, spec: "피드를 열기만
@@ -14,7 +14,7 @@
  */
 import Link from "next/link";
 
-import { getUnreadCount, listFeed } from "@/lib/db";
+import { getDataPort } from "@/lib/data-port";
 
 import { formatFeedEntryDisplay, isFeedEntryUnread } from "../_lib/feed-display";
 import { formatDateTime } from "../_lib/format";
@@ -45,9 +45,12 @@ export default async function FeedPage({
   const page = parsePage(params.page);
 
   // listFeed는 조회만 한다 — 이 호출로는 읽음 처리가 절대 일어나지 않는다(design.md D3).
-  const { entries, total, pageSize } = listFeed({ page });
+  const port = getDataPort();
+  const [{ entries, total, pageSize }, unreadCount] = await Promise.all([
+    port.listFeed({ page }),
+    port.getUnreadCount(),
+  ]);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const unreadCount = getUnreadCount();
   // "전체 읽음 처리" 폼이 돌아갈 경로 — 지금 보고 있는 이 피드 페이지 그대로다(design.md
   // D5와 같은 원칙).
   const currentHref = feedHref(page);
