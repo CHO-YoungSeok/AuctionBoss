@@ -102,3 +102,14 @@ describe("K8s", () => {
     expect(read("k8s/secret.yaml")).toContain("ANTHROPIC_API_KEY");
   });
 });
+
+describe("Next 이미지(Dockerfile)", () => {
+  // 회귀 방지: runner 단계에 tsconfig.json이 빠지면 컨테이너 안의 워커(tsx)가 `@/` 경로 별칭을
+  // 풀지 못해 `Cannot find module '@/lib/domain'`으로 시작하자마자 죽었다(1-B 5장에서 발견).
+  it("runner 단계가 tsconfig.json을 복사한다", () => {
+    const dockerfile = readFileSync(join(root, "Dockerfile"), "utf8");
+    const runner = dockerfile.slice(dockerfile.lastIndexOf("FROM "));
+    expect(runner).toMatch(/COPY\s+--from=builder\s+\S*tsconfig\.json/);
+  });
+});
+

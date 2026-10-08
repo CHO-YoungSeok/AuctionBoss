@@ -544,7 +544,7 @@ export class CourtAuctionAdapter implements AuctionSource {
         dropped.push(`${text(row.docid) ?? "(docid 없음)"}: ${missing.join(", ")} 누락`);
         continue;
       }
-      const key = `${courtName} ${caseNo} ${itemNo}`;
+      const key = `${courtName}\u0000${caseNo}\u0000${itemNo}`;
       const group = groups.get(key);
       if (group) group.rows.push(row);
       else groups.set(key, { key, rows: [row] });
