@@ -66,10 +66,10 @@
 
 ## 9. 마무리
 
-- [ ] 9.1 게이트 5종을 모두 통과시킨다. TS·Java 테스트 수가 1.1보다 줄지 않았는지 확인하고, 줄었으면 이유를 보고한다
-- [ ] 9.2 수치를 `docs/DEVELOPMENT_NOTES.md`에 기록한다: 화면별 Spring 요청 수, 새 API SQL 문 수와 `EXPLAIN`, 시나리오·단계 수와 불일치 원인, 포트 계약 사례 수, 두 모드의 화면 응답 시간, 8.2 결과, 테스트 수 변화
-- [ ] 9.3 `docs/REFERENCE.md`와 README에 `AUCTIONBOSS_DATA_SOURCE`·`AUCTIONBOSS_SPRING_BASE`, 새 API 5개(Next·Spring), 운영 기본값 `sqlite`, 개발용 `spring` 모드 실행법을 반영한다
-- [ ] 9.4 `docs/ROADMAP.md` 3단계를 갱신한다: 완료 기준을 "페이지·컴포넌트·화면용 라우트는 데이터 포트만 쓰고 SQLite 접근은 포트의 SQLite 구현체 한 곳(린트로 강제), 기존 화면 테스트가 두 원천에서 통과"로 고치고, 운영 화면 전환(`AUCTIONBOSS_DATA_SOURCE=spring`)과 기존 JSON API·SQLite 구현체 은퇴를 5단계 할 일에 적는다. 상태·수치·기록 위치를 채운다
+- [x] 9.1 게이트 5종을 모두 통과시킨다. TS·Java 테스트 수가 1.1보다 줄지 않았는지 확인하고, 줄었으면 이유를 보고한다
+- [x] 9.2 수치를 `docs/DEVELOPMENT_NOTES.md`에 기록한다: 화면별 Spring 요청 수, 새 API SQL 문 수와 `EXPLAIN`, 시나리오·단계 수와 불일치 원인, 포트 계약 사례 수, 두 모드의 화면 응답 시간, 8.2 결과, 테스트 수 변화
+- [x] 9.3 `docs/REFERENCE.md`와 README에 `AUCTIONBOSS_DATA_SOURCE`·`AUCTIONBOSS_SPRING_BASE`, 새 API 5개(Next·Spring), 운영 기본값 `sqlite`, 개발용 `spring` 모드 실행법을 반영한다
+- [x] 9.4 `docs/ROADMAP.md` 3단계를 갱신한다: 완료 기준을 "페이지·컴포넌트·화면용 라우트는 데이터 포트만 쓰고 SQLite 접근은 포트의 SQLite 구현체 한 곳(린트로 강제), 기존 화면 테스트가 두 원천에서 통과"로 고치고, 운영 화면 전환(`AUCTIONBOSS_DATA_SOURCE=spring`)과 기존 JSON API·SQLite 구현체 은퇴를 5단계 할 일에 적는다. 상태·수치·기록 위치를 채운다
 - [ ] 9.5 `regression-verifier` 서브에이전트로 회귀 검증을 받고 지적 사항을 반영한다
 - [ ] 9.6 커밋하고 푸시한 뒤 GitHub Actions의 TS 잡과 Java 잡이 통과하는지 확인한다
 - [ ] 9.7 `openspec validate switch-web-to-data-port --strict`를 통과시킨 뒤 change를 아카이브하고, 메인 스펙 `web-data-port`가 생기고 `spring-backend`에 요구사항이 반영됐는지 확인한다
@@ -106,3 +106,8 @@
 
 - 8.3: Spring 프로세스를 멈춘 뒤 spring 인스턴스의 `/`, `/items/1`, `/bookmarks`, `/feed`, `/status`가 모두 HTTP 500이고 시드 물건의 사건번호가 응답에 0회 나왔다(SQLite 데이터는 임시 파일에 809건이 있는데도 보이지 않음). Next 로그에는 Spring 연결 거부(`ECONNREFUSED 127.0.0.1:8089`)가 남는다. 다른 원천으로 대신 동작하지 않는다.
 - 정리: Next 2개, Spring, 임시 컨테이너, 임시 디렉터리는 스크립트 종료 시 모두 제거(`trap`). 기존 개발 DB 컨테이너는 원래대로 꺼진 상태.
+
+**9.1 최종 게이트 (2026-10-09)**
+- `npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint`(경고 6, 오류 0), `cd backend && ./gradlew clean check` 모두 통과.
+- 테스트 수: TypeScript 1212개(84개 파일), Java 370개(34개 클래스, 실패·건너뜀 0). 1.1 시작 기준 메모는 이 파일에 적힌 적이 없다. 시작 커밋은 `faf9897`(2단계 아카이브)이고, 그 트리에서 TS 923개(61개 파일)를 다시 돌려 확인했다. Java 332개는 `DEVELOPMENT_NOTES.md` 15.5의 값이다. 줄어든 테스트 없음. 증가의 큰 부분은 화면 렌더 테스트의 두 원천 실행이다.
+- 새 읽기 API 5개의 `EXPLAIN`을 임시 컨테이너에서 재서 `DEVELOPMENT_NOTES.md` 16.2에 기록했다(선택지 쿼리는 물건 전체 스캔).

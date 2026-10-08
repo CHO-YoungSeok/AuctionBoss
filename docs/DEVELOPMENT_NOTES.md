@@ -1749,3 +1749,115 @@ Spring이 Next보다 p50 기준 약 6배(표의 p50 비율 5.9~6.4배) 길지만
 2. 1단계 읽기 골든 생성기는 운영 DB에 의존해서 다시 만들면 값이 흔들린다. 2단계 시나리오 생성기는 시드 기반이라 결정적이다(생성을 두 번 돌려 바이트가 같음).
 3. 쓰기 API가 인증 없이 열려 있다. Spring 포트는 compose에서 루프백에만 열리며, 인증은 7단계다.
 4. 운영은 여전히 Next + SQLite다. MySQL에는 시드만 있다. 운영 전환은 5단계에서 데이터 이전과 함께 한다.
+
+## 16. 3단계: 화면 데이터 포트와 spring 모드 (switch-web-to-data-port, 2026-10-09)
+
+이 절은 3단계(화면의 데이터 접근을 데이터 포트 한 곳으로 모으고, 같은 화면이 SQLite와 Spring 양쪽에서 나오는 것을 증명하는 작업)가 끝난 시점의 실측값과 남은 공백을 적는다. 수치는 이 절을 쓰는 날 직접 다시 센 값이다. 운영 기본값은 그대로 `sqlite`이고, 운영 화면 전환은 5단계다.
+
+### 16.1 화면별 Spring 요청 수
+
+`AUCTIONBOSS_DATA_SOURCE=spring`일 때 화면 하나를 그리며 Spring(테스트에서는 Next 핸들러 대역 `fetch`)으로 보낸 HTTP 요청 수다. 데이터 행이 4건일 때와 30건일 때를 모두 쟀고, 같아야 통과한다(물건·회차마다 요청을 보내는 N+1이 생기면 30건 쪽이 늘어 실패한다). 요청은 화면 안에서 병렬로 보낸다(상세는 물건 1회 뒤 병렬).
+
+| 화면 | 상한(design D7) | 4건 | 30건 |
+|---|---|---|---|
+| `/` | 6 | 6 | 6 |
+| `/items/{id}` (사진 상태 `collected`) | 5 | 5 | 5 |
+| `/bookmarks` | 2 | 2 | 2 |
+| `/feed` | 2 | 2 | 2 |
+| `/status` | 11 | 11 | 11 |
+| 관심 토글·읽음 처리·사진 파일 | 1 | 1 | - |
+
+측정값이 모두 상한과 같다. 상한은 느슨한 여유가 아니라 지금 필요한 요청 수 그대로다. 줄일 여지는 있다(피드는 `GET /api/feed` 응답에 미확인 개수가 이미 있어 1회로 줄일 수 있다). 포트 메서드를 화면에 맞추지 않는다는 원칙을 지켜 늘리지 않았다. 설계상 상세 화면은 사진 상태가 `collected`가 아니면 사진 목록 요청이 빠진다(이번에 따로 재지 않았다). 변이 확인: 관심 목록 화면이 물건마다 `getItemById`를 부르게 바꾸면 테스트가 실패한다.
+
+### 16.2 새 읽기 API 5개의 SQL 문 수와 EXPLAIN
+
+`QueryCountTest`가 요청당 SQL 문 수를 고정한다(행 수를 바꿔도 같다).
+
+| API | SQL 문 수 | 내용 |
+|---|---|---|
+| `GET /api/items/filter-options` | 4 | 용도, 시도, 시군구, 법원 `DISTINCT` |
+| `GET /api/items/{id}/analyses` | 3 | 물건 존재, 목록(`limit`), 건수 |
+| `GET /api/items/{id}/photos` | 2 | 물건 존재, 목록 |
+| `GET /api/worker-runs/status` | 3 | 마지막 회차, 마지막 성공, 마지막 완료(성공·실패·차단) |
+| `GET /api/collector-state/rotation` | 1 | 키 하나 |
+
+`EXPLAIN`은 임시 `mysql:8.4` 컨테이너(기존 개발 DB 볼륨과 별개)에 Spring을 `local,seed`로 띄워 시드(물건 809건, 분석 12건, 회차 7건)를 넣고 실행했다. 사진은 시드에 없어 임시 DB에 3건을 넣었다. `rows`는 추정치다. 측정 뒤 컨테이너를 지웠다.
+
+| 쿼리 | type | key | rows | Extra |
+|---|---|---|---|---|
+| 용도 선택지(`DISTINCT usage_type`) | range | idx_items_usage_type | 5 | Using index for group-by |
+| 시도·시군구 선택지(`DISTINCT … COLLATE utf8mb4_0900_bin ORDER BY`) | ALL | NULL | 810 | Using where; Using temporary; Using filesort |
+| 법원 선택지 | index | uq_items_court_case_item | 810 | Using index; Using temporary; Using filesort |
+| 물건 존재(`id`) | const | PRIMARY | 1 | Using index |
+| 분석 목록(`item_id`, `analyzed_at desc, id desc`, limit 11) | ref | idx_analyses_item_id | 2 | Using filesort |
+| 분석 건수 | ref | idx_analyses_item_id | 2 | Using index |
+| 사진 목록(`item_id`, `seq`) | ref | uq_item_photos_item_seq | 3 | - |
+| 워커 마지막 회차 3종 | ref | idx_worker_runs_worker_started_at | 3 | Using filesort(성공·완료 조회는 Using where 추가) |
+| 로테이션(`key`) | const | PRIMARY | 1 | - |
+
+해석: 물건 하나를 기준으로 하는 쿼리(분석·사진·존재)와 워커 상태는 모두 인덱스를 탄다. 분석 목록과 워커 상태에 `filesort`가 남는 것은 정렬에 `id`를 더한 동률 해소 때문이고, 대상 행이 물건당 분석 수·워커당 회차 수뿐이라 지금(분석 12건, 회차 7건)은 무시할 수준이다. 비용이 큰 것은 시도·시군구·법원 선택지다. 시도·시군구는 전체 스캔, 법원은 전체 인덱스 스캔에 임시 테이블과 filesort가 붙는다. `COLLATE utf8mb4_0900_bin`(SQLite의 바이트 비교와 같은 구분을 하려는 선택, 16.3)이 컬럼 기본 정렬 규칙과 달라 인덱스 순서를 못 쓰는 것으로 보이지만, 규칙을 빼고 비교해 확인하지는 않았다. 809건에서는 문제가 없고, 물건이 수십만 건이 되면 다시 재야 한다(선택지 전용 테이블이나 캐시가 후보). 지금 개선하지 않았다.
+
+### 16.3 계약 시나리오
+
+시나리오 골든은 7개 115단계에서 10개 171단계로 늘었다. 새 것은 `screen-reads`(21단계), `worker-status`(24단계), `port-requests`(11단계)이고, 기존 7개는 재생성 결과가 바이트 단위로 같다. 1단계 읽기 골든 90개도 계속 일치한다. 3장에서 시나리오 2개를 더해 160단계였고, 5장에서 `port-requests`를 더해 171단계가 됐다.
+
+- 불일치 1건: 원인은 Spring이 아니라 테스트 하네스의 사진 id 카운터 미초기화였다. 이식 실수로 생긴 불일치는 0건이다.
+- 골든 형식에 단계별 `advanceMs`(그 단계부터 서버 시각을 뒤로 밀기)와 `config`의 `intervalMs`·`staleAfterIntervals` 덮어쓰기를 더했다. 워커 상태 판정은 지금 시각에 따라 달라서, Spring은 주입된 `Clock`(테스트에서 `MutableClock`), 생성기는 고정 시계를 쓴다.
+- 선택지 정렬 규칙: SQLite `DISTINCT … ORDER BY`는 바이트 비교다. MySQL 기본 `utf8mb4_0900_ai_ci`는 `A법원`과 `a법원`을 합치고, `utf8mb4_bin`은 뒤쪽 공백만 다른 `A법원 `를 합친다. 그래서 `COLLATE utf8mb4_0900_bin`을 쓰고, `A법원`/`a법원`/`A법원 `/빈 문자열 사례를 Next 저장소 테스트와 Spring 통합 테스트에 같이 둔다. 변이 확인: `utf8mb4_bin`으로 바꾸면 뒤쪽 공백 사례가, 기본 규칙으로 두면 대소문자 사례가 실패한다.
+
+### 16.4 포트 계약과 두 원천 동등성
+
+세 단계로 증명한다. (1) Spring ≡ Next 핸들러: 16.3의 시나리오 골든(Java, 매 CI). (2) Spring 구현체 ≡ SQLite 구현체: 시드를 적재한 임시 SQLite에서 SQLite 구현체와, Next 핸들러를 대역 `fetch`로 쓴 Spring 구현체를 같은 사례로 불러 `toStrictEqual`로 비교하는 포트 계약 테스트 49개(`port-contract.test.ts`; 목록 조건 15종 이상, 상세, 분석 이력, 변경 이력, 사진, 워커 상태·집계·회차, 로테이션, 쓰기 후 읽기). (3) 화면 렌더 테스트 5개 파일을 `describe.each(["sqlite", "spring"])`로 두 원천에서 돌린다(기대값은 하나).
+
+두 증명 사이의 빈틈은 골든 포함 검사가 막는다. 대역 `fetch`가 받은 요청을 `(메서드, 경로 틀, 쿼리 키 집합)`으로 기록하고, 모두 커밋된 골든에 있어야 통과한다. 미확인 개수 요청에 새 쿼리 키를 붙이면 이 검사가 실패한다(변이 확인). 목록 화면은 워커 전용 조건(`needsAnalysis` 등)을 포트로 넘기지 않는다. 1~2장의 회귀 검증이 찾은 문제(주소에 그 필드가 있으면 500)를 링크 생성 전에 제거해 고쳤고, 테스트가 이를 고정한다. 실패 처리도 테스트로 고정했다: Spring이 500, 형식이 다른 본문, 연결 실패를 돌려주면 페이지가 던지고(부분 렌더 없음), 없는 물건은 `notFound()`다. `spring` 모드가 SQLite를 열지 않는 것은 `getDb`가 던지는 상태로 Spring 구현체 테스트를 돌려 확인한다.
+
+### 16.5 개발 환경 spring 모드 비교 (8장)
+
+`scripts/dev/compare-screens.sh` 1회 실행(종료 코드 0). 임시 `mysql:8.4` 컨테이너(포트 3399)에 Spring jar(`local,seed`)를 붙여 시드를 넣고, 같은 시드 SQL을 `seed-to-sqlite`로 임시 SQLite에 넣었다. `next start`를 둘 띄웠다. sqlite 인스턴스(3100)와 spring 인스턴스(3101)이고, spring 쪽은 `AUCTIONBOSS_DB`를 존재하지 않는 디렉터리로 뒀다. 기존 개발 DB 볼륨은 건드리지 않았다.
+
+- 비교 35건(쓰기 전 15, 읽음 처리 전 2, 쓰기 후 18): HTML 차이 0건. 폼 5회(관심 등록 3, 해제 1, 읽음 처리 1)의 응답 코드는 두 인스턴스 모두 303이다. 실행 뒤에도 `AUCTIONBOSS_DB` 경로가 계속 없었다(spring 인스턴스가 SQLite를 열지 않음). 코드 결함은 찾지 못해 고친 것이 없다.
+- Spring을 멈춘 뒤 spring 인스턴스의 `/`, `/items/1`, `/bookmarks`, `/feed`, `/status`는 모두 HTTP 500이고, 임시 SQLite에 809건이 있는데도 시드 물건의 사건번호가 응답에 0회 나왔다. 다른 원천으로 대신 동작하지 않는다.
+
+응답 시간(ms, 같은 머신 루프백, 워밍업 1회 제외 10회, 중앙값/최댓값. **부하 테스트가 아니다**):
+
+| 화면 | sqlite | spring |
+|---|---|---|
+| `/` 기본 | 11/12 | 23/26 |
+| `/` 정렬+2페이지 | 11/13 | 22/25 |
+| `/` 용도·유찰 필터 | 11/12 | 22/29 |
+| `/` 시도·법원·정렬 | 11/13 | 23/33 |
+| `/` 분석 있음 | 8/9 | 18/21 |
+| `/` 결과 없음 | 7/8 | 17/20 |
+| `/` 잘못된 값 | 10/11 | 23/50 |
+| `/items/1` 분석 있음 | 6/8 | 20/24 |
+| `/items/3` 분석 없음·사진 대기 | 5/5 | 19/20 |
+| `/items/2` 사진 조회 불가 | 5/6 | 19/20 |
+| `/items/999999` 404 | 3/4 | 11/50 |
+| `/items/abc` | 4/5 | 4/4 |
+| `/bookmarks` | 4/4 | 11/18 |
+| `/feed` | 4/4 | 12/15 |
+| `/status` | 5/6 | 17/19 |
+
+spring 모드는 sqlite 모드의 약 2~4배(중앙값 +7~14ms, 두 모드가 같은 `/items/abc` 제외)다. HTTP 요청이 6~11개 늘고 JSON 직렬화가 더해진 값이다. 루프백이라 네트워크 지연은 반영되지 않는다. 느리면 그때 손본다(캐시는 이 단계의 범위가 아니다).
+
+**정규화에 대해.** 비교 스크립트는 HTML을 그대로 비교하지 않고 세 가지만 정규화한다. (N1) 빌드 ID 경로. (N2) `self.__next_f.push` 스트리밍 조각은 이어 붙여 해석한 뒤 조각 번호·참조 번호(`4:`, `$L10`)를 지우고 줄을 정렬한다. (N3) Suspense 번호. 정규화 없이는 35건 중 33건이 달랐다(실측). 보이는 DOM은 같고 RSC flight 데이터의 조각 나누기·번호만 달랐는데, sqlite 모드는 데이터가 동기로 와서 한 덩어리로, spring 모드는 비동기라 여러 조각으로 스트리밍되기 때문이다. 값(문자열·속성·숫자)은 그대로 비교하고 DOM은 한 글자도 바꾸지 않는다. `scripts/dev/__tests__/normalize-html.test.ts`가 값·DOM 차이는 잡고 조각 나누기만 무시함을 확인한다. 시각 의존 문구(경과 시간·D-day·담은 시각)는 정규화하지 않았다. 같은 URL을 두 인스턴스에 연달아 보내 차이를 수 ms로 줄였고, 이번 실행에서 차이는 0건이었다. 정규화 규칙이 동작 차이를 가릴 수 있다는 것이 이 방식의 한계다.
+
+### 16.6 lint 경계
+
+`eslint.config.mjs`의 `no-restricted-imports`가 `better-sqlite3`, `@/lib/db`, `@/lib/db/*`, `@/lib/storage/*`와 같은 상대 경로 가져오기를 막는다. 대상은 `src/app/**`(페이지·컴포넌트·`_lib`)와 `src/lib/data-port/spring/**`이고, 화면용 라우트 3개(`bookmarks/toggle`, `feed/mark-read`, `photos`)는 `src/app/api/**` 안에 있지만 다시 포함한다. 제외는 테스트와 나머지 기존 JSON API 라우트뿐이다. 기존 JSON API 라우트는 운영 분석 워커와 수집 경로가 쓰므로 5단계까지 SQLite를 직접 쓰는 것이 맞다. 그래서 ROADMAP의 완료 기준을 "화면 코드가 SQLite를 가져오지 않고, SQLite 접근은 포트의 SQLite 구현체 한 곳(린트로 강제)"으로 고쳤다. 화면이 SQLite를 직접 열지 못하게 하는 것이 목적이다. 라우트 파일 규칙은 파일 경로 목록이라, 새 화면용 라우트를 만들면 목록에 추가해야 한다(자동으로 잡히지 않는다). 운영 원천은 `sqlite`로 유지한다. compose·K8s의 웹 서비스가 `AUCTIONBOSS_DATA_SOURCE=spring`을 설정하지 않음을 `deploy-config.test.ts`가 고정한다.
+
+### 16.7 테스트 수
+
+| 구분 | 2단계 끝(15.5) | 3단계 끝 | 비고 |
+|---|---|---|---|
+| TypeScript(`npm test`) | 923 | 1212 | 61 → 84개 파일. 화면 렌더 테스트가 두 원천으로 돌아 늘었다 |
+| 백엔드(`./gradlew clean check`) | 332 | 370 | 31 → 34개 클래스, 실패·건너뜀 0 |
+
+줄어든 테스트는 없다. 기준값은 3단계 시작 커밋 `faf9897`(2단계 아카이브, 3단계 코드 커밋 `030aaed`의 부모)의 값이고 2단계 끝(15.5)의 값과 같다. tasks.md 1.1이 요구한 시작 기준 메모(커밋·테스트 수)는 tasks.md 하단에 한 번도 적히지 않았다(`6b08841`부터 `969848a`까지 모든 판을 확인). 그래서 `faf9897` 트리를 따로 풀어 `npx vitest run`을 돌려 TS 923개·61개 파일을 다시 확인했고, Java 332개·31개 클래스는 15.5의 값을 그대로 썼다. 게이트 5종(`npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint`, `cd backend && ./gradlew check`)이 모두 통과한다. `npm run lint`에는 경고 6개(오류 0)가 있다.
+
+### 16.8 남은 공백
+
+1. 실제 Spring을 붙인 화면 비교는 수동 스크립트다. CI가 실행하지 않는다(Docker·JDK·Next 빌드가 필요하다). CI는 대역 `fetch`와 골든 포함 검사로 두 증명을 잇는다.
+2. 응답 시간은 루프백, 시드 809건, 단일 요청 기준이다. 동시성과 네트워크 지연은 반영하지 않았다.
+3. 선택지 쿼리(시도·시군구·법원)는 물건 전체를 훑는다(16.2). 규모가 커지면 다시 재야 한다.
+4. 운영 화면은 여전히 `sqlite`다. `spring` 전환과 기존 JSON API·SQLite 구현체 은퇴는 5단계(데이터 이전)에서 한다. 새 읽기 API 5개의 Next 라우트도 그때 함께 은퇴한다.

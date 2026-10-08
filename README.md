@@ -9,7 +9,7 @@
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4-6DB33F?logo=springboot&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)
 ![Claude](https://img.shields.io/badge/Claude-API-D97757)
-![Tests](https://img.shields.io/badge/tests-923%20TS%20%2B%20332%20Java-success)
+![Tests](https://img.shields.io/badge/tests-1212%20TS%20%2B%20370%20Java-success)
 
 > 개인 프로젝트 · 1인 개발 · 2026.09 ~ · 지금은 백엔드를 Spring Boot + MySQL로 옮기는 중입니다 ([로드맵](docs/ROADMAP.md))
 
@@ -90,7 +90,9 @@ flowchart LR
 
 **1단계 완료 (읽기 API)**: `backend/`에 Spring Boot 4 백엔드를 세우고, SQLite 테이블 8개를 Flyway로 MySQL에 옮겼습니다. 읽기 API 5개를 JPA + QueryDSL로 구현했고, **기존 API와 응답이 같은지 계약 테스트 90개로 비교해 모두 일치**합니다. 실명을 가린 실제 데이터 809건을 시드로 씁니다. 화면과 수집 워커는 아직 기존 구조를 씁니다.
 
-**2단계 완료 (쓰기 API)**: 분석 저장, 워커 회차, 관심 물건, 변동 피드, 사진 파일 API를 옮겼고(`POST /api/analyses`, `/api/worker-runs`, `/api/bookmarks`, `/api/feed/read`, `GET /api/photos/...` 등), 시나리오 계약 테스트 7개·115단계가 모두 일치합니다. 개발 환경(시드 MySQL + Spring)에서 **분석 워커 코드 변경 0줄**, 환경 변수만 바꿔 분석 결과가 Spring에 저장되는 것을 확인했습니다. 쓰기 API에는 인증이 없어 Spring 포트는 루프백에만 엽니다. 화면 전용 폼 엔드포인트(`bookmarks/toggle`, `feed/mark-read`)는 3단계에서 다룹니다. 운영은 아직 Next + SQLite이고, 전환은 5단계 데이터 이전과 함께 합니다.
+**2단계 완료 (쓰기 API)**: 분석 저장, 워커 회차, 관심 물건, 변동 피드, 사진 파일 API를 옮겼고(`POST /api/analyses`, `/api/worker-runs`, `/api/bookmarks`, `/api/feed/read`, `GET /api/photos/...` 등), 시나리오 계약 테스트 7개·115단계가 모두 일치합니다. 개발 환경(시드 MySQL + Spring)에서 **분석 워커 코드 변경 0줄**, 환경 변수만 바꿔 분석 결과가 Spring에 저장되는 것을 확인했습니다. 쓰기 API에는 인증이 없어 Spring 포트는 루프백에만 엽니다.
+
+**3단계 완료 (화면 데이터 포트)**: 화면 5개와 폼·사진 라우트 3개의 데이터 접근을 `src/lib/data-port` 한 곳으로 모았습니다. 구현체는 SQLite와 Spring 둘이고 `AUCTIONBOSS_DATA_SOURCE`(기본 `sqlite`)로 고릅니다. 화면용 읽기 API 5개를 Spring에 더했고(필터 선택지, 분석 이력, 사진 목록, 워커 상태, 수집 로테이션), 시나리오 계약 테스트는 10개·171단계가 모두 일치합니다. 개발 환경에서 `spring` 모드로 띄운 화면 35건을 SQLite 모드와 비교해 **HTML 차이 0건**이었고(스트리밍 조각 번호만 정규화), Spring을 멈추면 SQLite로 대신 보여주지 않고 500으로 끝납니다. 화면 하나가 Spring으로 보내는 요청 수는 상한(최대 11개)을 테스트로 고정했고, 화면 코드가 SQLite를 직접 가져오면 린트가 실패합니다. **운영 화면은 아직 `sqlite`**이고, Spring 전환은 5단계 데이터 이전과 함께 합니다.
 
 **설계에서 지킨 두 가지 원칙**
 
@@ -144,7 +146,7 @@ flowchart LR
 | 백엔드 | Spring Boot 4, Java 21, JPA + QueryDSL, Flyway | 동적 검색은 QueryDSL, 스키마는 버전 관리되는 마이그레이션으로 |
 | 검증 | zod | 외부 응답, API 입력, 설정 파일을 런타임에 검증 |
 | AI | Claude | API 키가 있으면 Messages API, 없으면 Claude Code CLI로 자동 전환 |
-| 테스트 | Vitest, JUnit 5, Testcontainers | TS 923개, Java 332개(실제 MySQL 컨테이너, 기존 API와의 계약 테스트 읽기 90개 + 쓰기 시나리오 115단계 포함) |
+| 테스트 | Vitest, JUnit 5, Testcontainers | TS 1212개, Java 370개(실제 MySQL 컨테이너, 기존 API와의 계약 테스트 읽기 90개 + 시나리오 10개·171단계 포함) |
 | 인프라 | Docker Compose, GitHub Actions | 멀티 스테이지 빌드, 헬스체크, TS와 Java 검사를 CI에서 병렬 실행. Kubernetes 매니페스트는 있지만 클러스터에 배포한 적은 없음 |
 
 ## 개발 방식
@@ -187,6 +189,13 @@ Docker만 있으면 됩니다. 실명을 가린 시드 809건이 자동으로 �
 ```bash
 cp .env.example .env
 docker compose up -d mysql backend   # http://localhost:8080/api/items
+```
+
+화면을 Spring에서 읽게 해 보려면(개발용, 운영 기본값은 `sqlite`) Spring을 띄운 뒤 다음처럼 실행합니다. `scripts/dev/compare-screens.sh`는 임시 MySQL·Spring·SQLite에 두 모드를 띄워 화면을 비교합니다(Docker·JDK 필요).
+
+```bash
+AUCTIONBOSS_DATA_SOURCE=spring AUCTIONBOSS_SPRING_BASE=http://localhost:8080 npm run dev
+bash scripts/dev/compare-screens.sh
 ```
 
 ### 전체 검사

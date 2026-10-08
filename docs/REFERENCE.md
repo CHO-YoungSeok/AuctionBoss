@@ -59,6 +59,13 @@ AuctionBoss의 실행 구성, 설정, API, 데이터 모델을 정리한 문서�
 | `AUCTIONBOSS_DB` | `data/auctionboss.db` | SQLite 파일 경로 |
 | `AUCTIONBOSS_CONFIG` | `config/collector.json` | 설정 파일 경로 |
 
+**웹 서버: 화면 데이터 원천**
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `AUCTIONBOSS_DATA_SOURCE` | `sqlite` | 화면(페이지 5개와 폼·사진 라우트 3개)이 데이터를 읽는 곳. `sqlite`는 `AUCTIONBOSS_DB`의 SQLite, `spring`은 Spring API입니다. 알 수 없는 값은 허용 값을 담은 오류로 끝나고, 다른 원천으로 대신 동작하지 않습니다. 운영(compose·K8s)은 `sqlite`이고, `spring`은 개발 환경 검증용입니다(전환은 5단계) |
+| `AUCTIONBOSS_SPRING_BASE` | 없음 | `AUCTIONBOSS_DATA_SOURCE=spring`일 때 필요한 Spring 주소(예: `http://localhost:8080`). 서버에서만 쓰고 브라우저에 노출되지 않습니다. 요청마다 5초 제한을 둡니다 |
+
 **수집 워커**
 
 | 변수 | 기본값 | 설명 |
@@ -102,6 +109,9 @@ AuctionBoss의 실행 구성, 설정, API, 데이터 모델을 정리한 문서�
 | GET | `/api/items/:id` | 물건 1건과 최신 분석 |
 | GET | `/api/items/:id/changes` | 물건의 변경 이력 |
 | GET | `/api/items/usage-types` | 저장된 용도 목록 |
+| GET | `/api/items/filter-options` | 목록 화면 선택지. `{ usageTypes, sidoValues, sigunguValues, courtValues }` (3단계 추가) |
+| GET | `/api/items/:id/analyses` | 분석 이력과 전체 건수 `{ analyses, total }`. `limit`은 1~50 정수, 기본 10 (3단계 추가) |
+| GET | `/api/items/:id/photos` | 사진 목록(파일 경로 제외) `{ photos }` (3단계 추가) |
 | GET | `/api/photos/:itemId/:seq` | 저장된 물건 사진 파일 |
 
 `GET /api/items`의 주요 파라미터는 다음과 같습니다.
@@ -128,6 +138,8 @@ AuctionBoss의 실행 구성, 설정, API, 데이터 모델을 정리한 문서�
 | POST | `/api/worker-runs` | 실행 시작 기록 |
 | PATCH | `/api/worker-runs/:id` | 실행 종료 기록 (결과, 처리 건수, 오류) |
 | GET | `/api/worker-runs/summary` | 최근 기간의 성공률 · 차단 횟수 집계 (`since`의 시간대 오프셋은 UTC로 정규화해 비교) |
+| GET | `/api/worker-runs/status?worker=` | 워커 상태 판정 `{ state, lastSuccessAt, lastRun }`. `worker`는 `collector`, `analyzer`, `photos` (3단계 추가) |
+| GET | `/api/collector-state/rotation` | 다음 수집 로테이션 법원 `{ nextCourtCode }` (3단계 추가) |
 
 **관심 물건과 피드**
 
@@ -201,7 +213,7 @@ SQLite 테이블 8개로 구성됩니다. 스키마는 `src/lib/db/schema.ts`에
 
 ## 8. Spring 백엔드 (이전 중)
 
-`backend/`는 기존 백엔드를 Spring Boot + MySQL로 옮기는 중인 새 백엔드입니다. 1단계에서 읽기 API를, 2단계에서 쓰기 API를 옮겼고, 화면·수집·분석 워커의 운영 경로는 아직 위의 기존 구조(Next + SQLite)를 씁니다. 단계는 [로드맵](ROADMAP.md)에 있습니다.
+`backend/`는 기존 백엔드를 Spring Boot + MySQL로 옮기는 중인 새 백엔드입니다. 1단계에서 읽기 API를, 2단계에서 쓰기 API를, 3단계에서 화면용 읽기 API 5개를 옮겼고, 화면·수집·분석 워커의 운영 경로는 아직 위의 기존 구조(Next + SQLite)를 씁니다. 단계는 [로드맵](ROADMAP.md)에 있습니다.
 
 | 항목 | 내용 |
 | --- | --- |
@@ -210,11 +222,13 @@ SQLite 테이블 8개로 구성됩니다. 스키마는 `src/lib/db/schema.ts`에
 | 제공 API | `GET /api/items`, `/api/items/:id`, `/api/items/:id/changes`, `/api/items/usage-types`, `/api/health`. 경로·파라미터·응답 형태는 4절의 기존 API와 같습니다 |
 | 쓰기·나머지 API | `POST /api/analyses`, `POST /api/worker-runs`, `PATCH /api/worker-runs/:id`, `GET /api/worker-runs`, `GET /api/worker-runs/summary`, `GET·POST /api/bookmarks`, `DELETE /api/bookmarks/:itemId`, `GET /api/feed`, `POST /api/feed/read`, `GET /api/photos/:itemId/:seq`. 요청 검증과 응답은 기존 API와 같고, 시나리오 계약 테스트 7개·115단계로 비교합니다 |
 | 인증·노출 | 인증이 없습니다(7단계 예정). 쓰기 API가 열려 있으므로 compose는 8080을 루프백(`127.0.0.1`)에만 엽니다. 외부에 노출하지 않습니다 |
-| 아직 없는 것 | 화면 전용 폼 엔드포인트(`POST /api/bookmarks/toggle`, `POST /api/feed/mark-read`의 303 리다이렉트)는 3단계 화면 전환의 몫입니다 |
+| 화면용 읽기 API(3단계) | `GET /api/items/filter-options`, `/api/items/:id/analyses`, `/api/items/:id/photos`, `/api/worker-runs/status`, `/api/collector-state/rotation`. 4절의 같은 경로 Next 라우트가 계약 원본이고, 시나리오 골든(`screen-reads`, `worker-status`)으로 비교합니다. 선택지는 `COLLATE utf8mb4_0900_bin`으로 SQLite와 같은 구분·정렬을 합니다 |
+| 화면 폼 엔드포인트 | `POST /api/bookmarks/toggle`, `POST /api/feed/mark-read`(303 리다이렉트)는 Spring에 없고 Next에 남습니다. 데이터 포트로 Spring의 `bookmarks`·`feed/read`를 부릅니다 |
 | 분석 워커 연결 | 분석 워커는 코드 변경 없이 `AUCTIONBOSS_API_BASE`만 바꿔 Spring에 저장할 수 있습니다(개발 환경 검증: `scripts/dev/verify-analyzer-on-spring.sh`, 수동). 운영 전환은 5단계입니다 |
 | 스키마 | `backend/src/main/resources/db/migration/V1__baseline.sql`. 5절의 테이블 8개를 컬럼 이름까지 그대로 옮겼습니다. 금액은 BIGINT, 시각은 UTC `DATETIME(3)` |
 | 시드 | `seed` 프로필에서 DB가 비어 있을 때만 `db/seed/*.sql`을 넣습니다. 실명을 가린 물건 809건, 변경 이력 4,008건, 분석 12건 |
-| 계약 테스트 | 기존 API 응답 90개를 정답으로 저장해 두고, 같은 요청에 같은 JSON이 나오는지 비교합니다 |
+| 계약 테스트 | 기존 API 응답 90개와 시나리오 10개·171단계를 정답으로 저장해 두고, 같은 요청에 같은 JSON이 나오는지 비교합니다 |
+| 화면 데이터 포트 | `src/lib/data-port`가 화면의 데이터 접근(읽기 13, 쓰기 3, 사진 파일 1)을 한 곳에 모읍니다. 구현체는 SQLite와 Spring 둘이고 `AUCTIONBOSS_DATA_SOURCE`로 고릅니다(3절). 화면 한 장이 Spring으로 보내는 요청은 최대 `/` 6, `/items/:id` 5, `/bookmarks` 2, `/feed` 2, `/status` 11개입니다. `src/app/**`에서 `@/lib/db`·`better-sqlite3`를 가져오면 린트가 실패합니다(기존 JSON API 라우트 제외) |
 
 **프로필**
 
@@ -242,6 +256,15 @@ scripts/docker-smoke.sh                   # 처음 기동과 재기동(데이터
 npm run db:up                             # IDE 개발용 MySQL 켜기 (db:down 끄기, db:status 상태. 데이터는 보존)
 (cd backend && ./gradlew bootRun --args='--spring.profiles.active=local,seed')   # IDE 개발용
 (cd backend && ./gradlew check)           # 테스트 (Docker 필요)
+```
+
+**화면을 Spring으로 띄워 보기 (개발용)**
+
+운영 기본값은 `sqlite`입니다. 화면이 Spring에서도 같게 나오는지 보려면 Spring을 띄운 뒤 웹 서버를 `spring` 모드로 실행합니다. 이때 SQLite 파일은 열지 않으므로 Spring이 꺼지면 화면이 500으로 끝납니다.
+
+```bash
+AUCTIONBOSS_DATA_SOURCE=spring AUCTIONBOSS_SPRING_BASE=http://localhost:8080 npm run dev
+bash scripts/dev/compare-screens.sh   # 임시 MySQL+Spring+SQLite에 두 모드를 띄워 화면 HTML 비교, 응답 시간, Spring 중단 확인 (Docker·JDK 필요, 수동)
 ```
 
 ---
