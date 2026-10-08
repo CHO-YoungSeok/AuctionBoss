@@ -1,0 +1,136 @@
+{
+  "description": "순번이나 이미지 데이터가 없는 항목은 제외한다",
+  "now": "2026-10-08T12:00:00.000Z",
+  "options": {},
+  "call": {
+    "kind": "photos",
+    "ref": {
+      "courtCode": "B000210",
+      "internalCaseNo": "20260130101037"
+    }
+  },
+  "repeat": 1,
+  "responses": [
+    {
+      "status": 200,
+      "setCookie": [
+        "JSESSIONID=golden-session; Path=/; HttpOnly",
+        "WMONID=golden-wmon; Path=/"
+      ],
+      "body": "<html><body>index</body></html>"
+    },
+    {
+      "status": 200,
+      "body": "{\"status\":200,\"message\":\"물건상세검색 정보가  조회되었습니다.\",\"timestamp\":1789087532321,\"errors\":null,\"token\":null,\"data\":{\"dma_result\":{\"csBaseInfo\":{\"cortOfcCd\":\"B000210\",\"cortOfcNm\":\"서울중앙지방법원\",\"cortSptNm\":\"서울중앙지방법원\",\"csNo\":\"20260130101037\",\"csNm\":\"자동차임의경매\",\"csRcptYmd\":\"20260519\",\"csCmdcYmd\":\"20260417\",\"clmAmt\":39348305,\"rletApalYn\":\"N\",\"auctnSuspStatCd\":\"00\",\"ultmtDvsCd\":\"000\",\"csUltmtYmd\":null,\"csProgStatCd\":\"0002100001\",\"jdgeAojAsstnNm\":null,\"auctnDpcnMrgDvsCd\":\"0\",\"csProgSuspRsn\":null,\"mvprpCsNo\":null,\"mvprpRletDvsCd\":\"00031R\",\"jdbnCd\":\"1021\",\"cortAuctnJdbnNm\":\"경매21계\",\"jdbnTelno\":\"530-1822(제4별관 민사집행과)\",\"execrCsTelno\":\"02-533-6852\",\"cortTypCd\":\"40\",\"expCsNo\":null,\"lwstDvsCd\":\"2\",\"userCsNo\":\"2026타경101037\"},\"csPicLst\":[{\"cortAuctnPicSeq\":null,\"picFile\":\"AAAA\"},{\"cortAuctnPicSeq\":\"1\",\"picFile\":null},{\"cortAuctnPicSeq\":\"2\",\"picFile\":\"\"},{\"cortAuctnPicSeq\":\"3\",\"picFile\":\"BBBB\"}]},\"ipcheck\":true}}"
+    }
+  ],
+  "expected": [
+    {
+      "photos": [
+        {
+          "seq": 3,
+          "base64Length": 4,
+          "base64Sha256": "4a8d8134f29b0b7b60c126f5532bc9f5d9bb73037373cf6fb872d81f1dcefdfd"
+        }
+      ],
+      "requestsMade": 2
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/pgj/index.on",
+      "headers": [
+        [
+          "host",
+          "{host}"
+        ],
+        [
+          "connection",
+          "keep-alive"
+        ],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ],
+        [
+          "Accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        ],
+        [
+          "accept-language",
+          "*"
+        ],
+        [
+          "sec-fetch-mode",
+          "cors"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate"
+        ]
+      ],
+      "body": ""
+    },
+    {
+      "method": "POST",
+      "path": "/pgj/pgj15B/selectAuctnCsSrchRslt.on",
+      "headers": [
+        [
+          "host",
+          "{host}"
+        ],
+        [
+          "connection",
+          "keep-alive"
+        ],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ],
+        [
+          "Content-Type",
+          "application/json;charset=UTF-8"
+        ],
+        [
+          "Accept",
+          "application/json"
+        ],
+        [
+          "Referer",
+          "{base}/pgj/index.on"
+        ],
+        [
+          "Origin",
+          "{base}"
+        ],
+        [
+          "X-Requested-With",
+          "XMLHttpRequest"
+        ],
+        [
+          "Cookie",
+          "JSESSIONID=golden-session; WMONID=golden-wmon"
+        ],
+        [
+          "accept-language",
+          "*"
+        ],
+        [
+          "sec-fetch-mode",
+          "cors"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate"
+        ],
+        [
+          "content-length",
+          "107"
+        ]
+      ],
+      "body": "{\"dma_srchGdsDtlSrch\":{\"csNo\":\"20260130101037\",\"cortOfcCd\":\"B000210\",\"dspslGdsSeq\":\"\",\"pgmId\":\"PGJ15BM01\"}}"
+    }
+  ],
+  "sleeps": []
+}

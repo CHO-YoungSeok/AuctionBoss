@@ -1,0 +1,70 @@
+{
+  "description": "세션 HTTP 500은 SourceRequestError(요청 수 0으로 취급)",
+  "now": "2026-10-08T12:00:00.000Z",
+  "options": {},
+  "call": {
+    "kind": "activeItems",
+    "scope": {
+      "courts": [
+        {
+          "name": "서울중앙지방법원",
+          "courtCode": "B000210"
+        }
+      ]
+    }
+  },
+  "repeat": 1,
+  "responses": [
+    {
+      "status": 500,
+      "body": "Internal Server Error"
+    }
+  ],
+  "expected": [
+    {
+      "error": {
+        "kind": "SourceRequestError",
+        "requestsMade": 0,
+        "messageHead": "세션 초기화 요청이 실패했습니다 (HTTP 500)"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/pgj/index.on",
+      "headers": [
+        [
+          "host",
+          "{host}"
+        ],
+        [
+          "connection",
+          "keep-alive"
+        ],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ],
+        [
+          "Accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        ],
+        [
+          "accept-language",
+          "*"
+        ],
+        [
+          "sec-fetch-mode",
+          "cors"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate"
+        ]
+      ],
+      "body": ""
+    }
+  ],
+  "sleeps": []
+}

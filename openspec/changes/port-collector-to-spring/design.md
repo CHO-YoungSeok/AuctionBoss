@@ -59,6 +59,7 @@ com.auctionboss.collect
 ### D3. HTTP 클라이언트와 요청 형식: 실제 전송 기준으로 Node와 같게
 - **선택**: JDK `HttpClient`(HTTP/1.1 고정, 리다이렉트 따라가지 않음, 연결 10초·응답 60초 타임아웃)를 어댑터 안에서만 쓴다. 헤더 이름과 값, 본문 JSON 키 순서는 TS 어댑터가 실제로 보낸 것과 같게 한다.
 - **근거**: TS는 Node `fetch`(undici)를 쓰고, undici는 코드에 없는 기본 헤더(`accept-language`, `sec-fetch-mode`, `accept-encoding` 등)를 붙인다. WAF가 UA로 차단한 실측이 있으므로 헤더 차이가 차단 조건이 될 수 있다. 그래서 골든을 "TS 코드가 넘긴 인자"가 아니라 "루프백 가짜 서버가 받은 실제 요청"으로 만든다(D5). Java는 그 헤더 집합을 재현하고, `accept-encoding`을 보낸다면 압축 해제도 한다. HTTP/2로 협상하면 전송 형태가 달라지므로 HTTP/1.1로 고정한다.
+- **1장 실측 헤더 집합**(Node v26.10.0 `fetch`, 루프백 서버가 받은 순서 그대로): GET(세션)은 `host`, `connection: keep-alive`, `User-Agent`, `Accept`, `accept-language: *`, `sec-fetch-mode: cors`, `accept-encoding: gzip, deflate`. POST(검색·상세)는 `host`, `connection: keep-alive`, `User-Agent`, `Content-Type: application/json;charset=UTF-8`, `Accept: application/json`, `Referer`, `Origin`, `X-Requested-With: XMLHttpRequest`, `Cookie`(쿠키가 있을 때만), `accept-language: *`, `sec-fetch-mode: cors`, `accept-encoding: gzip, deflate`, `content-length`. 코드가 정한 헤더(대문자 시작)가 앞에, undici가 붙인 헤더(소문자)가 뒤에 온다. `br`은 보내지 않으므로 Java는 gzip·deflate만 풀면 된다. 전체 목록은 `contracts/source/*.json`의 `requests[].headers`에 있다.
 - **의도된 차이**: TS `fetch`에는 타임아웃이 없다. Java는 타임아웃을 둔다(멈춘 연결이 단일 실행 잠금을 무기한 잡지 않게). 타임아웃은 `SourceRequestError`로 분류되어 백오프를 걸지 않는다.
 - **버린 대안**: Spring `RestClient`(+ JDK 요청 팩토리). 헤더 기본값과 메시지 변환기가 끼어들어 전송 형태를 통제하기 어렵고, 어댑터는 원시 문자열 본문만 다루면 된다. WebClient는 리액티브 의존성을 들인다. 둘 다 기각.
 - **대기**: 페이지·법원 사이 대기는 주입된 `Sleeper`로 한다. 테스트는 호출된 대기 시간을 기록해 골든과 비교하고 실제로 자지 않는다.
@@ -74,7 +75,7 @@ com.auctionboss.collect
 
 ### D5. 동등성 ① 어댑터 골든
 - **픽스처 추출**: `scripts/collector-golden/extract-fixtures.ts`가 TS 픽스처 모듈을 import해 `backend/src/test/resources/contracts/source/fixtures/*.json`으로 쓴다(값 변형 없음). 기존 TS 픽스처를 고치지 않고 복사만 하므로 두 쪽이 같은 바이트를 본다. 상세 응답 픽스처의 개인 이름이 들어갈 수 있는 필드는 1단계 시드의 가림 규칙(`scripts/seed/masking.ts`)을 적용한 값으로 쓰고, 생성기와 Java 테스트 모두 가린 값을 입력으로 쓴다(입력이 같으면 동등성 비교에 영향 없음). 가림 적용 여부를 생성기 테스트로 고정한다.
-- **생성**: `scripts/collector-golden/generate-source-goldens.ts`가 사례마다 Node `http` 루프백 서버를 띄워 응답 시퀀스(상태, `Set-Cookie`, 본문)를 순서대로 돌려주고, 받은 요청(메서드, 경로, 헤더, 본문)을 기록한다. 기존 TS `CourtAuctionAdapter`를 `baseUrl`=그 서버, 실제 `fetch`, 기록용 `sleep`, 고정 `now`로 만들어 부르고 결과를 `contracts/source/{사례}.json`에 쓴다. 형식: `{ now, options, call: { kind: "activeItems"|"photos", scope|ref, repeat }, responses: [...], expected: { items, pagesRequested } | { photos, requestsMade } | { error: { kind, requestsMade, messageHead } }, requests: [...], sleeps: [...] }`. 어댑터 코드는 바꾸지 않는다(이미 `baseUrl`·`fetchFn`·`sleep`·`now`를 주입받는다).
+- **생성**: `scripts/collector-golden/generate-source-goldens.ts`가 사례마다 Node `http` 루프백 서버를 띄워 응답 시퀀스(상태, `Set-Cookie`, 본문)를 순서대로 돌려주고, 받은 요청(메서드, 경로, 헤더, 본문)을 기록한다. 기존 TS `CourtAuctionAdapter`를 `baseUrl`=그 서버, 실제 `fetch`, 기록용 `sleep`, 고정 `now`로 만들어 부르고 결과를 `contracts/source/{사례}.json`에 쓴다. 형식: `{ now, options, call: { kind: "activeItems"|"photos", scope|ref }, repeat, responses: [...], expected: Outcome[], requests: [...], sleeps: [...] }`. `expected`는 호출마다 하나(길이 = `repeat`)이고 `Outcome`은 `{ items, pagesRequested } | { photos: [{ seq, base64Length, base64Sha256 }], requestsMade } | { error: { kind, requestsMade, messageHead } }`다(사진은 크기를 줄이려고 base64 문자열 대신 길이와 SHA-256). `requests[].headers`는 받은 순서 그대로의 `[이름, 값]` 쌍이고, 서버 주소는 포트가 매번 달라 `{base}`(`host` 헤더 값은 `{host}`)로 바꿔 기록한다(오류 메시지의 주소도 같다). `sleeps`는 `{ ms, afterRequests }`(그 시점까지 서버가 받은 요청 수)로 대기 위치까지 비교한다. 고정 `now`는 UTC 정오(`2026-10-08T12:00:00.000Z`)다. 어댑터는 매각기일 창을 프로세스 로컬 날짜로 만들므로(TS 동작: 운영 컨테이너가 UTC면 한국 00~09시에 하루 전 날짜가 나간다) 시간대와 무관하게 같은 날짜가 나오는 시각을 고른다. 어댑터 코드는 바꾸지 않는다(이미 `baseUrl`·`fetchFn`·`sleep`·`now`를 주입받는다).
 - **사례 목록**(최소): 정상 1페이지(실제 응답 행), 3페이지(`totalCnt` 기준 페이지 수), 빈 페이지 조기 종료, `maxPages` 상한, 일괄매각 접기, 도로명만, 확장 필드 없음(없음과 0 구별), 필수 키 누락 행 제외, 원문 보존 코드, 법원 2곳(법원 사이 대기), 세션 쿠키 없음, WAF HTML, `ipcheck:false`(안내 문구 있음·없음), `data` 없음, 형식 위반, JSON 해석 불가, HTTP 500, 2페이지에서 차단, 사진 2장, 사진 빈 목록, 순번·이미지 결측 항목, 사진 차단, 사진 HTTP 오류, 같은 인스턴스로 사진 2회(부트스트랩 1회).
 - **Java 비교**: `SourceContractTest`가 사례마다 MockWebServer에 같은 응답을 넣고 Java 어댑터를 같은 옵션으로 부른다. 비교: 물건·사진은 `ContractTest.diff` 엄격 비교, 오류는 `kind`·`requestsMade`·메시지 첫 줄(zod 이슈 문구는 Java 검증기가 같은 문장을 만들 수 없으므로 첫 줄만), 요청은 순서·메서드·경로·본문(JSON 의미 비교)·헤더(이름 대소문자 무시, `host`·`content-length`·`connection` 같은 전송 계층 헤더 제외), 대기 시간 목록은 정확히.
 - **네트워크 오류 사례**: 연결 끊김은 MockWebServer의 소켓 정책으로, TS 쪽은 서버가 소켓을 닫는 것으로 만든다. 둘 다 `SourceRequestError`인지와 요청 수만 비교한다.
@@ -82,7 +83,7 @@ com.auctionboss.collect
 
 ### D6. 동등성 ② 저장 골든
 - **생성**: `scripts/collector-golden/generate-store-goldens.ts`가 시나리오마다 빈 임시 SQLite(`getDb` 스키마)와 임시 사진 디렉터리를 만들고, 기존 `startCollector`·`startPhotoWorker`를 `runImmediately:false`로 띄워 단계마다 `tick()`을 부른다. 소스는 시나리오가 정한 응답을 돌려주는 가짜 `AuctionSource`(정규화 물건 또는 오류 종류·요청 수)다. 고정 시각은 2단계의 `scripts/seed/fixed-clock.ts`(인자 없는 `Date`와 `Date.now()`만 고정)를 쓰고 단계마다 시각을 지정한다. 사진 워커는 `now`·`sleep`을 주입한다. 단계 뒤마다 스냅숏을 남긴다.
-- **스냅숏**: `items`(전체 컬럼, `id` 포함), `item_changes`(`id` 순), `worker_runs`(`detail`은 JSON 의미 비교), `collector_state`(`key`, `value`, `updated_at`), `item_photos`, 사진 파일(상대 경로, 크기, SHA-256), 가짜 소스가 받은 호출(법원 순서, 사진 대상), 틱 결과.
+- **스냅숏**: `items`(전체 컬럼, `id` 포함 — 1장 실측: SQLite의 `ON CONFLICT` 갱신도 AUTOINCREMENT를 한 칸 쓰고 MySQL 8.4(`innodb_autoinc_lock_mode=2`)의 `ON DUPLICATE KEY UPDATE`도 같으므로, 갱신 행에도 INSERT를 시도하면 id가 같다. 갱신을 `UPDATE`로 바꾸면 id가 달라지니 D8의 문장 그대로 쓴다), `item_changes`(`id` 순), `worker_runs`(`detail`은 JSON 의미 비교), `collector_state`(`key`, `value`, `updated_at`), `item_photos`, 사진 파일(상대 경로, 크기, SHA-256), 가짜 소스가 받은 호출(법원 순서, 사진 대상), 틱 결과.
 - **시각·숫자 정규화**: SQLite의 ISO 문자열과 MySQL `DATETIME(3)`은 밀리초 3자리 `Z` 문자열로, 숫자 컬럼은 1단계 시드 변환(`scripts/seed/sql.ts`)과 같은 규칙으로 비교한다. 오류 메시지는 어댑터 골든과 같은 첫 줄 규칙이다.
 - **Java 재생**: `StoreContractTest`가 시나리오마다 쓰기 대상 테이블을 비우고 `AUTO_INCREMENT`를 되돌린 뒤(2단계 D10과 같은 이유), `MutableClock`을 단계 시각으로 맞추고 가짜 `AuctionSource` 빈으로 `CollectorRun`·`PhotoRun`을 틱 경로(잠금 포함)로 실행해 같은 스냅숏을 비교한다. 시나리오 설정(법원, 상한, 사진 설정)은 골든의 `config`를 두 쪽이 같은 값으로 쓴다.
 - **시나리오 목록**
@@ -126,12 +127,12 @@ com.auctionboss.collect
 - 회차 하나의 물건 수는 법원 1곳 기준 수백 건이다. 물건당 3~7문장이면 수천 문장이므로 JDBC 배치는 처음에는 쓰지 않고, 시드 규모에서 회차 저장 시간을 재서 1초를 넘으면 배치로 바꾼다(수치는 DEVELOPMENT_NOTES에).
 
 ### D9. 정규화 모델과 변경 감지
-- `SourceItem`은 TS `AuctionItemInput`의 필드를 같은 이름·같은 의미로 담는 record다. 없음은 `null`, 정수는 `Long`, 면적·좌표·최저가율은 소스 원문을 보존하는 TS 동작과 같은 타입(`BigDecimal`/`Double`은 1장에서 TS 값 범위를 보고 정함)으로 둔다.
+- `SourceItem`은 TS `AuctionItemInput`의 필드를 같은 이름·같은 의미로 담는 record다. 없음은 `null`, 숫자 필드는 전부 `Long`, 좌표·코드·시각 문자열은 `String`이다. 1장 실측으로 정해졌다: TS `toInt`/`toIntNonZero`가 `Math.trunc`로 정수만 만들고(소수 입력 `"1.9"`는 1) 좌표(`xCordi`, `yCordi`, `cordiLvl`)는 숫자로 바꾸지 않는 문자열이라, 면적·최저가율에 `BigDecimal`/`Double`은 필요 없다. 시드 809건의 값 범위는 감정가·최저가 최대 약 510억(32비트를 넘으므로 BIGINT), 유찰 횟수 0~16, 면적 1~35682, 최저가율 3~100이고 소수·음수 값은 없다. 어댑터 변환의 경계 동작(`Number()` 의미: `"0x10"`→16, `"1e3"`→1000, `"1,234"`→1234, `"+7"`→7, 전각 숫자·`"1_000"`·`"Infinity"`→없음, 2^53 초과는 정밀도 손실, `"1e30"`처럼 `Long`을 넘는 값은 TS가 그대로 통과시킴)은 2.4의 Java 단위 테스트에서 경계값으로 정한다. `Long` 범위 밖 입력은 골든 사례 밖이며 Java는 변환 불가(없음)로 다루고 결정을 메모에 남긴다.
 - 감시 필드 비교 규칙(`minBidPrice`, `failedBidCount`는 숫자, `auctionDate`, `status`는 문자열, null↔값은 변경)과 이력 값의 문자열 표기(`String(value)`: 정수는 소수점 없이)는 TS와 같게 한다. 기존 DB 값과 새 값을 비교할 때 MySQL `BIGINT`와 SQLite `INTEGER`가 같은 문자열을 만드는지 저장 골든이 확인한다.
 - 어댑터 쪽 변환 함수(`toInt`, `toIntNonZero`, `text`, `toIsoDate`, `deriveStatus`, `pickAddress`, `pickMinBidPrice`, `resolveCourtCode`, `readCookieHeader`)는 이름을 맞춰 옮기고, 어댑터 골든과 별도로 TS 단위 테스트의 경계값을 Java 단위 테스트로 옮긴다.
 
 ### D10. 사진 워커 세부
-- 대기 물건 SQL은 TS `selectPendingPhotoItems`와 같은 조건·정렬로 옮긴다. `retryBefore = now - retryAfterHours`.
+- 대기 물건 SQL은 TS `selectPendingPhotoItems`와 같은 조건·정렬로 옮긴다. `retryBefore = now - retryAfterHours`. 조건은 `internal_case_no IS NOT NULL AND court_code IS NOT NULL`(빈 문자열은 통과한다)이고 실패 물건은 `photo_attempted_at <= retryBefore`(같은 시각 포함)다. 워커는 대기 목록의 물건 중 `!internalCaseNo || !courtCode`(빈 문자열 포함)를 요청도 실패 기록도 없이 건너뛰므로, 내부 사건번호가 빈 문자열인 물건은 목록에 계속 남고 매 회차 건너뛴다. 저장 골든 `photos-outcomes`가 이 경우를 담는다(TS 수집 경로는 빈 값을 `null`로 접어 실제로는 나오지 않지만 Java 쿼리·워커가 같은 의미를 지켜야 한다).
 - 파일 저장은 사진 디렉터리(`auctionboss.photos.dir`) 아래 `{itemId}/{seq}{ext}`. MIME·확장자 판정과 10MB 상한은 `src/lib/storage/photos.ts`와 같다. 쓰기 전에 `PhotoFileStore`와 같은 경계 검사를 한다. 사진 파일 API(2단계)가 같은 디렉터리를 읽으므로 스펙 시나리오 "사진 파일 API로 같은 바이트"를 통합 테스트로 확인한다.
 - 회차마다 새 어댑터 인스턴스(사진 세션 재사용 범위가 회차 하나)라 프로토타입 범위 빈 또는 팩토리로 만든다.
 
@@ -171,7 +172,7 @@ com.auctionboss.collect
 - [고정 주기 틱이 회차 시작 시각을 TS와 다르게 정렬] → 주기·건너뜀 의미만 같으면 된다. 저장 골든은 틱을 직접 부르므로 영향 없다.
 - [저장 실패 회차에서 로테이션 위치가 전진해 그 법원 물건이 한 바퀴 늦어짐] → TS와 같은 동작이고 원인이 DB 오류라 드물다. 회차가 `failed`로 기록되어 보인다(D8).
 - [픽스처 JSON에 실측 응답의 개인 정보가 복제됨] → 이미 저장소에 있는 TS 픽스처의 복사본이고, 이름 필드는 시드 가림 규칙을 적용한다(D5). 실제 사이트 확인 결과는 수치만 남긴다(D13).
-- [MySQL과 SQLite의 숫자·문자열 차이(정수 표기, 대소문자 비교, 콜레이션)] → 저장 골든이 이력 값 문자열과 자연 키 일치를 직접 비교한다. 자연 키 컬럼 콜레이션 차이(`utf8mb4_0900_ai_ci`는 대소문자·악센트 무시)로 SQLite에서 다른 키가 MySQL에서 같은 키가 되는 경우가 있는지 1장에서 시드로 확인한다.
+- [MySQL과 SQLite의 숫자·문자열 차이(정수 표기, 대소문자 비교, 콜레이션)] → 저장 골든이 이력 값 문자열과 자연 키 일치를 직접 비교한다. 1장 실측: 시드 원본 809건의 자연 키를 같은 컬럼 정의(`utf8mb4_0900_ai_ci`, UNIQUE)의 MySQL 8.4에 넣어 충돌 0건, 법원 이름 1종, 사건번호에 라틴 문자 0건이라 이 위험은 현재 데이터에서 실현되지 않는다. 자연 키 컬럼 콜레이션 차이(`utf8mb4_0900_ai_ci`는 대소문자·악센트 무시)로 SQLite에서 다른 키가 MySQL에서 같은 키가 되는 경우가 있는지 1장에서 시드로 확인한다.
 
 ## Migration Plan
 

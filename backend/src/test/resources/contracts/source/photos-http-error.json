@@ -1,0 +1,133 @@
+{
+  "description": "상세 HTTP 500은 SourceRequestError",
+  "now": "2026-10-08T12:00:00.000Z",
+  "options": {},
+  "call": {
+    "kind": "photos",
+    "ref": {
+      "courtCode": "B000210",
+      "internalCaseNo": "20260130101037"
+    }
+  },
+  "repeat": 1,
+  "responses": [
+    {
+      "status": 200,
+      "setCookie": [
+        "JSESSIONID=golden-session; Path=/; HttpOnly",
+        "WMONID=golden-wmon; Path=/"
+      ],
+      "body": "<html><body>index</body></html>"
+    },
+    {
+      "status": 500,
+      "body": "err"
+    }
+  ],
+  "expected": [
+    {
+      "error": {
+        "kind": "SourceRequestError",
+        "requestsMade": 2,
+        "messageHead": "물건 상세 요청이 실패했습니다 (HTTP 500)"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/pgj/index.on",
+      "headers": [
+        [
+          "host",
+          "{host}"
+        ],
+        [
+          "connection",
+          "keep-alive"
+        ],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ],
+        [
+          "Accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        ],
+        [
+          "accept-language",
+          "*"
+        ],
+        [
+          "sec-fetch-mode",
+          "cors"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate"
+        ]
+      ],
+      "body": ""
+    },
+    {
+      "method": "POST",
+      "path": "/pgj/pgj15B/selectAuctnCsSrchRslt.on",
+      "headers": [
+        [
+          "host",
+          "{host}"
+        ],
+        [
+          "connection",
+          "keep-alive"
+        ],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ],
+        [
+          "Content-Type",
+          "application/json;charset=UTF-8"
+        ],
+        [
+          "Accept",
+          "application/json"
+        ],
+        [
+          "Referer",
+          "{base}/pgj/index.on"
+        ],
+        [
+          "Origin",
+          "{base}"
+        ],
+        [
+          "X-Requested-With",
+          "XMLHttpRequest"
+        ],
+        [
+          "Cookie",
+          "JSESSIONID=golden-session; WMONID=golden-wmon"
+        ],
+        [
+          "accept-language",
+          "*"
+        ],
+        [
+          "sec-fetch-mode",
+          "cors"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate"
+        ],
+        [
+          "content-length",
+          "107"
+        ]
+      ],
+      "body": "{\"dma_srchGdsDtlSrch\":{\"csNo\":\"20260130101037\",\"cortOfcCd\":\"B000210\",\"dspslGdsSeq\":\"\",\"pgmId\":\"PGJ15BM01\"}}"
+    }
+  ],
+  "sleeps": []
+}

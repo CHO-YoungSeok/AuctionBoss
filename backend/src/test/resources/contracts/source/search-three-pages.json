@@ -1,0 +1,410 @@
+{
+  "description": "totalCnt(행 수) 기준 3페이지. groupTotalCount는 페이지 수 계산에 쓰이지 않는다. 페이지 사이 대기 2회",
+  "now": "2026-10-08T12:00:00.000Z",
+  "options": {
+    "pageSize": 2
+  },
+  "call": {
+    "kind": "activeItems",
+    "scope": {
+      "courts": [
+        {
+          "name": "서울중앙지방법원",
+          "courtCode": "B000210"
+        }
+      ]
+    }
+  },
+  "repeat": 1,
+  "responses": [
+    {
+      "status": 200,
+      "setCookie": [
+        "JSESSIONID=golden-session; Path=/; HttpOnly",
+        "WMONID=golden-wmon; Path=/"
+      ],
+      "body": "<html><body>index</body></html>"
+    },
+    {
+      "status": 200,
+      "body": "{\"status\":200,\"message\":\"검색 결과가 조회되었습니다.\",\"timestamp\":1788675327824,\"errors\":null,\"token\":null,\"data\":{\"dma_pageInfo\":{\"pageNo\":1,\"pageSize\":100,\"bfPageNo\":1,\"startRowNo\":1,\"totalCnt\":\"5\",\"totalYn\":\"Y\",\"groupTotalCount\":3},\"ipcheck\":true,\"dlt_srchResult\":[{\"docid\":\"B0002102011013002849711\",\"boCd\":\"B000210\",\"saNo\":\"20110130028497\",\"maemulSer\":\"1\",\"mokmulSer\":\"1\",\"srnSaNo\":\"2011타경28497\",\"jpDeptCd\":\"1001\",\"jinstatCd\":\"0002100001\",\"mulStatcd\":\"01\",\"mulJinYn\":\"Y\",\"maemulUtilCd\":\"01\",\"mulBigo\":\"\",\"gamevalAmt\":\"711000000\",\"minmaePrice\":\"711000000\",\"yuchalCnt\":\"1\",\"maeAmt\":\"0\",\"inqCnt\":\"55\",\"gwansMulRegCnt\":\"8\",\"ipchalGbncd\":\"000331\",\"maeGiil\":\"20260908\",\"maegyuljGiil\":\"20260915\",\"maeHh1\":\"1000\",\"notifyMinmaePrice1\":\"711000000\",\"notifyMinmaePrice2\":\"0\",\"notifyMinmaePriceRate1\":\"100\",\"maeGiilCnt\":\"1\",\"ipgiganFday\":\"\",\"ipgiganTday\":\"\",\"maePlace\":\"경매법정(제4별관211호)\",\"hjguSido\":\"서울특별시\",\"hjguSigu\":\"성북구\",\"hjguDong\":\"정릉동\",\"daepyoLotno\":\"1032\",\"buldNm\":\"정릉2차 대주피오레\",\"buldList\":\"203동 4층 401호\",\"lclsUtilCd\":\"20000\",\"mclsUtilCd\":\"20100\",\"sclsUtilCd\":\"20104\",\"xCordi\":\"312690\",\"yCordi\":\"555963\",\"pjbBuldList\":\"철근콘크리트구조\\n84.99㎡\",\"minArea\":\"84\",\"maxArea\":\"84\",\"dupSaNo\":\"2015타경14083<br/>2021타경102844\",\"byungSaNo\":\"\",\"jiwonNm\":\"서울중앙지방법원\",\"jpDeptNm\":\"경매1계\",\"tel\":\"530-1820 (제4별관 민사집행과)\",\"dspslUsgNm\":\"아파트\",\"convAddr\":\"[집합건물 철근콘크리트구조\\n84.99㎡]\",\"printSt\":\"서울특별시 성북구 정릉동 1032 정릉2차 대주피오레 203동 4층 401호\",\"printCsNo\":\"서울중앙지방법원<br/>2011타경28497<br/>2015타경14083<br/>2021타경102844<br/>(중복)\",\"colMerge\":\"201101300284971\",\"addrGbncd\":\"A\",\"rdNm\":\"\"},{\"docid\":\"B0002102024013000370211\",\"boCd\":\"B000210\",\"saNo\":\"20240130003702\",\"maemulSer\":\"1\",\"mokmulSer\":\"1\",\"srnSaNo\":\"2024타경3702\",\"jiwonNm\":\"서울중앙지방법원\",\"dspslUsgNm\":\"상가,오피스텔,근린시설\",\"gamevalAmt\":\"3050651500\",\"minmaePrice\":\"2440521200\",\"notifyMinmaePrice1\":\"2440521200\",\"maeGiil\":\"20260910\",\"yuchalCnt\":\"0\",\"mulBigo\":\"일괄매각\",\"addrGbncd\":\"A\",\"rdNm\":\"\",\"printSt\":\"서울특별시 종로구 종로4가 185\"}]}}"
+    },
+    {
+      "status": 200,
+      "body": "{\"status\":200,\"message\":\"검색 결과가 조회되었습니다.\",\"timestamp\":1788675327824,\"errors\":null,\"token\":null,\"data\":{\"dma_pageInfo\":{\"pageNo\":1,\"pageSize\":100,\"bfPageNo\":1,\"startRowNo\":1,\"totalCnt\":\"5\",\"totalYn\":\"Y\",\"groupTotalCount\":3},\"ipcheck\":true,\"dlt_srchResult\":[{\"docid\":\"B0002102024013000370212\",\"boCd\":\"B000210\",\"saNo\":\"20240130003702\",\"maemulSer\":\"1\",\"mokmulSer\":\"2\",\"srnSaNo\":\"2024타경3702\",\"jiwonNm\":\"서울중앙지방법원\",\"dspslUsgNm\":\"상가,오피스텔,근린시설\",\"gamevalAmt\":\"3050651500\",\"minmaePrice\":\"2440521200\",\"notifyMinmaePrice1\":\"2440521200\",\"maeGiil\":\"20260910\",\"yuchalCnt\":\"0\",\"mulBigo\":\"일괄매각\",\"addrGbncd\":\"A\",\"rdNm\":\"\",\"printSt\":\"서울특별시 종로구 종로4가 185-1\"},{\"docid\":\"B0002102024013000370213\",\"boCd\":\"B000210\",\"saNo\":\"20240130003702\",\"maemulSer\":\"1\",\"mokmulSer\":\"3\",\"srnSaNo\":\"2024타경3702\",\"jiwonNm\":\"서울중앙지방법원\",\"dspslUsgNm\":\"상가,오피스텔,근린시설\",\"gamevalAmt\":\"3050651500\",\"minmaePrice\":\"2440521200\",\"notifyMinmaePrice1\":\"2440521200\",\"maeGiil\":\"20260910\",\"yuchalCnt\":\"0\",\"mulBigo\":\"일괄매각\",\"addrGbncd\":\"R\",\"rdNm\":\"종로\",\"printSt\":\"서울특별시 종로구 종로 204\"}]}}"
+    },
+    {
+      "status": 200,
+      "body": "{\"status\":200,\"message\":\"검색 결과가 조회되었습니다.\",\"timestamp\":1788675327824,\"errors\":null,\"token\":null,\"data\":{\"dma_pageInfo\":{\"pageNo\":1,\"pageSize\":100,\"bfPageNo\":1,\"startRowNo\":1,\"totalCnt\":\"5\",\"totalYn\":\"Y\",\"groupTotalCount\":3},\"ipcheck\":true,\"dlt_srchResult\":[{\"docid\":\"B0002102024013000250111\",\"boCd\":\"B000210\",\"saNo\":\"20240130002501\",\"maemulSer\":\"1\",\"mokmulSer\":\"1\",\"srnSaNo\":\"2024타경2501\",\"jiwonNm\":\"서울중앙지방법원\",\"dspslUsgNm\":\"다세대\",\"gamevalAmt\":\"700000000\",\"minmaePrice\":\"448000000\",\"notifyMinmaePrice1\":\"358400000\",\"maeGiil\":\"20260910\",\"yuchalCnt\":\"3\",\"addrGbncd\":\"R\",\"rdNm\":\"남부순환로192길\",\"printSt\":\"서울특별시 관악구 남부순환로192길 10\"}]}}"
+    }
+  ],
+  "expected": [
+    {
+      "items": [
+        {
+          "court": "서울중앙지방법원",
+          "caseNo": "2011타경28497",
+          "itemNo": "1",
+          "address": "서울특별시 성북구 정릉동 1032 정릉2차 대주피오레 203동 4층 401호",
+          "usageType": "아파트",
+          "appraisalPrice": 711000000,
+          "minBidPrice": 711000000,
+          "auctionDate": "2026-09-08",
+          "failedBidCount": 1,
+          "status": "유찰 1회",
+          "minArea": 84,
+          "maxArea": 84,
+          "buildingDescription": "철근콘크리트구조\n84.99㎡",
+          "minBidPriceRound1": 711000000,
+          "minBidPriceRound2": null,
+          "minBidPriceRound3": null,
+          "minBidPriceRound4": null,
+          "minBidPriceRateRound1": 100,
+          "minBidPriceRateRound2": null,
+          "usageCodeLarge": "20000",
+          "usageCodeMedium": "20100",
+          "usageCodeSmall": "20104",
+          "sido": "서울특별시",
+          "sigungu": "성북구",
+          "dong": "정릉동",
+          "lotNumber": "1032",
+          "buildingName": "정릉2차 대주피오레",
+          "buildingUnit": "203동 4층 401호",
+          "coordinateX": "312690",
+          "coordinateY": "555963",
+          "coordinateLevel": null,
+          "auctionTime": "1000",
+          "auctionPlace": "경매법정(제4별관211호)",
+          "auctionDecisionDate": "2026-09-15",
+          "auctionRound": 1,
+          "note": null,
+          "duplicateCaseNo": "2015타경14083<br/>2021타경102844",
+          "mergedCaseNo": null,
+          "courtDepartment": "경매1계",
+          "courtPhone": "530-1820 (제4별관 민사집행과)",
+          "statusCode": "0002100001",
+          "itemStatusCode": "01",
+          "internalCaseNo": "20110130028497",
+          "courtCode": "B000210"
+        },
+        {
+          "court": "서울중앙지방법원",
+          "caseNo": "2024타경3702",
+          "itemNo": "1",
+          "address": "서울특별시 종로구 종로4가 185",
+          "usageType": "상가,오피스텔,근린시설",
+          "appraisalPrice": 3050651500,
+          "minBidPrice": 2440521200,
+          "auctionDate": "2026-09-10",
+          "failedBidCount": 0,
+          "status": "신건",
+          "minArea": null,
+          "maxArea": null,
+          "buildingDescription": null,
+          "minBidPriceRound1": 2440521200,
+          "minBidPriceRound2": null,
+          "minBidPriceRound3": null,
+          "minBidPriceRound4": null,
+          "minBidPriceRateRound1": null,
+          "minBidPriceRateRound2": null,
+          "usageCodeLarge": null,
+          "usageCodeMedium": null,
+          "usageCodeSmall": null,
+          "sido": null,
+          "sigungu": null,
+          "dong": null,
+          "lotNumber": null,
+          "buildingName": null,
+          "buildingUnit": null,
+          "coordinateX": null,
+          "coordinateY": null,
+          "coordinateLevel": null,
+          "auctionTime": null,
+          "auctionPlace": null,
+          "auctionDecisionDate": null,
+          "auctionRound": null,
+          "note": "일괄매각",
+          "duplicateCaseNo": null,
+          "mergedCaseNo": null,
+          "courtDepartment": null,
+          "courtPhone": null,
+          "statusCode": null,
+          "itemStatusCode": null,
+          "internalCaseNo": "20240130003702",
+          "courtCode": "B000210"
+        },
+        {
+          "court": "서울중앙지방법원",
+          "caseNo": "2024타경2501",
+          "itemNo": "1",
+          "address": "서울특별시 관악구 남부순환로192길 10",
+          "usageType": "다세대",
+          "appraisalPrice": 700000000,
+          "minBidPrice": 358400000,
+          "auctionDate": "2026-09-10",
+          "failedBidCount": 3,
+          "status": "유찰 3회",
+          "minArea": null,
+          "maxArea": null,
+          "buildingDescription": null,
+          "minBidPriceRound1": 358400000,
+          "minBidPriceRound2": null,
+          "minBidPriceRound3": null,
+          "minBidPriceRound4": null,
+          "minBidPriceRateRound1": null,
+          "minBidPriceRateRound2": null,
+          "usageCodeLarge": null,
+          "usageCodeMedium": null,
+          "usageCodeSmall": null,
+          "sido": null,
+          "sigungu": null,
+          "dong": null,
+          "lotNumber": null,
+          "buildingName": null,
+          "buildingUnit": null,
+          "coordinateX": null,
+          "coordinateY": null,
+          "coordinateLevel": null,
+          "auctionTime": null,
+          "auctionPlace": null,
+          "auctionDecisionDate": null,
+          "auctionRound": null,
+          "note": null,
+          "duplicateCaseNo": null,
+          "mergedCaseNo": null,
+          "courtDepartment": null,
+          "courtPhone": null,
+          "statusCode": null,
+          "itemStatusCode": null,
+          "internalCaseNo": "20240130002501",
+          "courtCode": "B000210"
+        }
+      ],
+      "pagesRequested": 3
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/pgj/index.on",
+      "headers": [
+        [
+          "host",
+          "{host}"
+        ],
+        [
+          "connection",
+          "keep-alive"
+        ],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ],
+        [
+          "Accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        ],
+        [
+          "accept-language",
+          "*"
+        ],
+        [
+          "sec-fetch-mode",
+          "cors"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate"
+        ]
+      ],
+      "body": ""
+    },
+    {
+      "method": "POST",
+      "path": "/pgj/pgjsearch/searchControllerMain.on",
+      "headers": [
+        [
+          "host",
+          "{host}"
+        ],
+        [
+          "connection",
+          "keep-alive"
+        ],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ],
+        [
+          "Content-Type",
+          "application/json;charset=UTF-8"
+        ],
+        [
+          "Accept",
+          "application/json"
+        ],
+        [
+          "Referer",
+          "{base}/pgj/index.on"
+        ],
+        [
+          "Origin",
+          "{base}"
+        ],
+        [
+          "X-Requested-With",
+          "XMLHttpRequest"
+        ],
+        [
+          "Cookie",
+          "JSESSIONID=golden-session; WMONID=golden-wmon"
+        ],
+        [
+          "accept-language",
+          "*"
+        ],
+        [
+          "sec-fetch-mode",
+          "cors"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate"
+        ],
+        [
+          "content-length",
+          "471"
+        ]
+      ],
+      "body": "{\"dma_pageInfo\":{\"pageNo\":1,\"pageSize\":2,\"bfPageNo\":1,\"startRowNo\":\"\",\"totalCnt\":0,\"totalYn\":\"Y\",\"groupTotalCount\":\"\"},\"dma_srchGdsDtlSrchInfo\":{\"rletDspslSpcCondCd\":\"\",\"bidDvsCd\":\"000331\",\"mvprpRletDvsCd\":\"00031R\",\"cortAuctnSrchCondCd\":\"0004601\",\"cortOfcCd\":\"B000210\",\"jdbnCd\":\"\",\"lclDspslGdsLstUsgCd\":\"\",\"mclDspslGdsLstUsgCd\":\"\",\"sclDspslGdsLstUsgCd\":\"\",\"cortStDvs\":\"1\",\"lafjOrderBy\":\"\",\"pgmId\":\"PGJ15AF01\",\"bidBgngYmd\":\"20261008\",\"bidEndYmd\":\"20261207\",\"srchInfo\":{}}}"
+    },
+    {
+      "method": "POST",
+      "path": "/pgj/pgjsearch/searchControllerMain.on",
+      "headers": [
+        [
+          "host",
+          "{host}"
+        ],
+        [
+          "connection",
+          "keep-alive"
+        ],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ],
+        [
+          "Content-Type",
+          "application/json;charset=UTF-8"
+        ],
+        [
+          "Accept",
+          "application/json"
+        ],
+        [
+          "Referer",
+          "{base}/pgj/index.on"
+        ],
+        [
+          "Origin",
+          "{base}"
+        ],
+        [
+          "X-Requested-With",
+          "XMLHttpRequest"
+        ],
+        [
+          "Cookie",
+          "JSESSIONID=golden-session; WMONID=golden-wmon"
+        ],
+        [
+          "accept-language",
+          "*"
+        ],
+        [
+          "sec-fetch-mode",
+          "cors"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate"
+        ],
+        [
+          "content-length",
+          "471"
+        ]
+      ],
+      "body": "{\"dma_pageInfo\":{\"pageNo\":2,\"pageSize\":2,\"bfPageNo\":1,\"startRowNo\":\"\",\"totalCnt\":5,\"totalYn\":\"N\",\"groupTotalCount\":\"\"},\"dma_srchGdsDtlSrchInfo\":{\"rletDspslSpcCondCd\":\"\",\"bidDvsCd\":\"000331\",\"mvprpRletDvsCd\":\"00031R\",\"cortAuctnSrchCondCd\":\"0004601\",\"cortOfcCd\":\"B000210\",\"jdbnCd\":\"\",\"lclDspslGdsLstUsgCd\":\"\",\"mclDspslGdsLstUsgCd\":\"\",\"sclDspslGdsLstUsgCd\":\"\",\"cortStDvs\":\"1\",\"lafjOrderBy\":\"\",\"pgmId\":\"PGJ15AF01\",\"bidBgngYmd\":\"20261008\",\"bidEndYmd\":\"20261207\",\"srchInfo\":{}}}"
+    },
+    {
+      "method": "POST",
+      "path": "/pgj/pgjsearch/searchControllerMain.on",
+      "headers": [
+        [
+          "host",
+          "{host}"
+        ],
+        [
+          "connection",
+          "keep-alive"
+        ],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ],
+        [
+          "Content-Type",
+          "application/json;charset=UTF-8"
+        ],
+        [
+          "Accept",
+          "application/json"
+        ],
+        [
+          "Referer",
+          "{base}/pgj/index.on"
+        ],
+        [
+          "Origin",
+          "{base}"
+        ],
+        [
+          "X-Requested-With",
+          "XMLHttpRequest"
+        ],
+        [
+          "Cookie",
+          "JSESSIONID=golden-session; WMONID=golden-wmon"
+        ],
+        [
+          "accept-language",
+          "*"
+        ],
+        [
+          "sec-fetch-mode",
+          "cors"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate"
+        ],
+        [
+          "content-length",
+          "471"
+        ]
+      ],
+      "body": "{\"dma_pageInfo\":{\"pageNo\":3,\"pageSize\":2,\"bfPageNo\":2,\"startRowNo\":\"\",\"totalCnt\":5,\"totalYn\":\"N\",\"groupTotalCount\":\"\"},\"dma_srchGdsDtlSrchInfo\":{\"rletDspslSpcCondCd\":\"\",\"bidDvsCd\":\"000331\",\"mvprpRletDvsCd\":\"00031R\",\"cortAuctnSrchCondCd\":\"0004601\",\"cortOfcCd\":\"B000210\",\"jdbnCd\":\"\",\"lclDspslGdsLstUsgCd\":\"\",\"mclDspslGdsLstUsgCd\":\"\",\"sclDspslGdsLstUsgCd\":\"\",\"cortStDvs\":\"1\",\"lafjOrderBy\":\"\",\"pgmId\":\"PGJ15AF01\",\"bidBgngYmd\":\"20261008\",\"bidEndYmd\":\"20261207\",\"srchInfo\":{}}}"
+    }
+  ],
+  "sleeps": [
+    {
+      "ms": 5000,
+      "afterRequests": 2
+    },
+    {
+      "ms": 5000,
+      "afterRequests": 3
+    }
+  ]
+}

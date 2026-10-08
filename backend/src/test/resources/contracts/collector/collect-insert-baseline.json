@@ -1,0 +1,398 @@
+{
+  "description": "빈 DB에 3건 신규. 1건은 매각기일이 없어 그 필드의 기준점이 생기지 않는다",
+  "clock": {
+    "t0": "2026-10-08T00:00:00.000Z"
+  },
+  "config": {
+    "scope": {
+      "courts": [
+        {
+          "name": "서울중앙지방법원",
+          "courtCode": "B000210"
+        }
+      ],
+      "maxCourtsPerRun": 1,
+      "maxRequestsPerRun": 13
+    },
+    "photos": {
+      "intervalMs": 1800000,
+      "maxItemsPerRun": 5,
+      "requestDelayMs": 30000,
+      "retryAfterHours": 24
+    }
+  },
+  "steps": [
+    {
+      "label": "첫 수집: 신규 3건",
+      "at": "2026-10-08T00:00:00.000Z",
+      "input": {
+        "label": "첫 수집: 신규 3건",
+        "at": "2026-10-08T00:00:00.000Z",
+        "run": "collector",
+        "search": {
+          "B000210": {
+            "items": [
+              {
+                "court": "서울중앙지방법원",
+                "caseNo": "2026타경1001",
+                "itemNo": "1",
+                "address": "서울특별시 종로구 시험로 1001",
+                "usageType": "아파트",
+                "appraisalPrice": 300000000,
+                "minBidPrice": 240000000,
+                "auctionDate": "2026-11-05",
+                "failedBidCount": 0,
+                "status": "신건",
+                "minArea": 84,
+                "maxArea": 84,
+                "buildingDescription": "철근콘크리트구조\n84.99㎡",
+                "minBidPriceRound1": 240000000,
+                "minBidPriceRateRound1": 80,
+                "sido": "서울특별시",
+                "sigungu": "종로구",
+                "dong": "청운동",
+                "lotNumber": "12",
+                "coordinateX": "312690",
+                "coordinateY": "555963",
+                "auctionTime": "1000",
+                "note": "비고 시험 문구",
+                "statusCode": "0002100001",
+                "internalCaseNo": "20260130010001",
+                "courtCode": "B000210"
+              },
+              {
+                "court": "서울중앙지방법원",
+                "caseNo": "2026타경1002",
+                "itemNo": "1",
+                "address": "서울특별시 종로구 시험로 1002",
+                "usageType": "아파트",
+                "appraisalPrice": 300000000,
+                "minBidPrice": 192000000,
+                "auctionDate": "2026-11-05",
+                "failedBidCount": 1,
+                "status": "유찰 1회"
+              },
+              {
+                "court": "서울중앙지방법원",
+                "caseNo": "2026타경1003",
+                "itemNo": "1",
+                "address": "서울특별시 종로구 시험로 1003",
+                "usageType": "아파트",
+                "appraisalPrice": 300000000,
+                "minBidPrice": 240000000,
+                "auctionDate": null,
+                "failedBidCount": 0,
+                "status": "신건"
+              }
+            ],
+            "pagesRequested": 3
+          }
+        }
+      },
+      "calls": [
+        {
+          "courtCode": "B000210",
+          "courtName": "서울중앙지방법원"
+        }
+      ],
+      "sleeps": [],
+      "tickResult": null,
+      "snapshot": {
+        "items": [
+          {
+            "id": 1,
+            "court": "서울중앙지방법원",
+            "case_no": "2026타경1001",
+            "item_no": "1",
+            "address": "서울특별시 종로구 시험로 1001",
+            "usage_type": "아파트",
+            "appraisal_price": 300000000,
+            "min_bid_price": 240000000,
+            "auction_date": "2026-11-05",
+            "failed_bid_count": 0,
+            "status": "신건",
+            "first_seen_at": "2026-10-08T00:00:00.000Z",
+            "last_seen_at": "2026-10-08T00:00:00.000Z",
+            "min_area": 84,
+            "max_area": 84,
+            "building_description": "철근콘크리트구조\n84.99㎡",
+            "min_bid_price_round1": 240000000,
+            "min_bid_price_round2": null,
+            "min_bid_price_round3": null,
+            "min_bid_price_round4": null,
+            "min_bid_price_rate_round1": 80,
+            "min_bid_price_rate_round2": null,
+            "usage_code_large": null,
+            "usage_code_medium": null,
+            "usage_code_small": null,
+            "sido": "서울특별시",
+            "sigungu": "종로구",
+            "dong": "청운동",
+            "lot_number": "12",
+            "building_name": null,
+            "building_unit": null,
+            "coordinate_x": "312690",
+            "coordinate_y": "555963",
+            "coordinate_level": null,
+            "auction_time": "1000",
+            "auction_place": null,
+            "auction_decision_date": null,
+            "auction_round": null,
+            "note": "비고 시험 문구",
+            "duplicate_case_no": null,
+            "merged_case_no": null,
+            "court_department": null,
+            "court_phone": null,
+            "status_code": "0002100001",
+            "item_status_code": null,
+            "internal_case_no": "20260130010001",
+            "court_code": "B000210",
+            "photo_status": null,
+            "photo_count": null,
+            "photo_collected_at": null,
+            "photo_attempted_at": null
+          },
+          {
+            "id": 2,
+            "court": "서울중앙지방법원",
+            "case_no": "2026타경1002",
+            "item_no": "1",
+            "address": "서울특별시 종로구 시험로 1002",
+            "usage_type": "아파트",
+            "appraisal_price": 300000000,
+            "min_bid_price": 192000000,
+            "auction_date": "2026-11-05",
+            "failed_bid_count": 1,
+            "status": "유찰 1회",
+            "first_seen_at": "2026-10-08T00:00:00.000Z",
+            "last_seen_at": "2026-10-08T00:00:00.000Z",
+            "min_area": null,
+            "max_area": null,
+            "building_description": null,
+            "min_bid_price_round1": null,
+            "min_bid_price_round2": null,
+            "min_bid_price_round3": null,
+            "min_bid_price_round4": null,
+            "min_bid_price_rate_round1": null,
+            "min_bid_price_rate_round2": null,
+            "usage_code_large": null,
+            "usage_code_medium": null,
+            "usage_code_small": null,
+            "sido": null,
+            "sigungu": null,
+            "dong": null,
+            "lot_number": null,
+            "building_name": null,
+            "building_unit": null,
+            "coordinate_x": null,
+            "coordinate_y": null,
+            "coordinate_level": null,
+            "auction_time": null,
+            "auction_place": null,
+            "auction_decision_date": null,
+            "auction_round": null,
+            "note": null,
+            "duplicate_case_no": null,
+            "merged_case_no": null,
+            "court_department": null,
+            "court_phone": null,
+            "status_code": null,
+            "item_status_code": null,
+            "internal_case_no": null,
+            "court_code": null,
+            "photo_status": null,
+            "photo_count": null,
+            "photo_collected_at": null,
+            "photo_attempted_at": null
+          },
+          {
+            "id": 3,
+            "court": "서울중앙지방법원",
+            "case_no": "2026타경1003",
+            "item_no": "1",
+            "address": "서울특별시 종로구 시험로 1003",
+            "usage_type": "아파트",
+            "appraisal_price": 300000000,
+            "min_bid_price": 240000000,
+            "auction_date": null,
+            "failed_bid_count": 0,
+            "status": "신건",
+            "first_seen_at": "2026-10-08T00:00:00.000Z",
+            "last_seen_at": "2026-10-08T00:00:00.000Z",
+            "min_area": null,
+            "max_area": null,
+            "building_description": null,
+            "min_bid_price_round1": null,
+            "min_bid_price_round2": null,
+            "min_bid_price_round3": null,
+            "min_bid_price_round4": null,
+            "min_bid_price_rate_round1": null,
+            "min_bid_price_rate_round2": null,
+            "usage_code_large": null,
+            "usage_code_medium": null,
+            "usage_code_small": null,
+            "sido": null,
+            "sigungu": null,
+            "dong": null,
+            "lot_number": null,
+            "building_name": null,
+            "building_unit": null,
+            "coordinate_x": null,
+            "coordinate_y": null,
+            "coordinate_level": null,
+            "auction_time": null,
+            "auction_place": null,
+            "auction_decision_date": null,
+            "auction_round": null,
+            "note": null,
+            "duplicate_case_no": null,
+            "merged_case_no": null,
+            "court_department": null,
+            "court_phone": null,
+            "status_code": null,
+            "item_status_code": null,
+            "internal_case_no": null,
+            "court_code": null,
+            "photo_status": null,
+            "photo_count": null,
+            "photo_collected_at": null,
+            "photo_attempted_at": null
+          }
+        ],
+        "itemChanges": [
+          {
+            "id": 1,
+            "item_id": 1,
+            "field": "minBidPrice",
+            "old_value": null,
+            "new_value": "240000000",
+            "changed_at": "2026-10-08T00:00:00.000Z",
+            "kind": "baseline"
+          },
+          {
+            "id": 2,
+            "item_id": 1,
+            "field": "failedBidCount",
+            "old_value": null,
+            "new_value": "0",
+            "changed_at": "2026-10-08T00:00:00.000Z",
+            "kind": "baseline"
+          },
+          {
+            "id": 3,
+            "item_id": 1,
+            "field": "auctionDate",
+            "old_value": null,
+            "new_value": "2026-11-05",
+            "changed_at": "2026-10-08T00:00:00.000Z",
+            "kind": "baseline"
+          },
+          {
+            "id": 4,
+            "item_id": 1,
+            "field": "status",
+            "old_value": null,
+            "new_value": "신건",
+            "changed_at": "2026-10-08T00:00:00.000Z",
+            "kind": "baseline"
+          },
+          {
+            "id": 5,
+            "item_id": 2,
+            "field": "minBidPrice",
+            "old_value": null,
+            "new_value": "192000000",
+            "changed_at": "2026-10-08T00:00:00.000Z",
+            "kind": "baseline"
+          },
+          {
+            "id": 6,
+            "item_id": 2,
+            "field": "failedBidCount",
+            "old_value": null,
+            "new_value": "1",
+            "changed_at": "2026-10-08T00:00:00.000Z",
+            "kind": "baseline"
+          },
+          {
+            "id": 7,
+            "item_id": 2,
+            "field": "auctionDate",
+            "old_value": null,
+            "new_value": "2026-11-05",
+            "changed_at": "2026-10-08T00:00:00.000Z",
+            "kind": "baseline"
+          },
+          {
+            "id": 8,
+            "item_id": 2,
+            "field": "status",
+            "old_value": null,
+            "new_value": "유찰 1회",
+            "changed_at": "2026-10-08T00:00:00.000Z",
+            "kind": "baseline"
+          },
+          {
+            "id": 9,
+            "item_id": 3,
+            "field": "minBidPrice",
+            "old_value": null,
+            "new_value": "240000000",
+            "changed_at": "2026-10-08T00:00:00.000Z",
+            "kind": "baseline"
+          },
+          {
+            "id": 10,
+            "item_id": 3,
+            "field": "failedBidCount",
+            "old_value": null,
+            "new_value": "0",
+            "changed_at": "2026-10-08T00:00:00.000Z",
+            "kind": "baseline"
+          },
+          {
+            "id": 11,
+            "item_id": 3,
+            "field": "status",
+            "old_value": null,
+            "new_value": "신건",
+            "changed_at": "2026-10-08T00:00:00.000Z",
+            "kind": "baseline"
+          }
+        ],
+        "workerRuns": [
+          {
+            "id": 1,
+            "worker": "collector",
+            "started_at": "2026-10-08T00:00:00.000Z",
+            "finished_at": "2026-10-08T00:00:00.000Z",
+            "outcome": "success",
+            "error_kind": null,
+            "error_message": null,
+            "detail": {
+              "targetCourts": [
+                "서울중앙지방법원"
+              ],
+              "pagesRequested": 3,
+              "itemsFetched": 3,
+              "inserted": 3,
+              "updated": 0,
+              "changed": 0
+            },
+            "items_changed": 0,
+            "created_at": "2026-10-08T00:00:00.000Z"
+          }
+        ],
+        "collectorState": [
+          {
+            "key": "collector.rotation.nextCourtCode",
+            "value": "B000210",
+            "updated_at": "2026-10-08T00:00:00.000Z"
+          }
+        ],
+        "itemPhotos": [],
+        "photoFiles": []
+      }
+    }
+  ]
+}

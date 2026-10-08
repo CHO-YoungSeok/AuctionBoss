@@ -1,0 +1,74 @@
+{
+  "description": "알 수 없는 법원 이름: 세션 요청 뒤 검색 요청 없이 SourceRequestError",
+  "now": "2026-10-08T12:00:00.000Z",
+  "options": {},
+  "call": {
+    "kind": "activeItems",
+    "scope": {
+      "courts": [
+        {
+          "name": "존재하지않는법원",
+          "courtCode": ""
+        }
+      ]
+    }
+  },
+  "repeat": 1,
+  "responses": [
+    {
+      "status": 200,
+      "setCookie": [
+        "JSESSIONID=golden-session; Path=/; HttpOnly",
+        "WMONID=golden-wmon; Path=/"
+      ],
+      "body": "<html><body>index</body></html>"
+    }
+  ],
+  "expected": [
+    {
+      "error": {
+        "kind": "SourceRequestError",
+        "requestsMade": 0,
+        "messageHead": "법원 코드를 알 수 없습니다: \"존재하지않는법원\" — config/collector.json의 courtCode를 채우세요"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/pgj/index.on",
+      "headers": [
+        [
+          "host",
+          "{host}"
+        ],
+        [
+          "connection",
+          "keep-alive"
+        ],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ],
+        [
+          "Accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        ],
+        [
+          "accept-language",
+          "*"
+        ],
+        [
+          "sec-fetch-mode",
+          "cors"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate"
+        ]
+      ],
+      "body": ""
+    }
+  ],
+  "sleeps": []
+}

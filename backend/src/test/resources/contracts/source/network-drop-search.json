@@ -1,0 +1,138 @@
+{
+  "description": "검색 중 연결이 끊기면 SourceRequestError",
+  "now": "2026-10-08T12:00:00.000Z",
+  "options": {},
+  "call": {
+    "kind": "activeItems",
+    "scope": {
+      "courts": [
+        {
+          "name": "서울중앙지방법원",
+          "courtCode": "B000210"
+        }
+      ]
+    }
+  },
+  "repeat": 1,
+  "responses": [
+    {
+      "status": 200,
+      "setCookie": [
+        "JSESSIONID=golden-session; Path=/; HttpOnly",
+        "WMONID=golden-wmon; Path=/"
+      ],
+      "body": "<html><body>index</body></html>"
+    },
+    {
+      "status": 200,
+      "body": "",
+      "closeSocket": true
+    }
+  ],
+  "expected": [
+    {
+      "error": {
+        "kind": "SourceRequestError",
+        "requestsMade": 1,
+        "messageHead": "요청 중 네트워크 오류가 발생했습니다: {base}/pgj/pgjsearch/searchControllerMain.on"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/pgj/index.on",
+      "headers": [
+        [
+          "host",
+          "{host}"
+        ],
+        [
+          "connection",
+          "keep-alive"
+        ],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ],
+        [
+          "Accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        ],
+        [
+          "accept-language",
+          "*"
+        ],
+        [
+          "sec-fetch-mode",
+          "cors"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate"
+        ]
+      ],
+      "body": ""
+    },
+    {
+      "method": "POST",
+      "path": "/pgj/pgjsearch/searchControllerMain.on",
+      "headers": [
+        [
+          "host",
+          "{host}"
+        ],
+        [
+          "connection",
+          "keep-alive"
+        ],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ],
+        [
+          "Content-Type",
+          "application/json;charset=UTF-8"
+        ],
+        [
+          "Accept",
+          "application/json"
+        ],
+        [
+          "Referer",
+          "{base}/pgj/index.on"
+        ],
+        [
+          "Origin",
+          "{base}"
+        ],
+        [
+          "X-Requested-With",
+          "XMLHttpRequest"
+        ],
+        [
+          "Cookie",
+          "JSESSIONID=golden-session; WMONID=golden-wmon"
+        ],
+        [
+          "accept-language",
+          "*"
+        ],
+        [
+          "sec-fetch-mode",
+          "cors"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate"
+        ],
+        [
+          "content-length",
+          "472"
+        ]
+      ],
+      "body": "{\"dma_pageInfo\":{\"pageNo\":1,\"pageSize\":40,\"bfPageNo\":1,\"startRowNo\":\"\",\"totalCnt\":0,\"totalYn\":\"Y\",\"groupTotalCount\":\"\"},\"dma_srchGdsDtlSrchInfo\":{\"rletDspslSpcCondCd\":\"\",\"bidDvsCd\":\"000331\",\"mvprpRletDvsCd\":\"00031R\",\"cortAuctnSrchCondCd\":\"0004601\",\"cortOfcCd\":\"B000210\",\"jdbnCd\":\"\",\"lclDspslGdsLstUsgCd\":\"\",\"mclDspslGdsLstUsgCd\":\"\",\"sclDspslGdsLstUsgCd\":\"\",\"cortStDvs\":\"1\",\"lafjOrderBy\":\"\",\"pgmId\":\"PGJ15AF01\",\"bidBgngYmd\":\"20261008\",\"bidEndYmd\":\"20261207\",\"srchInfo\":{}}}"
+    }
+  ],
+  "sleeps": []
+}

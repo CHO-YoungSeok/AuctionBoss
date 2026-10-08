@@ -1,0 +1,133 @@
+{
+  "description": "상세 응답이 WAF HTML이면 WafBlockedError(요청 2)",
+  "now": "2026-10-08T12:00:00.000Z",
+  "options": {},
+  "call": {
+    "kind": "photos",
+    "ref": {
+      "courtCode": "B000210",
+      "internalCaseNo": "20260130101037"
+    }
+  },
+  "repeat": 1,
+  "responses": [
+    {
+      "status": 200,
+      "setCookie": [
+        "JSESSIONID=golden-session; Path=/; HttpOnly",
+        "WMONID=golden-wmon; Path=/"
+      ],
+      "body": "<html><body>index</body></html>"
+    },
+    {
+      "status": 200,
+      "body": "<html><head><title>Blocked</title></head><body>\nThe request / response that are contrary to the Web firewall security policies have been blocked.\n<br>Detect time : 2026-09-06 15:17:52\n<br>Detect client IP : 203.0.113.10\n<br>Detect URL : /pgj/pgjsearch/searchControllerMain.on\n</body></html>"
+    }
+  ],
+  "expected": [
+    {
+      "error": {
+        "kind": "WafBlockedError",
+        "requestsMade": 2,
+        "messageHead": "WAF가 JSON 대신 차단 페이지를 반환했습니다 (HTTP 200이지만 본문이 JSON이 아님)"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/pgj/index.on",
+      "headers": [
+        [
+          "host",
+          "{host}"
+        ],
+        [
+          "connection",
+          "keep-alive"
+        ],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ],
+        [
+          "Accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        ],
+        [
+          "accept-language",
+          "*"
+        ],
+        [
+          "sec-fetch-mode",
+          "cors"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate"
+        ]
+      ],
+      "body": ""
+    },
+    {
+      "method": "POST",
+      "path": "/pgj/pgj15B/selectAuctnCsSrchRslt.on",
+      "headers": [
+        [
+          "host",
+          "{host}"
+        ],
+        [
+          "connection",
+          "keep-alive"
+        ],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ],
+        [
+          "Content-Type",
+          "application/json;charset=UTF-8"
+        ],
+        [
+          "Accept",
+          "application/json"
+        ],
+        [
+          "Referer",
+          "{base}/pgj/index.on"
+        ],
+        [
+          "Origin",
+          "{base}"
+        ],
+        [
+          "X-Requested-With",
+          "XMLHttpRequest"
+        ],
+        [
+          "Cookie",
+          "JSESSIONID=golden-session; WMONID=golden-wmon"
+        ],
+        [
+          "accept-language",
+          "*"
+        ],
+        [
+          "sec-fetch-mode",
+          "cors"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate"
+        ],
+        [
+          "content-length",
+          "107"
+        ]
+      ],
+      "body": "{\"dma_srchGdsDtlSrch\":{\"csNo\":\"20260130101037\",\"cortOfcCd\":\"B000210\",\"dspslGdsSeq\":\"\",\"pgmId\":\"PGJ15BM01\"}}"
+    }
+  ],
+  "sleeps": []
+}
