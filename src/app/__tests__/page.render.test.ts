@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, getRepository } from "@/lib/db";
 import type { AuctionItemInput } from "@/lib/domain";
 
+import { DATA_SOURCES_UNDER_TEST, useDataSource } from "@/lib/data-port/__tests__/data-sources";
 import ItemListPage from "../page";
 
 let workDir: string;
@@ -61,7 +62,8 @@ async function renderListPage(
   return renderToStaticMarkup(createElement(() => element));
 }
 
-describe("물건 목록 페이지 렌더링 (hardening-round1 task 3)", () => {
+describe.each(DATA_SOURCES_UNDER_TEST)("물건 목록 페이지 렌더링 (hardening-round1 task 3) [%s 원천]", (source) => {
+  useDataSource(source);
   it("DB가 완전히 비었으면 '아직 수집된 물건이 없습니다'를 보여준다(필터 안내와 구분)", async () => {
     getRepository(); // 스키마만 생성, 물건 0건.
 

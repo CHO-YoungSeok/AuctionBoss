@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { addBookmark, closeDb, getRepository, getUnreadCount, markFeedRead } from "@/lib/db";
 import type { AuctionItemInput } from "@/lib/domain";
 
+import { DATA_SOURCES_UNDER_TEST, useDataSource } from "@/lib/data-port/__tests__/data-sources";
 import FeedPage from "../page";
 
 let workDir: string;
@@ -62,7 +63,8 @@ async function renderFeed(page?: string): Promise<string> {
   return renderToStaticMarkup(createElement(() => element));
 }
 
-describe("변동 피드 화면 렌더링", () => {
+describe.each(DATA_SOURCES_UNDER_TEST)("변동 피드 화면 렌더링 [%s 원천]", (source) => {
+  useDataSource(source);
   it("변동이 없으면 빈 상태 안내만 있고 읽음 버튼도 없다", async () => {
     const html = await renderFeed();
 

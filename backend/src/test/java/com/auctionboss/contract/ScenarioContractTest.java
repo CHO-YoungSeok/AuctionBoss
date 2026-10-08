@@ -102,14 +102,14 @@ class ScenarioContractTest {
 	@TestFactory
 	Stream<DynamicTest> 시나리오_골든과_같다() throws IOException {
 		Resource[] files = new PathMatchingResourcePatternResolver().getResources("classpath:contracts/scenarios/*.json");
-		assertThat(files).as("시나리오 파일").hasSize(9);
+		assertThat(files).as("시나리오 파일").hasSize(10);
 		int steps = 0;
 		for (Resource file : files) {
 			try (InputStream in = file.getInputStream()) {
 				steps += JSON.readTree(in).get("steps").size();
 			}
 		}
-		assertThat(steps).as("시나리오 단계 수").isEqualTo(160);
+		assertThat(steps).as("시나리오 단계 수").isEqualTo(171);
 		return Arrays.stream(files).sorted(Comparator.comparing(Resource::getFilename)).map(file -> {
 			String name = file.getFilename().replace(".json", "");
 			return DynamicTest.dynamicTest(name, () -> play(name, file));

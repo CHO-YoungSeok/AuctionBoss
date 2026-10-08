@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { addBookmark, closeDb, getRepository } from "@/lib/db";
 import type { AuctionItemInput } from "@/lib/domain";
 
+import { DATA_SOURCES_UNDER_TEST, useDataSource } from "@/lib/data-port/__tests__/data-sources";
 import BookmarksPage from "../page";
 
 let workDir: string;
@@ -65,7 +66,8 @@ async function renderBookmarks(page?: string): Promise<string> {
   return renderToStaticMarkup(createElement(() => element));
 }
 
-describe("관심 물건 화면 렌더링", () => {
+describe.each(DATA_SOURCES_UNDER_TEST)("관심 물건 화면 렌더링 [%s 원천]", (source) => {
+  useDataSource(source);
   it("담은 물건이 없으면 표 대신 빈 상태 안내와 목록으로 가는 링크를 보여준다", async () => {
     seedItems(2); // 물건은 있어도 담은 것이 없다.
 

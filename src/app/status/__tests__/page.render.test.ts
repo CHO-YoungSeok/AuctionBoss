@@ -13,8 +13,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { COLLECTOR_STATE_KEYS, closeDb, finishRun, setCollectorState, startRun } from "@/lib/db";
 
 import { setDataPortForTesting } from "@/lib/data-port";
-import { createSqlitePort } from "@/lib/data-port/sqlite";
 
+import { DATA_SOURCES_UNDER_TEST, createTestPort, useDataSource } from "@/lib/data-port/__tests__/data-sources";
 import StatusPage from "../page";
 
 let workDir: string;
@@ -40,7 +40,8 @@ async function renderStatus(): Promise<string> {
   return renderToStaticMarkup(createElement(() => element));
 }
 
-describe("상태 화면 — 사진 워커 (fix-photo-worker-and-deploy-config 4.2)", () => {
+describe.each(DATA_SOURCES_UNDER_TEST)("상태 화면 — 사진 워커 (fix-photo-worker-and-deploy-config 4.2) [%s 원천]", (source) => {
+  useDataSource(source);
   it("회차 기록이 없으면 세 워커 카드 모두 오류 대신 안내 문구를 보여준다", async () => {
     const html = await renderStatus();
     expect(html).toContain("사진 수집 워커");
@@ -61,7 +62,8 @@ describe("상태 화면 — 사진 워커 (fix-photo-worker-and-deploy-config 4.
   });
 });
 
-describe("상태 화면 — 로테이션 정보와 설정 오류 (switch-web-to-data-port 2.6)", () => {
+describe.each(DATA_SOURCES_UNDER_TEST)("상태 화면 — 로테이션 정보와 설정 오류 (switch-web-to-data-port 2.6) [%s 원천]", (source) => {
+  useDataSource(source);
   let originalConfigEnv: string | undefined;
 
   beforeEach(() => {
@@ -83,11 +85,11 @@ describe("상태 화면 — 로테이션 정보와 설정 오류 (switch-web-to-
   });
 
   it("설정 파일을 읽지 못하면 로테이션 자리만 안내 문구로 바뀌고 나머지 화면은 그대로 나온다", async () => {
-    // SQLite 구현체의 `getWorkerStatus`도 같은 설정 파일을 읽어 먼저 던지므로, 이 안내 경로는
+    // SQLite 구현체(와 Spring 대역의 Next 라우트)의 `getWorkerStatus`도 같은 설정 파일을 읽어 먼저 던지므로, 이 안내 경로는
     // 상태 판정이 설정과 무관하게 돌아오는 원천(Spring: 백엔드가 자기 설정으로 판정)에서만 보인다.
     // 그 상황을 만들려고 상태 판정만 대체한 포트를 끼운다.
     setDataPortForTesting({
-      ...createSqlitePort(),
+      ...createTestPort(source).port,
       getWorkerStatus: async () => ({ state: "stale", lastSuccessAt: null, lastRun: null }),
     });
     process.env.AUCTIONBOSS_CONFIG = path.join(workDir, "없는-설정.json");

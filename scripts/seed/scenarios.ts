@@ -337,6 +337,29 @@ const workerStatus: ScenarioDef = {
   ],
 };
 
+// ---- switch-web-to-data-port 5.3: 데이터 포트의 Spring 구현체가 보내는 요청 틀 ----
+// 포트 계약 테스트(`port-contract.test.ts`)의 골든 포함 검사가 요구하는 틀 중 기존 골든에 성공 응답이
+// 없던 것만 모았다: 관심 목록·피드의 `page`만 보내는 요청, 미확인 개수용 `pageSize`만 보내는 피드 요청,
+// 회차 집계의 `worker`+`since`. 상태가 다른 두 시점(담기 전·읽음 처리 후)의 미확인 개수도 본다.
+
+const portRequests: ScenarioDef = {
+  name: "port-requests",
+  config: {},
+  steps: [
+    get("/api/feed", "pageSize=1"),
+    post("/api/bookmarks", { itemId: 1 }),
+    get("/api/bookmarks", "page=1"),
+    get("/api/bookmarks", "page=2"),
+    get("/api/feed", "page=1"),
+    get("/api/feed", "page=2"),
+    get("/api/feed", "pageSize=1"),
+    post("/api/feed/read"),
+    get("/api/feed", "pageSize=1"),
+    get("/api/worker-runs/summary", "worker=collector&since=2026-10-01T00:00:00.000Z"),
+    get("/api/worker-runs/summary", "worker=analyzer&since=2026-10-01T00:00:00.000Z"),
+  ],
+};
+
 export const SCENARIOS: ScenarioDef[] = [
   workerRunsLifecycle,
   workerRunsErrors,
@@ -347,4 +370,5 @@ export const SCENARIOS: ScenarioDef[] = [
   photos,
   screenReads,
   workerStatus,
+  portRequests,
 ];

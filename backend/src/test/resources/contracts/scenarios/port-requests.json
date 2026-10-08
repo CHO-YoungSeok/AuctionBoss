@@ -1,0 +1,341 @@
+{
+  "clock": {
+    "start": "2026-10-08T00:00:00.000Z",
+    "stepMs": 1000
+  },
+  "config": {},
+  "steps": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/feed",
+        "query": "pageSize=1"
+      },
+      "status": 200,
+      "body": {
+        "entries": [],
+        "total": 0,
+        "page": 1,
+        "pageSize": 1,
+        "unreadCount": 0
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/bookmarks",
+        "query": "",
+        "body": {
+          "itemId": 1
+        }
+      },
+      "status": 201,
+      "body": {
+        "item": {
+          "id": 1,
+          "court": "서울중앙지방법원",
+          "caseNo": "2011타경28497",
+          "itemNo": "1",
+          "address": "서울특별시 성북구 정릉동 1032 정릉2차 대주피오레 203동 4층 401호",
+          "usageType": "아파트",
+          "appraisalPrice": 711000000,
+          "minBidPrice": 568800000,
+          "auctionDate": "2026-10-13",
+          "failedBidCount": 2,
+          "status": "유찰 2회",
+          "firstSeenAt": "2026-09-08T11:48:38.617Z",
+          "lastSeenAt": "2026-10-01T18:57:20.909Z",
+          "lastChangedAt": "2026-10-01T18:57:20.909Z",
+          "bookmarked": true,
+          "minArea": 84,
+          "maxArea": 84,
+          "buildingDescription": "철근콘크리트구조\n84.99㎡",
+          "minBidPriceRound1": 568800000,
+          "minBidPriceRound2": null,
+          "minBidPriceRound3": null,
+          "minBidPriceRound4": null,
+          "minBidPriceRateRound1": 80,
+          "minBidPriceRateRound2": 80,
+          "usageCodeLarge": "20000",
+          "usageCodeMedium": "20100",
+          "usageCodeSmall": "20104",
+          "sido": "서울특별시",
+          "sigungu": "성북구",
+          "dong": "정릉동",
+          "lotNumber": "1032",
+          "buildingName": "정릉2차 대주피오레",
+          "buildingUnit": "203동 4층 401호",
+          "coordinateX": "312690",
+          "coordinateY": "555963",
+          "coordinateLevel": "1",
+          "auctionTime": "1000",
+          "auctionPlace": "경매법정(제4별관211호)",
+          "auctionDecisionDate": "2026-10-20",
+          "auctionRound": 2,
+          "note": null,
+          "duplicateCaseNo": "2015타경14083<br/>2021타경102844",
+          "mergedCaseNo": null,
+          "courtDepartment": "경매1계",
+          "courtPhone": "530-1820 (제4별관 민사집행과)",
+          "statusCode": "0002100001",
+          "itemStatusCode": "01",
+          "internalCaseNo": "20110130028497",
+          "courtCode": "B000210",
+          "photoCollectedAt": null
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/bookmarks",
+        "query": "page=1"
+      },
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": 1,
+            "court": "서울중앙지방법원",
+            "caseNo": "2011타경28497",
+            "itemNo": "1",
+            "address": "서울특별시 성북구 정릉동 1032 정릉2차 대주피오레 203동 4층 401호",
+            "usageType": "아파트",
+            "appraisalPrice": 711000000,
+            "minBidPrice": 568800000,
+            "auctionDate": "2026-10-13",
+            "failedBidCount": 2,
+            "status": "유찰 2회",
+            "firstSeenAt": "2026-09-08T11:48:38.617Z",
+            "lastSeenAt": "2026-10-01T18:57:20.909Z",
+            "lastChangedAt": "2026-10-01T18:57:20.909Z",
+            "bookmarked": true,
+            "minArea": 84,
+            "maxArea": 84,
+            "buildingDescription": "철근콘크리트구조\n84.99㎡",
+            "minBidPriceRound1": 568800000,
+            "minBidPriceRound2": null,
+            "minBidPriceRound3": null,
+            "minBidPriceRound4": null,
+            "minBidPriceRateRound1": 80,
+            "minBidPriceRateRound2": 80,
+            "usageCodeLarge": "20000",
+            "usageCodeMedium": "20100",
+            "usageCodeSmall": "20104",
+            "sido": "서울특별시",
+            "sigungu": "성북구",
+            "dong": "정릉동",
+            "lotNumber": "1032",
+            "buildingName": "정릉2차 대주피오레",
+            "buildingUnit": "203동 4층 401호",
+            "coordinateX": "312690",
+            "coordinateY": "555963",
+            "coordinateLevel": "1",
+            "auctionTime": "1000",
+            "auctionPlace": "경매법정(제4별관211호)",
+            "auctionDecisionDate": "2026-10-20",
+            "auctionRound": 2,
+            "note": null,
+            "duplicateCaseNo": "2015타경14083<br/>2021타경102844",
+            "mergedCaseNo": null,
+            "courtDepartment": "경매1계",
+            "courtPhone": "530-1820 (제4별관 민사집행과)",
+            "statusCode": "0002100001",
+            "itemStatusCode": "01",
+            "internalCaseNo": "20110130028497",
+            "courtCode": "B000210",
+            "photoCollectedAt": null
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "pageSize": 20
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/bookmarks",
+        "query": "page=2"
+      },
+      "status": 200,
+      "body": {
+        "items": [],
+        "total": 1,
+        "page": 2,
+        "pageSize": 20
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/feed",
+        "query": "page=1"
+      },
+      "status": 200,
+      "body": {
+        "entries": [
+          {
+            "id": 1620,
+            "itemId": 1,
+            "itemAddress": "서울특별시 성북구 정릉동 1032 정릉2차 대주피오레 203동 4층 401호",
+            "field": "status",
+            "oldValue": "유찰 1회",
+            "newValue": "유찰 2회",
+            "changedAt": "2026-10-01T18:57:20.909Z",
+            "bookmarkedAt": "2026-10-08T00:00:01.000Z"
+          },
+          {
+            "id": 1619,
+            "itemId": 1,
+            "itemAddress": "서울특별시 성북구 정릉동 1032 정릉2차 대주피오레 203동 4층 401호",
+            "field": "auctionDate",
+            "oldValue": "2026-09-08",
+            "newValue": "2026-10-13",
+            "changedAt": "2026-10-01T18:57:20.909Z",
+            "bookmarkedAt": "2026-10-08T00:00:01.000Z"
+          },
+          {
+            "id": 1618,
+            "itemId": 1,
+            "itemAddress": "서울특별시 성북구 정릉동 1032 정릉2차 대주피오레 203동 4층 401호",
+            "field": "failedBidCount",
+            "oldValue": "1",
+            "newValue": "2",
+            "changedAt": "2026-10-01T18:57:20.909Z",
+            "bookmarkedAt": "2026-10-08T00:00:01.000Z"
+          },
+          {
+            "id": 1617,
+            "itemId": 1,
+            "itemAddress": "서울특별시 성북구 정릉동 1032 정릉2차 대주피오레 203동 4층 401호",
+            "field": "minBidPrice",
+            "oldValue": "711000000",
+            "newValue": "568800000",
+            "changedAt": "2026-10-01T18:57:20.909Z",
+            "bookmarkedAt": "2026-10-08T00:00:01.000Z"
+          }
+        ],
+        "total": 4,
+        "page": 1,
+        "pageSize": 20,
+        "unreadCount": 4
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/feed",
+        "query": "page=2"
+      },
+      "status": 200,
+      "body": {
+        "entries": [],
+        "total": 4,
+        "page": 2,
+        "pageSize": 20,
+        "unreadCount": 4
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/feed",
+        "query": "pageSize=1"
+      },
+      "status": 200,
+      "body": {
+        "entries": [
+          {
+            "id": 1620,
+            "itemId": 1,
+            "itemAddress": "서울특별시 성북구 정릉동 1032 정릉2차 대주피오레 203동 4층 401호",
+            "field": "status",
+            "oldValue": "유찰 1회",
+            "newValue": "유찰 2회",
+            "changedAt": "2026-10-01T18:57:20.909Z",
+            "bookmarkedAt": "2026-10-08T00:00:01.000Z"
+          }
+        ],
+        "total": 4,
+        "page": 1,
+        "pageSize": 1,
+        "unreadCount": 4
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/feed/read",
+        "query": ""
+      },
+      "status": 200,
+      "body": {
+        "lastReadAt": "2026-10-08T00:00:07.000Z",
+        "unreadCount": 0
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/feed",
+        "query": "pageSize=1"
+      },
+      "status": 200,
+      "body": {
+        "entries": [
+          {
+            "id": 1620,
+            "itemId": 1,
+            "itemAddress": "서울특별시 성북구 정릉동 1032 정릉2차 대주피오레 203동 4층 401호",
+            "field": "status",
+            "oldValue": "유찰 1회",
+            "newValue": "유찰 2회",
+            "changedAt": "2026-10-01T18:57:20.909Z",
+            "bookmarkedAt": "2026-10-08T00:00:01.000Z"
+          }
+        ],
+        "total": 4,
+        "page": 1,
+        "pageSize": 1,
+        "unreadCount": 0
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/summary",
+        "query": "worker=collector&since=2026-10-01T00:00:00.000Z"
+      },
+      "status": 200,
+      "body": {
+        "totalRuns": 1,
+        "successCount": 1,
+        "failedCount": 0,
+        "blockedCount": 0,
+        "skippedCount": 0,
+        "runningCount": 0,
+        "successRate": 1,
+        "itemsChanged": 195
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/worker-runs/summary",
+        "query": "worker=analyzer&since=2026-10-01T00:00:00.000Z"
+      },
+      "status": 200,
+      "body": {
+        "totalRuns": 1,
+        "successCount": 1,
+        "failedCount": 0,
+        "blockedCount": 0,
+        "skippedCount": 0,
+        "runningCount": 0,
+        "successRate": 1,
+        "itemsChanged": 0
+      }
+    }
+  ]
+}

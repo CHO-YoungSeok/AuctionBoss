@@ -48,6 +48,7 @@ import { formatAreaRange, computePricePerArea, formatPricePerArea } from "./_lib
 import { ITEM_LIST_PATH, itemListHref } from "./_lib/item-query-url";
 import { NOTE_FLAG_LABELS, detectNoteFlags } from "./_lib/note-flags";
 import { formatRegionSummary } from "./_lib/region-summary";
+import { toScreenItemQuery } from "./_lib/screen-item-query";
 
 // 수집기가 새로 넣은 데이터가 바로 보여야 하므로 정적 프리렌더를 끈다.
 // (이게 없으면 `next build`가 빌드 시점에 DB를 열어 페이지를 미리 렌더한다.)
@@ -80,7 +81,7 @@ export default async function ItemListPage({
   const [filterOptions, { items, total, page, pageSize }, totalCountResult, analyzedCountResult, unreadCount, collectorStatus] =
     await Promise.all([
       port.listFilterOptions(),
-      port.listItems(query),
+      port.listItems(toScreenItemQuery(query)),
       port.listItems({ pageSize: 1 }),
       port.listItems({ analyzed: true, pageSize: 1 }),
       port.getUnreadCount(),

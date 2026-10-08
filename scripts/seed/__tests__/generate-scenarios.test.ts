@@ -19,7 +19,7 @@ describe("시나리오 골든 생성", () => {
     }
   }, 120_000);
 
-  it("9개 시나리오를 정의하고 원본이 500을 낸 단계가 없다", async () => {
+  it("10개 시나리오를 정의하고 원본이 500을 낸 단계가 없다", async () => {
     expect(SCENARIOS.map((s) => s.name)).toEqual([
       "worker-runs-lifecycle",
       "worker-runs-errors",
@@ -30,6 +30,7 @@ describe("시나리오 골든 생성", () => {
       "photos",
       "screen-reads",
       "worker-status",
+      "port-requests",
     ]);
     const { files } = await generateAll();
     for (const text of files.values()) {

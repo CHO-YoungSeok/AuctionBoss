@@ -35,6 +35,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, getRepository } from "@/lib/db";
 import type { AuctionItemInput } from "@/lib/domain";
 
+import { DATA_SOURCES_UNDER_TEST, useDataSource } from "@/lib/data-port/__tests__/data-sources";
 import ItemDetailPage from "../page";
 
 let workDir: string;
@@ -75,7 +76,8 @@ async function renderItemPage(id: string): Promise<string> {
   return renderToStaticMarkup(createElement(() => element));
 }
 
-describe("물건 상세 페이지 렌더링 (hardening-round1 task 3)", () => {
+describe.each(DATA_SOURCES_UNDER_TEST)("물건 상세 페이지 렌더링 (hardening-round1 task 3) [%s 원천]", (source) => {
+  useDataSource(source);
   it("확장 필드와 분석 본문(굵게)이 실제 HTML에 나타난다", async () => {
     const repo = getRepository();
     repo.upsertItems([
@@ -210,7 +212,8 @@ describe("물건 상세 페이지 렌더링 (hardening-round1 task 3)", () => {
   });
 });
 
-describe("물건 상세 페이지 — 사진 표시 상태 (fix-photo-worker-and-deploy-config 4.1, D6)", () => {
+describe.each(DATA_SOURCES_UNDER_TEST)("물건 상세 페이지 — 사진 표시 상태 (fix-photo-worker-and-deploy-config 4.1, D6) [%s 원천]", (source) => {
+  useDataSource(source);
   it("상세 조회 식별자가 없는 물건은 '사진 정보 없음(조회 불가)'로 보이고 실패·대기 문구는 없다", async () => {
     const repo = getRepository();
     repo.upsertItems([makeItem()]);

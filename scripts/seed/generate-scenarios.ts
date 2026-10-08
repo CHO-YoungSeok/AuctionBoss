@@ -14,7 +14,9 @@
  *   - photo: { contentType, cacheControl, sha256 } (사진 200 응답).
  *   - photos: 사진 디렉터리에 준비할 item_photos 행과 픽스처 파일.
  *
- * 실행: npx tsx scripts/seed/generate-scenarios.ts
+ * 실행: npx tsx --tsconfig scripts/dev/tsconfig.snapshot.json scripts/seed/generate-scenarios.ts
+ * (사진 라우트가 데이터 포트를 거치며 `server-only`를 불러오므로, 그 별칭이 있는 tsconfig가 필요하다.
+ * 없으면 "Cannot find module 'server-only'"로 실패한다.)
  */
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
