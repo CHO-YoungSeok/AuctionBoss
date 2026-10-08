@@ -56,7 +56,7 @@
 - [x] 8.5 게이트 5종을 모두 통과시킨다. TS·Java 테스트 수가 1.1보다 줄지 않았는지 확인하고, 줄었으면 이유를 보고한다
 - [x] 8.6 `regression-verifier` 서브에이전트로 회귀 검증을 받고 지적 사항을 반영한다
 - [x] 8.7 커밋하고 푸시한 뒤 GitHub Actions의 TS 잡과 Java 잡이 통과하는지 확인한다
-- [ ] 8.8 `openspec validate add-spring-write-api --strict`를 통과시킨 뒤 change를 아카이브하고, 메인 스펙 `spring-backend`에 요구사항이 반영됐는지 확인한다
+- [x] 8.8 `openspec validate add-spring-write-api --strict`를 통과시킨 뒤 change를 아카이브하고, 메인 스펙 `spring-backend`에 요구사항이 반영됐는지 확인한다
 
 ---
 
