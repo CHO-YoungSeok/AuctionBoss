@@ -6,6 +6,8 @@ spring:
     name: backend
   datasource:
     hikari:
+      # 연결을 못 얻을 때 헬스체크가 오래 매달리지 않도록 짧게 둔다.
+      connection-timeout: 5000
       # 시간대는 세 층에서 UTC로 고정한다: JVM(BackendApplication), Hibernate(jdbc.time_zone),
       # JDBC 드라이버(여기). 드라이버 설정을 프로필별 URL이 아니라 공통에 두어야
       # Testcontainers(@ServiceConnection) 접속에도 똑같이 적용된다.

@@ -25,12 +25,12 @@
 
 ## 5. 읽기 API
 
-- [ ] 5.1 공통 JSON 설정(밀리초 3자리 `Z` 시각 직렬화, NULL 필드 출력 규칙)과 오류 응답(`{ error, details }`, 404 메시지)을 구현하고 단위 테스트로 확인한다
-- [ ] 5.2 `src/lib/domain/item-query.ts`의 strict 파서 규칙을 Java 파서로 옮긴다. 원본 테스트(`src/lib/domain/__tests__/item-query.test.ts`)의 거절·허용 사례를 Java 테스트로 옮겨 같은 `field`가 나오는지 확인한다
-- [ ] 5.3 QueryDSL로 목록 검색을 구현한다. 필터 전체, 정렬 5종(실수 나눗셈 캐스팅, NULL 뒤로, `id` 보조 정렬), LIKE 이스케이프, `lastChangedAt`·`bookmarked` 서브쿼리 식을 포함한다. 저장소 테스트로 각 필터와 정렬을 확인한다
-- [ ] 5.4 재분석 대상 조회(`needsAnalysis`, `promptVersion`, 설정의 재분석 최소 간격, 오래된 분석 우선 정렬)를 구현한다. 고정 `Clock`으로 변경 있음·없음·간격 안·미분석 물건 사례를 테스트한다
-- [ ] 5.5 `GET /api/items`, `GET /api/items/{id}`, `GET /api/items/{id}/changes`, `GET /api/items/usage-types` 컨트롤러를 만들고 MockMvc로 정상·400·404 응답을 확인한다
-- [ ] 5.6 `GET /api/health`를 구현한다. DB 정상 시 200, DB 중단 시 503이 나오는지 Testcontainers 컨테이너를 멈춰 확인한다
+- [x] 5.1 공통 JSON 설정(밀리초 3자리 `Z` 시각 직렬화, NULL 필드 출력 규칙)과 오류 응답(`{ error, details }`, 404 메시지)을 구현하고 단위 테스트로 확인한다
+- [x] 5.2 `src/lib/domain/item-query.ts`의 strict 파서 규칙을 Java 파서로 옮긴다. 원본 테스트(`src/lib/domain/__tests__/item-query.test.ts`)의 거절·허용 사례를 Java 테스트로 옮겨 같은 `field`가 나오는지 확인한다
+- [x] 5.3 QueryDSL로 목록 검색을 구현한다. 필터 전체, 정렬 5종(실수 나눗셈 캐스팅, NULL 뒤로, `id` 보조 정렬), LIKE 이스케이프, `lastChangedAt`·`bookmarked` 서브쿼리 식을 포함한다. 저장소 테스트로 각 필터와 정렬을 확인한다
+- [x] 5.4 재분석 대상 조회(`needsAnalysis`, `promptVersion`, 설정의 재분석 최소 간격, 오래된 분석 우선 정렬)를 구현한다. 고정 `Clock`으로 변경 있음·없음·간격 안·미분석 물건 사례를 테스트한다
+- [x] 5.5 `GET /api/items`, `GET /api/items/{id}`, `GET /api/items/{id}/changes`, `GET /api/items/usage-types` 컨트롤러를 만들고 MockMvc로 정상·400·404 응답을 확인한다
+- [x] 5.6 `GET /api/health`를 구현한다. DB 정상 시 200, DB 중단 시 503이 나오는지 Testcontainers 컨테이너를 멈춰 확인한다
 
 ## 6. 기존 API와의 계약 비교
 
