@@ -17,6 +17,7 @@
     "db:status": "bash scripts/dev-db.sh status"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.132.1",
     "better-sqlite3": "^13.0.3",
     "next": "15.5.25",
     "react": "^19.0.0",
@@ -26,11 +27,13 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.7",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.5.25",
+    "js-yaml": "^5.4.3",
     "tsx": "^4.19.2",
     "typescript": "^5",
     "vitest": "^4.1.11"

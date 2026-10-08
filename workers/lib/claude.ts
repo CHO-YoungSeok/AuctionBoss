@@ -16,6 +16,7 @@ import { execFile } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 
 /** 기본 타임아웃(ms). 물건 1건 요약이라 넉넉하게 잡아도 2분이면 충분하다. */
@@ -239,54 +240,67 @@ export const runClaudeHeadless: RunClaude = async ({
   }
 };
 
+/** API 모드 기본 모델. env `AUCTIONBOSS_ANALYZE_MODEL`이 있으면 그 값이 우선한다. */
+export const DEFAULT_API_MODEL = "claude-opus-5-5";
+
+/** 서버 측 대체(거절 시 다른 모델이 이어받기) 베타 헤더 값. */
+export const SERVER_SIDE_FALLBACK_BETA = "server-side-fallback-2026-07-01";
+
+/** thinking 토큰도 포함되므로 넉넉하게 잡는다(비스트리밍 권장값). */
+export const API_MAX_TOKENS = 16_000;
+
+/** 테스트가 가짜를 주입할 수 있도록 SDK 클라이언트에서 쓰는 부분만 좁힌 타입. */
+export type AnthropicLike = Pick<Anthropic, "beta">;
+
 export async function runClaudeViaApi(
   options: RunClaudeOptions,
   apiKey: string,
-  fetchFn = fetch
+  client: AnthropicLike = new Anthropic({ apiKey }),
 ): Promise<ClaudeResult> {
-  const model = options.model ?? "claude-3-5-sonnet-20241022";
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_CLAUDE_TIMEOUT_MS);
+  const model = options.model || DEFAULT_API_MODEL;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_CLAUDE_TIMEOUT_MS;
 
+  let message;
   try {
-    const response = await fetchFn("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
+    message = await client.beta.messages.create(
+      {
         model,
-        max_tokens: 8192,
+        max_tokens: API_MAX_TOKENS,
+        output_config: { effort: "medium" },
+        betas: [SERVER_SIDE_FALLBACK_BETA],
+        fallbacks: "default",
         messages: [{ role: "user", content: options.prompt }],
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new ClaudeInvocationError(`Anthropic API 오류: ${response.status} ${response.statusText} ${text}`);
-    }
-
-    const data = await response.json() as { content?: Array<{ type: string; text?: string }>; model?: string };
-    const text = data.content?.find((c) => c.type === "text")?.text;
-    if (!text) {
-      throw new ClaudeInvocationError("Anthropic API 응답에 텍스트가 없습니다");
-    }
-
-    return { text, model: data.model ?? model };
+      },
+      { timeout: timeoutMs },
+    );
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new ClaudeInvocationError(`API 호출이 ${options.timeoutMs ?? DEFAULT_CLAUDE_TIMEOUT_MS}ms 안에 끝나지 않아 종료했습니다`);
+    if (error instanceof Anthropic.APIConnectionTimeoutError) {
+      throw new ClaudeInvocationError(`API 호출이 ${timeoutMs}ms 안에 끝나지 않아 종료했습니다`, { cause: error });
     }
-    if (error instanceof ClaudeInvocationError) {
-      throw error;
+    if (error instanceof Anthropic.AnthropicError) {
+      throw new ClaudeInvocationError(`Anthropic API 오류: ${error.message}`, { cause: error });
     }
-    throw new ClaudeInvocationError(`API 호출 중 오류 발생: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-  } finally {
-    clearTimeout(timeoutId);
+    throw error;
   }
+
+  if (message.stop_reason === "max_tokens") {
+    throw new ClaudeInvocationError(`Anthropic API 출력이 잘림(max_tokens=${API_MAX_TOKENS}) — 분석을 저장하지 않습니다`);
+  }
+  if (message.stop_reason === "refusal") {
+    const category = message.stop_details?.category ?? "unknown";
+    throw new ClaudeInvocationError(`Anthropic API가 응답을 거절했습니다 (category=${category})`);
+  }
+
+  const text = message.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("")
+    .trim();
+  if (!text) {
+    throw new ClaudeInvocationError("Anthropic API 응답에 텍스트가 없습니다");
+  }
+
+  return { text, model: message.model ?? model };
 }
 
 export const runClaude: RunClaude = async (options) => {
