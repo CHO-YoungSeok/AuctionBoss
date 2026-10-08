@@ -7,7 +7,9 @@
  * - OS cron이 아니라 프로세스 안의 `setInterval`을 쓴다. "이전 회차가 아직 안 끝났으면
  *   건너뛴다"는 spec 요구사항을 lock 파일 없이 메모리 플래그 하나로 만족시킬 수 있다.
  * - 로봇탐지/WAF 차단(`SourceBlockedError`)은 재시도해도 풀리지 않는다(NOTES §6.1).
- *   그래서 차단을 만나면 백오프 창(기본 1시간)을 열고 그 동안의 tick을 건너뛴다.
+ *   그래서 차단을 만나면 백오프 창(기본 1시간)을 열고 그 동안의 tick을 건너뛴다. 백오프
+ *   종료 시각은 `collector_state.backoff_until`에 기록한다 — 재시작해도 유지되고 사진
+ *   워커와 공유된다(fix-photo-worker-and-deploy-config design.md D2).
  *   그 외 오류는 해당 회차만 중단하고 다음 주기에 정상 시도한다.
  *
  * 이 파일은 직접 실행될 때만 스케줄러를 띄운다. `startCollector()`를 export하므로
@@ -18,6 +20,8 @@ import { fileURLToPath } from "node:url";
 
 import {
   closeDb,
+  extendBackoffUntil,
+  getBackoffUntil,
   getRepository,
   finishRun,
   getCollectorState,
@@ -28,6 +32,7 @@ import {
 } from "@/lib/db";
 import type { FinishRunInput } from "@/lib/db";
 import {
+  DEFAULT_BLOCK_BACKOFF_MS,
   computeLapDurationMs,
   loadCollectorConfig,
   selectRotationCourts,
@@ -44,9 +49,6 @@ import {
   type AuctionSource,
   type Logger,
 } from "@/lib/sources";
-
-/** 차단 감지 시 기본 백오프. NOTES §6.1이 "최소 1시간 권장"이라 적었다. */
-export const DEFAULT_BLOCK_BACKOFF_MS = 60 * 60 * 1000;
 
 export interface CollectorOptions {
   source: AuctionSource;
@@ -150,6 +152,27 @@ function safeSetRotationState(logger: Logger, courtCode: string): void {
 }
 
 /**
+ * 공유 백오프 종료 시각 조회(design.md D2). 읽기가 실패하면(예: DB 오류) 백오프 없음으로
+ * 진행한다 — DB가 죽었다면 회차 기록도 실패하므로 백오프만 지켜 얻는 것이 없다.
+ */
+function safeGetBackoffUntil(logger: Logger): Date | null {
+  try {
+    return getBackoffUntil();
+  } catch (error) {
+    logger.error("[collector] 백오프 조회 실패 — 백오프 없음으로 보고 진행합니다", error);
+    return null;
+  }
+}
+
+function safeExtendBackoffUntil(logger: Logger, until: Date): void {
+  try {
+    extendBackoffUntil(until);
+  } catch (error) {
+    logger.error("[collector] 백오프 기록 실패 — 다음 회차에 차단이 다시 감지될 수 있습니다", error);
+  }
+}
+
+/**
  * 스케줄러를 시작한다.
  *
  * `running` 플래그는 이 함수의 클로저에 있다. 한 프로세스에서 워커는 하나만 뜨므로
@@ -162,7 +185,6 @@ export function startCollector(options: CollectorOptions): CollectorHandle {
   const upsert = options.upsert ?? ((items) => getRepository().upsertItems(items));
 
   let running = false;
-  let blockedUntil = 0;
   let runSeq = 0;
   let current: Promise<void> | null = null;
 
@@ -293,7 +315,10 @@ export function startCollector(options: CollectorOptions): CollectorHandle {
       safeRecordSkippedRun(logger, "overlap");
       return;
     }
-    const remaining = blockedUntil - Date.now();
+    // 백오프는 프로세스 메모리가 아니라 공유 저장소에서 읽는다 — 재시작 후에도, 다른
+    // 워커(사진)가 기록한 백오프도 지켜야 한다.
+    const backoffUntil = safeGetBackoffUntil(logger);
+    const remaining = backoffUntil ? backoffUntil.getTime() - Date.now() : 0;
     if (remaining > 0) {
       logger.warn(
         `[collector] 소스 차단 백오프 중이라 건너뜁니다 — 남은 시간 ${formatDuration(remaining)}`,
@@ -308,7 +333,7 @@ export function startCollector(options: CollectorOptions): CollectorHandle {
         await runOnce();
       } catch (error) {
         if (error instanceof SourceBlockedError) {
-          blockedUntil = Date.now() + blockBackoffMs;
+          safeExtendBackoffUntil(logger, new Date(Date.now() + blockBackoffMs));
           logger.error(
             `[collector] 소스가 접근을 차단했습니다 (${error.name}). ` +
               `${formatDuration(blockBackoffMs)} 동안 수집을 멈춥니다.`,

@@ -368,8 +368,13 @@ export function createWorkerRunsRepository(db: Db): WorkerRunsRepository {
     getWorkerStatus(worker, options) {
       const nowIso = options?.now ?? new Date().toISOString();
       const config = options?.config ?? loadCollectorConfig();
-      const expectedIntervalMs =
-        worker === "collector" ? config.intervalMs : config.analysis.intervalMs;
+      // 워커별 기대 주기. 다른 워커의 주기로 판정하면 주기가 긴 워커가 정상인데도
+      // 미실행으로 보일 수 있다(fix-photo-worker-and-deploy-config D3).
+      const expectedIntervalMs = {
+        collector: config.intervalMs,
+        analyzer: config.analysis.intervalMs,
+        photos: config.photos.intervalMs,
+      }[worker];
       const staleThresholdMs = expectedIntervalMs * config.observability.staleAfterIntervals;
 
       const lastRunRow = selectLastRun.get({ worker });

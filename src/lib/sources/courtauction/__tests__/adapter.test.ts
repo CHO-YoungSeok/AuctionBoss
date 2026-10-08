@@ -902,3 +902,123 @@ describe("parseDetailResponse 및 GIF base64 검증 (Stage B.4)", () => {
     expect(detectImageExtension(binBuf.toString("base64"))).toBe("bin");
   });
 });
+
+// ------------------------------------------------------------- 사진 조회 (fix-photo-worker-and-deploy-config D1)
+
+/** 부트스트랩은 쿠키를 주고, 상세 경로는 `detailResponses`를 순서대로 돌려주는 가짜 fetch. */
+function makePhotoAdapter(detailResponses: (string | Response)[]) {
+  const requests: RecordedRequest[] = [];
+  let detailIndex = 0;
+  const fetchFn = async (url: string, init?: RequestInit): Promise<Response> => {
+    requests.push({
+      url,
+      init,
+      body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+    });
+    if (url.endsWith(SESSION_BOOTSTRAP_PATH)) {
+      return new Response("<html></html>", {
+        status: 200,
+        headers: { "set-cookie": "JSESSIONID=abc123; Path=/; HttpOnly" },
+      });
+    }
+    const next = detailResponses[Math.min(detailIndex, detailResponses.length - 1)];
+    detailIndex += 1;
+    if (next === undefined) throw new Error("테스트 fixture가 부족합니다");
+    return typeof next === "string" ? new Response(next, { status: 200 }) : next;
+  };
+  const adapter = new CourtAuctionAdapter({
+    fetchFn,
+    logger: collectingLogger(),
+    sleep: vi.fn(async () => {}),
+  });
+  return { adapter, requests };
+}
+
+const PHOTO_REF = { courtCode: "B000210", internalCaseNo: "20260130101037" };
+
+describe("CourtAuctionAdapter.fetchItemPhotos (D1)", () => {
+  it("사진 2장을 소스 중립 형태({ seq, base64 })로 돌려준다", async () => {
+    const { adapter } = makePhotoAdapter([validDetailBody()]);
+    const result = await adapter.fetchItemPhotos(PHOTO_REF);
+
+    expect(result.photos).toHaveLength(2);
+    expect(result.photos[0]).toEqual({ seq: 1, base64: REAL_DETAIL_PICS[0].picFile });
+    expect(result.photos[1]!.seq).toBe(2);
+    // 소스 고유 속성이 새지 않는다
+    expect(result.photos[0]).not.toHaveProperty("cortAuctnPicSeq");
+    expect(result.photos[0]).not.toHaveProperty("picFile");
+  });
+
+  it("csPicLst가 빈 배열이면 오류가 아니라 빈 결과", async () => {
+    const { adapter } = makePhotoAdapter([validDetailBody({ pics: [] })]);
+    const result = await adapter.fetchItemPhotos(PHOTO_REF);
+    expect(result.photos).toEqual([]);
+  });
+
+  it("순번이나 이미지 데이터가 없는 항목은 결과에서 제외한다", async () => {
+    const { adapter } = makePhotoAdapter([
+      validDetailBody({
+        pics: [
+          { cortAuctnPicSeq: null, picFile: "AAAA" },
+          { cortAuctnPicSeq: "1", picFile: null },
+          { cortAuctnPicSeq: "2", picFile: "" },
+          { cortAuctnPicSeq: "3", picFile: "BBBB" },
+        ],
+      }),
+    ]);
+    const result = await adapter.fetchItemPhotos(PHOTO_REF);
+    expect(result.photos).toEqual([{ seq: 3, base64: "BBBB" }]);
+  });
+
+  it("본문이 HTML(WAF 차단 페이지)이면 WafBlockedError", async () => {
+    const { adapter } = makePhotoAdapter([WAF_BLOCKED_BODY]);
+    await expect(adapter.fetchItemPhotos(PHOTO_REF)).rejects.toBeInstanceOf(WafBlockedError);
+  });
+
+  it("ipcheck가 false면 RobotDetectedError", async () => {
+    const { adapter } = makePhotoAdapter([ROBOT_BLOCKED_BODY]);
+    await expect(adapter.fetchItemPhotos(PHOTO_REF)).rejects.toBeInstanceOf(RobotDetectedError);
+  });
+
+  it("스키마가 맞지 않으면 ResponseSchemaError", async () => {
+    const { adapter } = makePhotoAdapter([DETAIL_SCHEMA_VIOLATION_BODY]);
+    await expect(adapter.fetchItemPhotos(PHOTO_REF)).rejects.toBeInstanceOf(ResponseSchemaError);
+  });
+
+  it("HTTP 오류는 빈 결과가 아니라 SourceRequestError", async () => {
+    const { adapter } = makePhotoAdapter([new Response("err", { status: 500 })]);
+    await expect(adapter.fetchItemPhotos(PHOTO_REF)).rejects.toBeInstanceOf(SourceRequestError);
+  });
+
+  it("두 번 호출해도 세션 부트스트랩은 1회이고 requestsMade 합계는 3", async () => {
+    const { adapter, requests } = makePhotoAdapter([validDetailBody()]);
+    const first = await adapter.fetchItemPhotos(PHOTO_REF);
+    const second = await adapter.fetchItemPhotos(PHOTO_REF);
+
+    expect(requests.filter((r) => r.url.endsWith(SESSION_BOOTSTRAP_PATH))).toHaveLength(1);
+    expect(requests.filter((r) => r.url.endsWith(DETAIL_PATH))).toHaveLength(2);
+    expect(first.requestsMade).toBe(2);
+    expect(second.requestsMade).toBe(1);
+    expect(first.requestsMade + second.requestsMade).toBe(3);
+  });
+
+  it("요청 본문에 csNo·cortOfcCd가 들어가고 UA·쿠키를 같이 보낸다", async () => {
+    const { adapter, requests } = makePhotoAdapter([validDetailBody()]);
+    await adapter.fetchItemPhotos(PHOTO_REF);
+
+    const detail = requests.find((r) => r.url.endsWith(DETAIL_PATH))!;
+    const body = detail.body as { dma_srchGdsDtlSrch: Record<string, string> };
+    expect(body.dma_srchGdsDtlSrch.csNo).toBe(PHOTO_REF.internalCaseNo);
+    expect(body.dma_srchGdsDtlSrch.cortOfcCd).toBe(PHOTO_REF.courtCode);
+    expect(body.dma_srchGdsDtlSrch.dspslGdsSeq).toBe("");
+    const headers = detail.init!.headers as Record<string, string>;
+    expect(headers["User-Agent"]).toBe(USER_AGENT);
+    expect(headers.Cookie).toContain("JSESSIONID=abc123");
+  });
+
+  it("차단 오류에는 실제로 보낸 요청 수가 실린다", async () => {
+    const { adapter } = makePhotoAdapter([ROBOT_BLOCKED_BODY]);
+    const error = await adapter.fetchItemPhotos(PHOTO_REF).catch((e: unknown) => e);
+    expect((error as SourceError).pagesRequested).toBe(2);
+  });
+});

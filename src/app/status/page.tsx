@@ -202,7 +202,7 @@ export default function StatusPage() {
 
       <header className="page-header">
         <h1>워커 상태</h1>
-        <p className="muted">수집·분석 워커의 현재 상태와 최근 회차 기록입니다.</p>
+        <p className="muted">수집·분석·사진 워커의 현재 상태와 최근 회차 기록입니다.</p>
       </header>
 
       <div className="status-grid">

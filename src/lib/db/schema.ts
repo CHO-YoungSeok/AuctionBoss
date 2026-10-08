@@ -65,6 +65,9 @@ CREATE TABLE IF NOT EXISTS items (
   photo_status              TEXT,
   photo_count               INTEGER,
   photo_collected_at        TEXT,
+  -- ↓ 사진 마지막 시도 시각(fix-photo-worker-and-deploy-config D4). 실패 물건의 재시도 간격
+  -- 판정에 쓴다. nullable. migrateItemPhotoColumns가 기존 DB에 ALTER TABLE로 추가한다.
+  photo_attempted_at        TEXT,
   UNIQUE (court, case_no, item_no)
 );
 

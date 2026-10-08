@@ -2,6 +2,9 @@ export {
   consoleLogger,
   type AuctionSource,
   type FetchActiveItemsResult,
+  type FetchItemPhotosResult,
+  type PhotoLookupRef,
+  type SourcePhoto,
   type Logger,
 } from "./types";
 export {

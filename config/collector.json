@@ -17,6 +17,12 @@
     "reanalysisCooldownHours": 24,
     "intervalMs": 600000
   },
+  "photos": {
+    "intervalMs": 1800000,
+    "maxItemsPerRun": 5,
+    "requestDelayMs": 30000,
+    "retryAfterHours": 24
+  },
   "observability": {
     "maxRunsPerWorker": 1000,
     "staleAfterIntervals": 3

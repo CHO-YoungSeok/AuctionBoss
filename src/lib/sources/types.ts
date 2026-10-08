@@ -27,6 +27,29 @@ export interface FetchActiveItemsResult {
   pagesRequested: number;
 }
 
+/**
+ * 사진 조회 입력. 정규화 모델이 보존한 소스 중립 필드(`courtCode`, `internalCaseNo`)다
+ * (design.md D1). 화면 표시용 사건번호와 소스 내부 식별자는 다를 수 있다.
+ */
+export interface PhotoLookupRef {
+  courtCode: string;
+  internalCaseNo: string;
+}
+
+/**
+ * 사진 한 장. 이미지 바이트의 표준 텍스트 표현(base64)이라 소스 고유 형식이 아니다.
+ */
+export interface SourcePhoto {
+  seq: number;
+  base64: string;
+}
+
+export interface FetchItemPhotosResult {
+  photos: SourcePhoto[];
+  /** 이번 호출에서 실제로 보낸 요청 수(세션 부트스트랩 포함). 실행 메타데이터. */
+  requestsMade: number;
+}
+
 export interface AuctionSource {
   /**
    * 수집 범위에 해당하는 "진행 중" 물건을 전부 조회해 정규화 모델로 돌려준다.
@@ -36,6 +59,12 @@ export interface AuctionSource {
    *   "결과가 0건"과 "실패"를 호출자가 구분할 수 있어야 하기 때문이다.
    */
   fetchActiveItems(scope: CollectScope): Promise<FetchActiveItemsResult>;
+
+  /**
+   * 한 물건의 사진을 조회한다. 사진이 없으면 빈 결과, 요청 실패·차단·응답 형식 변경은
+   * 빈 결과가 아니라 **throw**로 알린다(차단은 `SourceBlockedError`).
+   */
+  fetchItemPhotos(ref: PhotoLookupRef): Promise<FetchItemPhotosResult>;
 }
 
 /**

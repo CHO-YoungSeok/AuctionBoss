@@ -742,9 +742,24 @@ export interface AuctionRepository {
   listItemChanges(itemId: number): ItemChange[];
   
   getItemPhotos(itemId: number): ItemPhoto[];
-  saveItemPhotos(itemId: number, photos: Array<{ seq: number; filePath: string; fileSize: number; mimeType: string }>, status: PhotoStatus): void;
-  updateItemPhotoStatus(itemId: number, status: PhotoStatus): void;
-  getPendingPhotoItems(limit?: number): AuctionItem[];
+  /** 사진을 저장하고 상태·마지막 시도 시각(`photo_attempted_at`)을 함께 기록한다. */
+  saveItemPhotos(
+    itemId: number,
+    photos: Array<{ seq: number; filePath: string; fileSize: number; mimeType: string }>,
+    status: PhotoStatus,
+    options?: { now?: string },
+  ): void;
+  /** 상태와 마지막 시도 시각(`photo_attempted_at`)을 함께 기록한다. */
+  updateItemPhotoStatus(itemId: number, status: PhotoStatus, options?: { now?: string }): void;
+  /**
+   * 사진 수집 대기 물건(fix-photo-worker-and-deploy-config D4). 미시도(NULL·uncollected)가
+   * 먼저, 그다음 마지막 시도가 오래된 `failed` 순이다. `failed`는 마지막 시도로부터
+   * `retryAfterHours`(기본 24)가 지났거나 시도 시각이 없을 때만 포함한다.
+   */
+  getPendingPhotoItems(
+    limit?: number,
+    options?: { now?: Date; retryAfterHours?: number },
+  ): AuctionItem[];
 }
 
 interface ExistingItemRow {
@@ -1095,16 +1110,17 @@ export function createRepository(db: Db): AuctionRepository {
   `);
 
   const updateItemPhotoStatusStmt = db.prepare(`
-    UPDATE items SET photo_status = @status, photo_count = @count, photo_collected_at = @collectedAt
+    UPDATE items SET photo_status = @status, photo_count = @count, photo_collected_at = @collectedAt,
+      photo_attempted_at = @collectedAt
     WHERE id = @itemId
   `);
 
   const updateItemPhotoStatusOnlyStmt = db.prepare(`
-    UPDATE items SET photo_status = @status WHERE id = @itemId
+    UPDATE items SET photo_status = @status, photo_attempted_at = @attemptedAt WHERE id = @itemId
   `);
 
   const selectPendingPhotoItems = db.prepare<
-    { limit: number },
+    { limit: number; retryBefore: string },
     ItemRow
   >(`
     SELECT
@@ -1121,11 +1137,18 @@ export function createRepository(db: Db): AuctionRepository {
       status_code, item_status_code, internal_case_no, court_code,
       photo_status, photo_count, photo_collected_at
     FROM items
-    WHERE (photo_status IS NULL OR photo_status = 'uncollected' OR photo_status = 'failed')
-      AND internal_case_no IS NOT NULL
+    WHERE internal_case_no IS NOT NULL
       AND court_code IS NOT NULL
+      AND (
+        photo_status IS NULL OR photo_status = 'uncollected'
+        OR (
+          photo_status = 'failed'
+          AND (photo_attempted_at IS NULL OR photo_attempted_at <= @retryBefore)
+        )
+      )
     ORDER BY
       CASE WHEN (photo_status IS NULL OR photo_status = 'uncollected') THEN 0 ELSE 1 END,
+      photo_attempted_at ASC,
       id DESC
     LIMIT @limit
   `);
@@ -1221,8 +1244,8 @@ export function createRepository(db: Db): AuctionRepository {
       return selectItemPhotos.all({ itemId });
     },
 
-    saveItemPhotos(itemId, photos, status) {
-      const collectedAt = new Date().toISOString();
+    saveItemPhotos(itemId, photos, status, options) {
+      const collectedAt = options?.now ?? new Date().toISOString();
       const saveTransaction = db.transaction(() => {
         for (const photo of photos) {
           insertItemPhoto.run({
@@ -1244,12 +1267,19 @@ export function createRepository(db: Db): AuctionRepository {
       saveTransaction();
     },
 
-    updateItemPhotoStatus(itemId, status) {
-      updateItemPhotoStatusOnlyStmt.run({ itemId, status });
+    updateItemPhotoStatus(itemId, status, options) {
+      updateItemPhotoStatusOnlyStmt.run({
+        itemId,
+        status,
+        attemptedAt: options?.now ?? new Date().toISOString(),
+      });
     },
 
-    getPendingPhotoItems(limit = 10) {
-      return selectPendingPhotoItems.all({ limit }).map(row => toAuctionItem(row));
+    getPendingPhotoItems(limit = 10, options) {
+      const now = options?.now ?? new Date();
+      const retryAfterHours = options?.retryAfterHours ?? 24;
+      const retryBefore = new Date(now.getTime() - retryAfterHours * 3_600_000).toISOString();
+      return selectPendingPhotoItems.all({ limit, retryBefore }).map((row) => toAuctionItem(row));
     },
 
     insertAnalysis(input, options) {
@@ -1361,14 +1391,26 @@ export function getItemPhotos(itemId: number): ItemPhoto[] {
   return getRepository().getItemPhotos(itemId);
 }
 
-export function saveItemPhotos(itemId: number, photos: Array<{ seq: number; filePath: string; fileSize: number; mimeType: string }>, status: PhotoStatus): void {
-  return getRepository().saveItemPhotos(itemId, photos, status);
+export function saveItemPhotos(
+  itemId: number,
+  photos: Array<{ seq: number; filePath: string; fileSize: number; mimeType: string }>,
+  status: PhotoStatus,
+  options?: { now?: string },
+): void {
+  return getRepository().saveItemPhotos(itemId, photos, status, options);
 }
 
-export function updateItemPhotoStatus(itemId: number, status: PhotoStatus): void {
-  return getRepository().updateItemPhotoStatus(itemId, status);
+export function updateItemPhotoStatus(
+  itemId: number,
+  status: PhotoStatus,
+  options?: { now?: string },
+): void {
+  return getRepository().updateItemPhotoStatus(itemId, status, options);
 }
 
-export function getPendingPhotoItems(limit?: number): AuctionItem[] {
-  return getRepository().getPendingPhotoItems(limit);
+export function getPendingPhotoItems(
+  limit?: number,
+  options?: { now?: Date; retryAfterHours?: number },
+): AuctionItem[] {
+  return getRepository().getPendingPhotoItems(limit, options);
 }

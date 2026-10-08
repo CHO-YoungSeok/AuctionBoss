@@ -151,6 +151,8 @@ function migrateItemPhotoColumns(db: Db): void {
     ["photo_status", "TEXT"],
     ["photo_count", "INTEGER"],
     ["photo_collected_at", "TEXT"],
+    // 마지막 시도 시각(fix-photo-worker-and-deploy-config D4). 기존 행은 NULL.
+    ["photo_attempted_at", "TEXT"],
   ];
 
   for (const [name, ddl] of photoColumns) {

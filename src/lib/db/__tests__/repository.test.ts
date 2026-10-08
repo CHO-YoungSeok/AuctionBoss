@@ -1823,8 +1823,8 @@ describe("Item Photos & getPendingPhotoItems", () => {
     const item3 = items.find((i) => i.itemNo === "3")!;
     const item4 = items.find((i) => i.itemNo === "4")!;
 
-    // 1번: failed 로 설정
-    repo.updateItemPhotoStatus(item1.id, "failed");
+    // 1번: failed 로 설정 (재시도 간격 24시간이 충분히 지난 오래된 시도)
+    repo.updateItemPhotoStatus(item1.id, "failed", { now: "2020-01-01T00:00:00.000Z" });
     // 2번: uncollected 로 설정
     repo.updateItemPhotoStatus(item2.id, "uncollected");
     // 3번: photo_status 는 NULL 유지
@@ -1845,5 +1845,116 @@ describe("Item Photos & getPendingPhotoItems", () => {
     expect(pendingItemNos[2]).toBe("1");
     // 앞의 두 개는 2(uncollected)와 3(null)
     expect(pendingItemNos.slice(0, 2).sort()).toEqual(["2", "3"]);
+  });
+
+  // fix-photo-worker-and-deploy-config 3.2 (D4): 실패 재시도 간격
+  describe("getPendingPhotoItems — 재시도 간격", () => {
+    const NOW = new Date("2026-10-08T12:00:00.000Z");
+    const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOString();
+
+    function seed(specs: Array<{ itemNo: string; ids: boolean }>) {
+      repo.upsertItems(
+        specs.map((s) =>
+          s.ids
+            ? makeItem({ itemNo: s.itemNo, internalCaseNo: `case${s.itemNo}`, courtCode: "B000210" })
+            : makeItem({ itemNo: s.itemNo }),
+        ),
+      );
+      const items = repo.listItems({ pageSize: 50 }).items;
+      return (no: string) => items.find((i) => i.itemNo === no)!.id;
+    }
+
+    const pendingNos = (retryAfterHours = 24) =>
+      repo
+        .getPendingPhotoItems(10, { now: NOW, retryAfterHours })
+        .map((i) => i.itemNo);
+
+    it("미시도 물건이 재시도 대상 실패 물건보다 먼저 온다", () => {
+      const id = seed([
+        { itemNo: "failed-old", ids: true },
+        { itemNo: "fresh", ids: true },
+      ]);
+      repo.updateItemPhotoStatus(id("failed-old"), "failed", { now: hoursAgo(48) });
+      expect(pendingNos()).toEqual(["fresh", "failed-old"]);
+    });
+
+    it("재시도 간격 안(1시간 전)의 실패 물건은 제외한다", () => {
+      const id = seed([{ itemNo: "recent", ids: true }]);
+      repo.updateItemPhotoStatus(id("recent"), "failed", { now: hoursAgo(1) });
+      expect(pendingNos()).toEqual([]);
+    });
+
+    it("재시도 간격이 지난(25시간 전) 실패 물건은 포함하고 미시도 뒤에 온다", () => {
+      const id = seed([
+        { itemNo: "failed-25h", ids: true },
+        { itemNo: "fresh", ids: true },
+      ]);
+      repo.updateItemPhotoStatus(id("failed-25h"), "failed", { now: hoursAgo(25) });
+      expect(pendingNos()).toEqual(["fresh", "failed-25h"]);
+    });
+
+    it("재시도 간격은 설정값을 따른다 (1시간 전 실패 + 간격 0.5시간이면 포함)", () => {
+      const id = seed([{ itemNo: "recent", ids: true }]);
+      repo.updateItemPhotoStatus(id("recent"), "failed", { now: hoursAgo(1) });
+      expect(pendingNos(0.5)).toEqual(["recent"]);
+    });
+
+    it("시각이 NULL인 옛 failed 행은 곧바로 대상이다", () => {
+      const id = seed([{ itemNo: "legacy", ids: true }]);
+      db.prepare("UPDATE items SET photo_status = 'failed', photo_attempted_at = NULL WHERE id = ?").run(
+        id("legacy"),
+      );
+      expect(pendingNos()).toEqual(["legacy"]);
+    });
+
+    it("실패 물건은 마지막 시도가 오래된 순으로 온다", () => {
+      const id = seed([
+        { itemNo: "a", ids: true },
+        { itemNo: "b", ids: true },
+      ]);
+      repo.updateItemPhotoStatus(id("a"), "failed", { now: hoursAgo(30) });
+      repo.updateItemPhotoStatus(id("b"), "failed", { now: hoursAgo(100) });
+      expect(pendingNos()).toEqual(["b", "a"]);
+    });
+
+    it("collected·empty 물건은 제외한다", () => {
+      const id = seed([
+        { itemNo: "done", ids: true },
+        { itemNo: "none", ids: true },
+      ]);
+      repo.saveItemPhotos(
+        id("done"),
+        [{ seq: 1, filePath: "1/1.jpg", fileSize: 1, mimeType: "image/jpeg" }],
+        "collected",
+        { now: hoursAgo(100) },
+      );
+      repo.updateItemPhotoStatus(id("none"), "empty", { now: hoursAgo(100) });
+      expect(pendingNos()).toEqual([]);
+    });
+
+    it("식별자가 없는 물건은 상태와 무관하게 제외한다", () => {
+      const id = seed([{ itemNo: "noid", ids: false }]);
+      expect(pendingNos()).toEqual([]);
+      repo.updateItemPhotoStatus(id("noid"), "failed", { now: hoursAgo(100) });
+      expect(pendingNos()).toEqual([]);
+    });
+
+    it("사진 결과를 기록하면 photo_attempted_at이 함께 기록된다", () => {
+      const id = seed([
+        { itemNo: "x", ids: true },
+        { itemNo: "y", ids: true },
+      ]);
+      repo.updateItemPhotoStatus(id("x"), "empty", { now: "2026-10-08T01:02:03.000Z" });
+      repo.saveItemPhotos(
+        id("y"),
+        [{ seq: 1, filePath: "1/1.jpg", fileSize: 1, mimeType: "image/jpeg" }],
+        "collected",
+        { now: "2026-10-08T04:05:06.000Z" },
+      );
+      const row = (n: number) =>
+        db.prepare("SELECT photo_attempted_at AS t FROM items WHERE id = ?").get(n) as { t: string };
+      expect(row(id("x")).t).toBe("2026-10-08T01:02:03.000Z");
+      expect(row(id("y")).t).toBe("2026-10-08T04:05:06.000Z");
+    });
   });
 });

@@ -16,6 +16,8 @@ export type {
   ItemChange,
   ItemChangeKind,
   ObservabilityConfig,
+  PhotosConfig,
+  PhotosRunDetail,
   RunOutcome,
   SkipReason,
   WatchedField,
@@ -52,6 +54,8 @@ export {
   type PricePerAreaFields,
   type PricePerAreaResult,
 } from "./price";
+
+export { DEFAULT_BLOCK_BACKOFF_MS } from "./backoff";
 
 export { PROMPT_VERSION } from "./analysis";
 

@@ -371,12 +371,28 @@ export interface CollectorScopeConfig extends CollectScope {
   maxRequestsPerRun: number;
 }
 
+/**
+ * `config/collector.json`의 photos 절(fix-photo-worker-and-deploy-config D3/D4). 사진 워커는
+ * 수집 워커와 같은 IP 요청 예산을 나눠 쓰므로 수집보다 드물고 느리게 돈다.
+ */
+export interface PhotosConfig {
+  /** 사진 워커 주기(ms). */
+  intervalMs: number;
+  /** 회차당 처리할 물건 수 상한. */
+  maxItemsPerRun: number;
+  /** 같은 회차 안에서 물건 사이에 둘 요청 간격(ms). */
+  requestDelayMs: number;
+  /** 실패한 물건을 다시 대상으로 삼기까지의 간격(시간). 마지막 시도 시각 기준. */
+  retryAfterHours: number;
+}
+
 /** `config/collector.json` 전체. */
 export interface CollectorConfig {
   scope: CollectorScopeConfig;
   /** 수집 주기(ms) */
   intervalMs: number;
   analysis: AnalysisConfig;
+  photos: PhotosConfig;
   observability: ObservabilityConfig;
 }
 
@@ -433,8 +449,22 @@ export interface AnalyzerRunDetail {
   failed: number;
 }
 
+/** photos 회차의 표시용 수치(fix-photo-worker-and-deploy-config D3) — `detail` JSON에 저장된다. */
+export interface PhotosRunDetail {
+  /** 시도한 물건 수. */
+  attempted: number;
+  /** 사진을 저장한 물건 수. */
+  collected: number;
+  /** 사진이 없다고 확인된 물건 수. */
+  empty: number;
+  /** 실패한 물건 수(차단으로 중단된 물건은 포함하지 않는다). */
+  failed: number;
+  /** 실제로 보낸 요청 수(세션 부트스트랩 포함). */
+  requestsMade: number;
+}
+
 /** 워커별로 다른 `detail` JSON의 형태. `worker` 컬럼 값으로 어느 쪽인지 구별한다. */
-export type WorkerRunDetail = CollectorRunDetail | AnalyzerRunDetail;
+export type WorkerRunDetail = CollectorRunDetail | AnalyzerRunDetail | PhotosRunDetail;
 
 /** `worker_runs` 테이블의 회차 한 건(design.md D1). */
 export interface WorkerRun {

@@ -44,6 +44,12 @@ function makeConfig(overrides: Partial<CollectorConfig> = {}): CollectorConfig {
       reanalysisCooldownHours: 24,
       intervalMs: 10 * 60 * 1000, // analyzer 10분
     },
+    photos: {
+      intervalMs: 30 * 60 * 1000, // photos 30분
+      maxItemsPerRun: 5,
+      requestDelayMs: 30_000,
+      retryAfterHours: 24,
+    },
     observability: { maxRunsPerWorker: 1000, staleAfterIntervals: 3 },
     ...overrides,
   };
@@ -505,5 +511,37 @@ describe("getWorkerStatus(design.md D5)", () => {
 
     expect(repo.getWorkerStatus("collector", { now, config }).state).toBe("ok");
     expect(repo.getWorkerStatus("analyzer", { now, config }).state).toBe("stale");
+  });
+
+  // fix-photo-worker-and-deploy-config 3.5 (D3): 사진 워커는 자기 주기(photos.intervalMs)로 판정한다.
+  it("사진 주기 30분·분석 주기 10분·마지막 성공 40분 전이면 사진 워커는 stale이 아니다", () => {
+    const config = makeConfig(); // analysis.intervalMs 10분, photos.intervalMs 30분
+    const run = repo.startRun("photos", { now: "2026-01-01T11:20:00.000Z", config });
+    repo.finishRun(
+      run,
+      {
+        outcome: "success",
+        detail: { attempted: 3, collected: 2, empty: 1, failed: 0, requestsMade: 4 },
+      },
+      { now: "2026-01-01T11:20:00.000Z" },
+    );
+
+    const status = repo.getWorkerStatus("photos", { now, config });
+    expect(status.state).toBe("ok");
+    expect(status.lastSuccessAt).toBe("2026-01-01T11:20:00.000Z");
+  });
+
+  it("사진 워커도 자기 주기 × N(30분 × 3 = 90분)을 넘기면 stale이다", () => {
+    const config = makeConfig();
+    const run = repo.startRun("photos", { now: "2026-01-01T10:20:00.000Z", config }); // 100분 전
+    repo.finishRun(
+      run,
+      {
+        outcome: "success",
+        detail: { attempted: 0, collected: 0, empty: 0, failed: 0, requestsMade: 0 },
+      },
+      { now: "2026-01-01T10:20:00.000Z" },
+    );
+    expect(repo.getWorkerStatus("photos", { now, config }).state).toBe("stale");
   });
 });

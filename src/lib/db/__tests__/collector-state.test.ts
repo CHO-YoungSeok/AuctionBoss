@@ -64,3 +64,55 @@ describe("createCollectorStateRepository", () => {
     expect(repo.getCollectorState("other-key")).toBe("다른 값");
   });
 });
+
+describe("차단 백오프 공유 (fix-photo-worker-and-deploy-config D2)", () => {
+  it("BACKOFF_UNTIL 키는 옛 사진 워커가 쓰던 이름 backoff_until이다", () => {
+    expect(COLLECTOR_STATE_KEYS.BACKOFF_UNTIL).toBe("backoff_until");
+  });
+
+  it("값이 없으면 null", () => {
+    const repo = createCollectorStateRepository(db);
+    expect(repo.getBackoffUntil()).toBeNull();
+  });
+
+  it("파싱할 수 없는 값은 null", () => {
+    const repo = createCollectorStateRepository(db);
+    repo.setCollectorState(COLLECTOR_STATE_KEYS.BACKOFF_UNTIL, "not-a-date");
+    expect(repo.getBackoffUntil()).toBeNull();
+  });
+
+  it("옛 사진 워커 형식(ISO 문자열) 행을 그대로 읽는다", () => {
+    db.prepare(
+      "INSERT INTO collector_state (key, value, updated_at) VALUES ('backoff_until', '2026-10-08T12:00:00.000Z', '2026-10-08T11:50:00.000Z')",
+    ).run();
+    const repo = createCollectorStateRepository(db);
+    expect(repo.getBackoffUntil()?.toISOString()).toBe("2026-10-08T12:00:00.000Z");
+  });
+
+  it("값이 없을 때 extend하면 기록된다", () => {
+    const repo = createCollectorStateRepository(db);
+    repo.extendBackoffUntil(new Date("2026-10-08T12:00:00.000Z"));
+    expect(repo.getBackoffUntil()?.toISOString()).toBe("2026-10-08T12:00:00.000Z");
+  });
+
+  it("더 늦은 값은 덮어쓴다", () => {
+    const repo = createCollectorStateRepository(db);
+    repo.extendBackoffUntil(new Date("2026-10-08T12:00:00.000Z"));
+    repo.extendBackoffUntil(new Date("2026-10-08T14:00:00.000Z"));
+    expect(repo.getBackoffUntil()?.toISOString()).toBe("2026-10-08T14:00:00.000Z");
+  });
+
+  it("더 이른 값은 무시한다 (2시간 뒤 값 유지)", () => {
+    const repo = createCollectorStateRepository(db);
+    repo.extendBackoffUntil(new Date("2026-10-08T14:00:00.000Z"));
+    repo.extendBackoffUntil(new Date("2026-10-08T12:00:00.000Z"));
+    expect(repo.getBackoffUntil()?.toISOString()).toBe("2026-10-08T14:00:00.000Z");
+  });
+
+  it("저장된 값이 파싱 불가일 때는 새 값으로 덮어쓴다", () => {
+    const repo = createCollectorStateRepository(db);
+    repo.setCollectorState(COLLECTOR_STATE_KEYS.BACKOFF_UNTIL, "garbage");
+    repo.extendBackoffUntil(new Date("2026-10-08T12:00:00.000Z"));
+    expect(repo.getBackoffUntil()?.toISOString()).toBe("2026-10-08T12:00:00.000Z");
+  });
+});

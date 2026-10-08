@@ -4,7 +4,13 @@
  */
 import { describe, expect, it } from "vitest";
 
-import type { AnalyzerRunDetail, CollectorRunDetail, CourtRef, WorkerRun } from "@/lib/domain";
+import type {
+  AnalyzerRunDetail,
+  CollectorRunDetail,
+  CourtRef,
+  PhotosRunDetail,
+  WorkerRun,
+} from "@/lib/domain";
 
 import {
   describeOutcome,
@@ -226,6 +232,40 @@ describe("describeRunDetail", () => {
     const detail: AnalyzerRunDetail = { newCount: 1, reanalysisCount: 0, succeeded: 1, failed: 0 };
     const run = makeRun({ outcome: "success", worker: "analyzer", detail });
     expect(describeRunDetail(run)).toBe("신규분석 1 · 재분석 0 · 성공 1 · 실패 0");
+  });
+});
+
+describe("describeRunDetail — 사진 워커 회차 (fix-photo-worker-and-deploy-config 4.2)", () => {
+  const detail: PhotosRunDetail = { attempted: 3, collected: 2, empty: 1, failed: 0, requestsMade: 4 };
+
+  it("성공 회차는 시도·저장·사진 없음·실패 건수 네 수치를 보여준다", () => {
+    const run = makeRun({ outcome: "success", worker: "photos", detail });
+    expect(describeRunDetail(run)).toBe("시도 3 · 저장 2 · 사진 없음 1 · 실패 0");
+  });
+
+  it("일부 실패한 성공 회차도 실패 건수가 보인다", () => {
+    const run = makeRun({
+      outcome: "success",
+      worker: "photos",
+      detail: { attempted: 3, collected: 1, empty: 0, failed: 2, requestsMade: 4 },
+    });
+    expect(describeRunDetail(run)).toBe("시도 3 · 저장 1 · 사진 없음 0 · 실패 2");
+  });
+
+  it("실패·차단 회차는 오류와 함께 건수도 보여준다", () => {
+    const run = makeRun({
+      outcome: "blocked",
+      worker: "photos",
+      errorKind: "RobotDetectedError",
+      detail: { attempted: 2, collected: 1, empty: 0, failed: 0, requestsMade: 3 },
+    });
+    const result = describeRunDetail(run);
+    expect(result).toContain("시도 2 · 저장 1 · 사진 없음 0 · 실패 0");
+    expect(result).toContain("RobotDetectedError");
+  });
+
+  it("detail이 없는 사진 성공 회차는 '-'(방어적 처리)", () => {
+    expect(describeRunDetail(makeRun({ outcome: "success", worker: "photos", detail: null }))).toBe("-");
   });
 });
 

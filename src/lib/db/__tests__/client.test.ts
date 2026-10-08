@@ -1106,4 +1106,74 @@ describe("openDatabase — collector_state 마이그레이션 (scale-collection-
       upgraded.close();
     }
   });
+
+  /**
+   * fix-photo-worker-and-deploy-config 3.1: `photo_attempted_at` 컬럼이 생기기 전 스키마의
+   * 기존 DB를 열면 컬럼이 추가되고 기존 행(사진 상태 포함)이 그대로 보존된다.
+   */
+  it("photo_attempted_at 컬럼이 없는 옛 DB를 열면 컬럼이 추가되고 기존 행이 보존된다", () => {
+    const dbPath = path.join(workDir, "pre-attempt.db");
+    const legacy = new Database(dbPath);
+    legacy.exec(`
+      CREATE TABLE items (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        court              TEXT    NOT NULL,
+        case_no            TEXT    NOT NULL,
+        item_no            TEXT    NOT NULL,
+        address            TEXT,
+        usage_type         TEXT,
+        appraisal_price    INTEGER,
+        min_bid_price      INTEGER,
+        auction_date       TEXT,
+        failed_bid_count   INTEGER,
+        status             TEXT,
+        first_seen_at      TEXT    NOT NULL,
+        last_seen_at       TEXT    NOT NULL,
+        internal_case_no   TEXT,
+        court_code         TEXT,
+        photo_status       TEXT,
+        photo_count        INTEGER,
+        photo_collected_at TEXT,
+        UNIQUE (court, case_no, item_no)
+      );
+    `);
+    legacy
+      .prepare(
+        `INSERT INTO items (court, case_no, item_no, first_seen_at, last_seen_at,
+                            internal_case_no, court_code, photo_status)
+         VALUES ('서울중앙지방법원', '2025타경1', '1', '2026-01-01T00:00:00.000Z',
+                 '2026-01-01T00:00:00.000Z', '20250130001234', 'B000210', 'failed')`,
+      )
+      .run();
+    const before = (legacy.pragma("table_info(items)") as Array<{ name: string }>).map((c) => c.name);
+    legacy.close();
+    expect(before).not.toContain("photo_attempted_at");
+
+    const upgraded = openDatabase(dbPath);
+    try {
+      const after = (upgraded.pragma("table_info(items)") as Array<{ name: string }>).map(
+        (c) => c.name,
+      );
+      expect(after).toContain("photo_attempted_at");
+
+      const row = upgraded
+        .prepare<[], { case_no: string; photo_status: string; photo_attempted_at: string | null }>(
+          "SELECT case_no, photo_status, photo_attempted_at FROM items",
+        )
+        .get();
+      expect(row).toEqual({ case_no: "2025타경1", photo_status: "failed", photo_attempted_at: null });
+    } finally {
+      upgraded.close();
+    }
+  });
+
+  it("새 DB의 items에 photo_attempted_at 컬럼이 있다", () => {
+    const db = openDatabase(":memory:");
+    try {
+      const names = (db.pragma("table_info(items)") as Array<{ name: string }>).map((c) => c.name);
+      expect(names).toContain("photo_attempted_at");
+    } finally {
+      db.close();
+    }
+  });
 });

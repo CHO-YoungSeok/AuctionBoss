@@ -14,6 +14,7 @@ import type {
   AnalyzerRunDetail,
   CollectorRunDetail,
   CourtRef,
+  PhotosRunDetail,
   RunOutcome,
   SkipReason,
   WorkerKind,
@@ -197,6 +198,18 @@ function isAnalyzerDetail(
   return worker === "analyzer" && detail !== null;
 }
 
+function isPhotosDetail(
+  worker: WorkerKind,
+  detail: WorkerRun["detail"],
+): detail is PhotosRunDetail {
+  return worker === "photos" && detail !== null;
+}
+
+/** 사진 회차의 시도·저장·사진 없음·실패 건수(fix-photo-worker-and-deploy-config 4.2). */
+function describePhotosCounts(d: PhotosRunDetail): string {
+  return `시도 ${d.attempted} · 저장 ${d.collected} · 사진 없음 ${d.empty} · 실패 ${d.failed}`;
+}
+
 /**
  * 회차 한 건의 "상세" 열에 보여줄 문자열을 결정한다(task 5.2 요구사항 전부):
  * - `skipped`는 사유(overlap/backoff)
@@ -224,13 +237,20 @@ export function describeRunDetail(run: WorkerRun): string {
   if (run.outcome === "failed" || run.outcome === "blocked") {
     const kind = run.errorKind ?? "알 수 없는 오류";
     const base = run.errorMessage ? `${kind}: ${run.errorMessage}` : kind;
-    return `${courtsPrefix}${base}`;
+    // 사진 회차는 실패·차단이어도 어디까지 처리했는지(건수)를 함께 보여준다.
+    const photosPrefix = isPhotosDetail(run.worker, run.detail)
+      ? `${describePhotosCounts(run.detail)} — `
+      : "";
+    return `${courtsPrefix}${photosPrefix}${base}`;
   }
 
   if (run.outcome === "success") {
     if (isCollectorDetail(run.worker, run.detail)) {
       const d = run.detail;
       return `${courtsPrefix}신규 ${d.inserted} · 갱신 ${d.updated} · 변경 ${d.changed}`;
+    }
+    if (isPhotosDetail(run.worker, run.detail)) {
+      return describePhotosCounts(run.detail);
     }
     if (isAnalyzerDetail(run.worker, run.detail)) {
       const d = run.detail;

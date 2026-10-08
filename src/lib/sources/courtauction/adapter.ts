@@ -27,7 +27,10 @@ import {
   consoleLogger,
   type AuctionSource,
   type FetchActiveItemsResult,
+  type FetchItemPhotosResult,
   type Logger,
+  type PhotoLookupRef,
+  type SourcePhoto,
 } from "../types";
 import { courtCodeByName } from "./courts";
 import {
@@ -219,6 +222,8 @@ export class CourtAuctionAdapter implements AuctionSource {
   private readonly logger: Logger;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => Date;
+  /** 사진 조회용 세션. 인스턴스 안에서 첫 호출 때 한 번 만들고 재사용한다(design.md D1). */
+  private photoCookie: string | null = null;
 
   constructor(options: CourtAuctionAdapterOptions = {}) {
     // globalThis.fetch를 그대로 넣지 않고 감싸는 이유: undici가 `this` 바인딩을 요구한다.
@@ -255,6 +260,68 @@ export class CourtAuctionAdapter implements AuctionSource {
       }
     }
     return { items, pagesRequested };
+  }
+
+  /**
+   * 한 물건의 사진을 조회한다(NOTES §10.1 상세 엔드포인트, `dspslGdsSeq`는 빈 값).
+   * 응답은 검색과 같은 3단 검사(`parseDetailResponse`)를 거친다.
+   * `cortAuctnPicSeq`와 `picFile`이 모두 있는 항목만 돌려준다.
+   */
+  async fetchItemPhotos(ref: PhotoLookupRef): Promise<FetchItemPhotosResult> {
+    let requestsMade = 0;
+    try {
+      if (this.photoCookie === null) {
+        requestsMade += 1;
+        this.photoCookie = await this.bootstrapSession();
+      }
+      requestsMade += 1;
+      const raw = await this.detailRequest(ref, this.photoCookie);
+      const data = parseDetailResponse(raw);
+
+      const photos: SourcePhoto[] = [];
+      for (const pic of data.dma_result.csPicLst) {
+        const seq = pic.cortAuctnPicSeq == null ? NaN : Number(pic.cortAuctnPicSeq);
+        if (!Number.isFinite(seq) || !pic.picFile) continue;
+        photos.push({ seq, base64: pic.picFile });
+      }
+      return { photos, requestsMade };
+    } catch (error) {
+      // 실패해도 "실제로 몇 번 보냈는지"는 남긴다(차단은 요청을 보냈기 때문에 발생한다).
+      throw attachPagesRequested(error, requestsMade);
+    }
+  }
+
+  private async detailRequest(ref: PhotoLookupRef, cookie: string): Promise<string> {
+    const url = `${this.baseUrl}${DETAIL_PATH}`;
+    const headers: Record<string, string> = {
+      "User-Agent": USER_AGENT,
+      "Content-Type": "application/json;charset=UTF-8",
+      Accept: "application/json",
+      Referer: `${this.baseUrl}${SESSION_BOOTSTRAP_PATH}`,
+      Origin: this.baseUrl,
+      "X-Requested-With": "XMLHttpRequest",
+    };
+    if (cookie) headers.Cookie = cookie;
+
+    const response = await this.request(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        dma_srchGdsDtlSrch: {
+          csNo: ref.internalCaseNo,
+          cortOfcCd: ref.courtCode,
+          dspslGdsSeq: "",
+          pgmId: "PGJ15BM01",
+        },
+      }),
+    });
+    if (!response.ok) {
+      throw new SourceRequestError(
+        `물건 상세 요청이 실패했습니다 (HTTP ${response.status})`,
+        { url, status: response.status },
+      );
+    }
+    return response.text();
   }
 
   // ---------------------------------------------------------------- 세션/요청

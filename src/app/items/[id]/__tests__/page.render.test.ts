@@ -209,3 +209,23 @@ describe("물건 상세 페이지 렌더링 (hardening-round1 task 3)", () => {
     expect(html).not.toContain("표시하지 않습니다");
   });
 });
+
+describe("물건 상세 페이지 — 사진 표시 상태 (fix-photo-worker-and-deploy-config 4.1, D6)", () => {
+  it("상세 조회 식별자가 없는 물건은 '사진 정보 없음(조회 불가)'로 보이고 실패·대기 문구는 없다", async () => {
+    const repo = getRepository();
+    repo.upsertItems([makeItem()]);
+    const html = await renderItemPage("1");
+    expect(html).toContain("사진 정보 없음(조회 불가)");
+    expect(html).not.toContain("사진 수집 실패");
+    expect(html).not.toContain("사진 수집 대기 중");
+  });
+
+  it("식별자가 있고 아직 시도하지 않은 물건은 '수집 대기 중'으로 보인다", async () => {
+    const repo = getRepository();
+    repo.upsertItems([makeItem({ internalCaseNo: "20250130001234", courtCode: "B000210" })]);
+    const html = await renderItemPage("1");
+    expect(html).toContain("사진 수집 대기 중입니다");
+    expect(html).not.toContain("조회 불가");
+  });
+});
+

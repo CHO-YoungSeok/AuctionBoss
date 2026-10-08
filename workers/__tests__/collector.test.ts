@@ -12,7 +12,18 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// 공유 백오프 저장소(`collector_state.backoff_until`)의 메모리 흉내. 실제 구현처럼 더 늦은
+// 값으로만 갱신한다. 다른 워커가 미리 기록한 백오프나 재시작(새 startCollector)을 흉내내려고
+// 테스트가 이 값을 직접 읽고 쓴다.
+const backoffStore = vi.hoisted(() => ({ until: null as Date | null }));
+
 vi.mock("@/lib/db", () => ({
+  getBackoffUntil: vi.fn(() => backoffStore.until),
+  extendBackoffUntil: vi.fn((until: Date) => {
+    if (!backoffStore.until || until.getTime() > backoffStore.until.getTime()) {
+      backoffStore.until = until;
+    }
+  }),
   startRun: vi.fn(),
   finishRun: vi.fn(),
   recordSkippedRun: vi.fn(),
@@ -26,7 +37,9 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import {
+  extendBackoffUntil,
   finishRun,
+  getBackoffUntil,
   getCollectorState,
   recordSkippedRun,
   setCollectorState,
@@ -50,6 +63,8 @@ const finishRunMock = vi.mocked(finishRun);
 const recordSkippedRunMock = vi.mocked(recordSkippedRun);
 const getCollectorStateMock = vi.mocked(getCollectorState);
 const setCollectorStateMock = vi.mocked(setCollectorState);
+const getBackoffUntilMock = vi.mocked(getBackoffUntil);
+const extendBackoffUntilMock = vi.mocked(extendBackoffUntil);
 
 // maxCourtsPerRun/maxRequestsPerRun은 실제 config/collector.json 기본값과 같게 둔다
 // (법원 1곳, 상한 1곳) — 이 파일의 테스트는 대부분 "로테이션 도입 전과 동일한 동작"을
@@ -60,6 +75,9 @@ const scope: CollectorScopeConfig = {
   maxCourtsPerRun: 1,
   maxRequestsPerRun: 999,
 };
+
+/** 수집 워커는 사진을 조회하지 않는다 — 계약을 채우기 위한 빈 구현. */
+const noPhotos: AuctionSource["fetchItemPhotos"] = async () => ({ photos: [], requestsMade: 0 });
 
 const silentLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} };
 
@@ -80,7 +98,7 @@ function item(itemNo: string): AuctionItemInput {
 
 function baseOptions(overrides: Partial<CollectorOptions> = {}): CollectorOptions {
   return {
-    source: { fetchActiveItems: async () => ({ items: [], pagesRequested: 0 }) },
+    source: { fetchItemPhotos: noPhotos, fetchActiveItems: async () => ({ items: [], pagesRequested: 0 }) },
     scope,
     intervalMs: 999_000_000, // 실제 타이머가 안 도는 값 — tick()을 직접 호출한다
     runImmediately: false,
@@ -92,6 +110,7 @@ function baseOptions(overrides: Partial<CollectorOptions> = {}): CollectorOption
 
 beforeEach(() => {
   vi.clearAllMocks();
+  backoffStore.until = null;
   startRunMock.mockReturnValue(1);
 });
 
@@ -103,7 +122,7 @@ describe("startCollector — 회차 기록 연동(4.1)", () => {
   it("정상 회차는 success로 기록되고 detail에 targetCourts/pagesRequested/itemsFetched/inserted/updated/changed가 담긴다", async () => {
     const upsert = vi.fn(() => ({ inserted: 2, updated: 1, changed: 1 }));
     const source: AuctionSource = {
-      fetchActiveItems: async () => ({
+      fetchItemPhotos: noPhotos, fetchActiveItems: async () => ({
         items: [item("1"), item("2"), item("3")],
         pagesRequested: 5,
       }),
@@ -133,7 +152,7 @@ describe("startCollector — 회차 기록 연동(4.1)", () => {
     // CollectorOptions.maxPagesPerCourt(설정값)를 그대로 기록했으므로 pagesRequested가
     // 1이 됐을 것이다 — 이 테스트는 그 결함을 잡는다.
     const source: AuctionSource = {
-      fetchActiveItems: async () => ({ items: [], pagesRequested: 7 }),
+      fetchItemPhotos: noPhotos, fetchActiveItems: async () => ({ items: [], pagesRequested: 7 }),
     };
     startRunMock.mockReturnValue(11);
 
@@ -157,7 +176,7 @@ describe("startCollector — 회차 기록 연동(4.1)", () => {
   ])("%s는 failed가 아니라 blocked로 기록되고 error_kind가 클래스 이름과 같다", async (name, makeError) => {
     startRunMock.mockReturnValue(9);
     const source: AuctionSource = {
-      fetchActiveItems: async () => {
+      fetchItemPhotos: noPhotos, fetchActiveItems: async () => {
         throw makeError();
       },
     };
@@ -181,7 +200,7 @@ describe("startCollector — 회차 기록 연동(4.1)", () => {
   ])("%s는 blocked가 아니라 failed로 기록된다(차단과 일반 실패의 구별)", async (name, makeError) => {
     startRunMock.mockReturnValue(3);
     const source: AuctionSource = {
-      fetchActiveItems: async () => {
+      fetchItemPhotos: noPhotos, fetchActiveItems: async () => {
         throw makeError();
       },
     };
@@ -199,7 +218,7 @@ describe("startCollector — 회차 기록 연동(4.1)", () => {
   it("차단 회차의 detail에는 실패 전까지 확인된 수치(itemsFetched=0 등)가 남는다", async () => {
     startRunMock.mockReturnValue(5);
     const source: AuctionSource = {
-      fetchActiveItems: async () => {
+      fetchItemPhotos: noPhotos, fetchActiveItems: async () => {
         // 이 가짜 소스는 (실제 CourtAuctionAdapter와 달리) 오류에 pagesRequested를 실어
         // 보내지 않는다 — "어댑터가 그 필드를 아직 채우지 않은 오류"를 흉내 낸다. 그
         // 경우 detail의 기본값 0이 그대로 쓰인다(세션 부트스트랩 단계에서 실패해 검색
@@ -236,7 +255,7 @@ describe("startCollector — 회차 기록 연동(4.1)", () => {
     // 그대로 detail에 반영하는지 확인한다.
     startRunMock.mockReturnValue(6);
     const source: AuctionSource = {
-      fetchActiveItems: async () => {
+      fetchItemPhotos: noPhotos, fetchActiveItems: async () => {
         throw attachPagesRequested(new RobotDetectedError("3페이지째 차단", null), 3);
       },
     };
@@ -262,7 +281,7 @@ describe("startCollector — 건너뜀 사유 구별(4.3)", () => {
       resolveHang = resolve;
     });
     const source: AuctionSource = {
-      fetchActiveItems: async () => {
+      fetchItemPhotos: noPhotos, fetchActiveItems: async () => {
         await hang;
         return { items: [], pagesRequested: 0 };
       },
@@ -283,7 +302,7 @@ describe("startCollector — 건너뜀 사유 구별(4.3)", () => {
 
   it("차단 백오프 창 안이면 skipped/backoff로 기록된다(overlap과 구별)", async () => {
     const source: AuctionSource = {
-      fetchActiveItems: async () => {
+      fetchItemPhotos: noPhotos, fetchActiveItems: async () => {
         throw new RobotDetectedError("차단", null);
       },
     };
@@ -308,7 +327,7 @@ describe("startCollector — 건너뜀 사유 구별(4.3)", () => {
   it("백오프 창이 지나면 다음 tick은 건너뛰지 않고 다시 수집을 시도한다(복귀)", async () => {
     let calls = 0;
     const source: AuctionSource = {
-      fetchActiveItems: async () => {
+      fetchItemPhotos: noPhotos, fetchActiveItems: async () => {
         calls += 1;
         if (calls === 1) throw new RobotDetectedError("차단", null);
         return { items: [], pagesRequested: 1 };
@@ -338,6 +357,92 @@ describe("startCollector — 건너뜀 사유 구별(4.3)", () => {
   });
 });
 
+describe("startCollector — 공유 백오프(fix-photo-worker-and-deploy-config 2.2, D2)", () => {
+  it("차단되면 공유 저장소에 now + blockBackoffMs를 기록한다", async () => {
+    const source: AuctionSource = {
+      fetchItemPhotos: noPhotos,
+      fetchActiveItems: async () => {
+        throw new RobotDetectedError("차단", null);
+      },
+    };
+    const before = Date.now();
+    const handle = startCollector(baseOptions({ source, blockBackoffMs: 60_000 }));
+    await handle.tick();
+    await handle.stop();
+
+    expect(extendBackoffUntilMock).toHaveBeenCalledTimes(1);
+    const until = extendBackoffUntilMock.mock.calls[0]![0];
+    expect(until.getTime()).toBeGreaterThanOrEqual(before + 60_000);
+    expect(until.getTime()).toBeLessThanOrEqual(Date.now() + 60_000);
+  });
+
+  it("다른 워커가 미리 기록한 백오프가 있으면 첫 tick부터 소스를 부르지 않고 skipped/backoff로 기록한다", async () => {
+    backoffStore.until = new Date(Date.now() + 60_000);
+    const fetchActiveItems = vi.fn(async () => ({ items: [], pagesRequested: 1 }));
+    const source: AuctionSource = { fetchItemPhotos: noPhotos, fetchActiveItems };
+
+    const handle = startCollector(baseOptions({ source }));
+    await handle.tick();
+    await handle.stop();
+
+    expect(fetchActiveItems).not.toHaveBeenCalled();
+    expect(recordSkippedRunMock).toHaveBeenCalledWith("collector", "backoff");
+    expect(startRunMock).not.toHaveBeenCalled();
+  });
+
+  it("재시작한 새 startCollector 인스턴스도 같은 저장소의 백오프를 지킨다", async () => {
+    const blockingSource: AuctionSource = {
+      fetchItemPhotos: noPhotos,
+      fetchActiveItems: async () => {
+        throw new RobotDetectedError("차단", null);
+      },
+    };
+    const first = startCollector(baseOptions({ source: blockingSource, blockBackoffMs: 60_000 }));
+    await first.tick();
+    await first.stop(); // 프로세스 종료를 흉내 — 메모리 상태는 버려지고 저장소만 남는다
+
+    const fetchActiveItems = vi.fn(async () => ({ items: [], pagesRequested: 1 }));
+    const second = startCollector(
+      baseOptions({ source: { fetchItemPhotos: noPhotos, fetchActiveItems } }),
+    );
+    await second.tick();
+    await second.stop();
+
+    expect(fetchActiveItems).not.toHaveBeenCalled();
+    expect(recordSkippedRunMock).toHaveBeenCalledWith("collector", "backoff");
+  });
+
+  it("백오프 시각이 지나 있으면(옛 값) 다시 수집한다", async () => {
+    backoffStore.until = new Date(Date.now() - 1_000);
+    const fetchActiveItems = vi.fn(async () => ({ items: [], pagesRequested: 1 }));
+    const handle = startCollector(
+      baseOptions({ source: { fetchItemPhotos: noPhotos, fetchActiveItems } }),
+    );
+    await handle.tick();
+    await handle.stop();
+
+    expect(fetchActiveItems).toHaveBeenCalledTimes(1);
+    expect(recordSkippedRunMock).not.toHaveBeenCalledWith("collector", "backoff");
+  });
+
+  it("백오프 조회가 throw해도 로그만 남기고 수집은 진행한다", async () => {
+    getBackoffUntilMock.mockImplementationOnce(() => {
+      throw new Error("db down");
+    });
+    const errors: string[] = [];
+    const logger: Logger = { info: () => {}, warn: () => {}, error: (m) => errors.push(m) };
+    const fetchActiveItems = vi.fn(async () => ({ items: [], pagesRequested: 1 }));
+    const handle = startCollector(
+      baseOptions({ source: { fetchItemPhotos: noPhotos, fetchActiveItems }, logger }),
+    );
+    await handle.tick();
+    await handle.stop();
+
+    expect(fetchActiveItems).toHaveBeenCalledTimes(1);
+    expect(errors.some((m) => m.includes("백오프 조회 실패"))).toBe(true);
+  });
+});
+
 describe("startCollector — 기록 실패가 수집을 막지 않는다(4.2, 스펙 MUST NOT)", () => {
   it("startRun/finishRun이 둘 다 던져도 물건은 정상 저장되고 tick()은 정상 종료한다", async () => {
     startRunMock.mockImplementation(() => {
@@ -349,7 +454,7 @@ describe("startCollector — 기록 실패가 수집을 막지 않는다(4.2, �
     const items = [item("1"), item("2")];
     const upsert = vi.fn(() => ({ inserted: 2, updated: 0, changed: 0 }));
     const source: AuctionSource = {
-      fetchActiveItems: async () => ({ items, pagesRequested: 1 }),
+      fetchItemPhotos: noPhotos, fetchActiveItems: async () => ({ items, pagesRequested: 1 }),
     };
 
     const handle = startCollector(baseOptions({ source, upsert }));
@@ -370,7 +475,7 @@ describe("startCollector — 기록 실패가 수집을 막지 않는다(4.2, �
       resolveHang = resolve;
     });
     const source: AuctionSource = {
-      fetchActiveItems: async () => {
+      fetchItemPhotos: noPhotos, fetchActiveItems: async () => {
         await hang;
         return { items: [], pagesRequested: 0 };
       },
@@ -393,7 +498,7 @@ describe("startCollector — 기록 실패가 수집을 막지 않는다(4.2, �
       throw new Error("회차 기록 DB 다운");
     });
     const source: AuctionSource = {
-      fetchActiveItems: async () => ({ items: [], pagesRequested: 0 }),
+      fetchItemPhotos: noPhotos, fetchActiveItems: async () => ({ items: [], pagesRequested: 0 }),
     };
 
     const handle = startCollector(baseOptions({ source }));
@@ -428,7 +533,7 @@ describe("startCollector — 로테이션 연동(scale-collection-scheduling 3.1
     };
     const calledCourtCodes: string[] = [];
     const source: AuctionSource = {
-      fetchActiveItems: async ({ courts }) => {
+      fetchItemPhotos: noPhotos, fetchActiveItems: async ({ courts }) => {
         calledCourtCodes.push(courts[0]!.courtCode);
         return { items: [], pagesRequested: 1 };
       },
@@ -476,7 +581,7 @@ describe("startCollector — 로테이션 연동(scale-collection-scheduling 3.1
     };
     const calledCourtCodes: string[] = [];
     const source: AuctionSource = {
-      fetchActiveItems: async ({ courts }) => {
+      fetchItemPhotos: noPhotos, fetchActiveItems: async ({ courts }) => {
         calledCourtCodes.push(courts[0]!.courtCode);
         throw new RobotDetectedError("차단", null);
       },
@@ -509,7 +614,7 @@ describe("startCollector — 로테이션 연동(scale-collection-scheduling 3.1
     };
     const calledCourtCodes: string[] = [];
     const source: AuctionSource = {
-      fetchActiveItems: async ({ courts }) => {
+      fetchItemPhotos: noPhotos, fetchActiveItems: async ({ courts }) => {
         calledCourtCodes.push(courts[0]!.courtCode);
         throw new RobotDetectedError("차단", null);
       },
@@ -540,7 +645,7 @@ describe("startCollector — 로테이션 연동(scale-collection-scheduling 3.1
     };
     const calledCourtCodes: string[] = [];
     const source: AuctionSource = {
-      fetchActiveItems: async ({ courts }) => {
+      fetchItemPhotos: noPhotos, fetchActiveItems: async ({ courts }) => {
         calledCourtCodes.push(courts[0]!.courtCode);
         // 첫 법원 하나가 이미 상한(2)만큼 요청을 쓴다 — 중간에 끊기지 않고 끝까지
         // 완료되는지가 이 테스트의 핵심(법원을 중간에 끊으면 "물건이 줄었다"로

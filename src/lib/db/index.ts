@@ -20,6 +20,8 @@ export {
 export {
   COLLECTOR_STATE_KEYS,
   createCollectorStateRepository,
+  extendBackoffUntil,
+  getBackoffUntil,
   getCollectorState,
   getCollectorStateRepository,
   setCollectorState,

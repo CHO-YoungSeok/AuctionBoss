@@ -42,6 +42,16 @@ const analysisConfigSchema = z.object({
   intervalMs: z.number().int().positive(),
 });
 
+// fix-photo-worker-and-deploy-config D3/D4: 다른 설정 필드와 동일하게 없거나 잘못된 값이면
+// 기본값으로 조용히 넘어가지 않고 즉시 throw한다. 요청 간격 0은 허용하지 않는다(저속 수집이
+// 설정 오류로 조용히 꺼지면 IP 차단 위험이 커진다).
+const photosConfigSchema = z.object({
+  intervalMs: z.number().int().positive(),
+  maxItemsPerRun: z.number().int().positive(),
+  requestDelayMs: z.number().int().positive(),
+  retryAfterHours: z.number().int().positive(),
+});
+
 // add-collection-observability design.md D6/1.3: 다른 설정 필드와 동일하게, 없거나
 // 잘못된 값이면 기본값으로 조용히 넘어가지 않고 즉시 throw한다. "기본 1000/3"은 배포되는
 // config/collector.json 파일 자체의 값이지, 로더가 채우는 기본값이 아니다.
@@ -54,6 +64,7 @@ export const collectorConfigSchema = z.object({
   scope: collectScopeSchema,
   intervalMs: z.number().int().positive(),
   analysis: analysisConfigSchema,
+  photos: photosConfigSchema,
   observability: observabilityConfigSchema,
 });
 

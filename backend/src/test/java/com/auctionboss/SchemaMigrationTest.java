@@ -39,6 +39,21 @@ class SchemaMigrationTest extends AbstractMySqlTest {
 	}
 
 	@Test
+	void v2AddsNullablePhotoAttemptedAtColumn() {
+		Map<String, Object> v2 = jdbc.queryForMap(
+				"SELECT version, success FROM flyway_schema_history WHERE version = '2'");
+		assertThat(v2.get("success")).isIn(true, 1);
+
+		Map<String, Object> column = jdbc.queryForMap(
+				"SELECT data_type AS data_type, is_nullable AS is_nullable, datetime_precision AS prec "
+						+ "FROM information_schema.columns WHERE table_schema = DATABASE() "
+						+ "AND table_name = 'items' AND column_name = 'photo_attempted_at'");
+		assertThat(column.get("data_type").toString()).isEqualToIgnoringCase("datetime");
+		assertThat(column.get("is_nullable").toString()).isEqualToIgnoringCase("YES");
+		assertThat(((Number) column.get("prec")).intValue()).isEqualTo(3);
+	}
+
+	@Test
 	void createsIndexesAndUniqueConstraints() {
 		List<String> indexes = jdbc.queryForList(
 				"SELECT DISTINCT index_name FROM information_schema.statistics WHERE table_schema = DATABASE()",

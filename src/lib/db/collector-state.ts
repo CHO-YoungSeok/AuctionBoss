@@ -23,6 +23,13 @@ export const COLLECTOR_STATE_KEYS = {
    * (`selectRotationCourts`, `src/lib/domain/rotation.ts`).
    */
   ROTATION_NEXT_COURT_CODE: "collector.rotation.nextCourtCode",
+  /**
+   * 차단 백오프 종료 시각(UTC ISO 문자열). 외부 소스에 요청하는 모든 워커(수집·사진)가
+   * 이 키 하나를 함께 읽고 쓴다(fix-photo-worker-and-deploy-config design.md D2). 다른
+   * 키와 이름 규칙이 다른 이유: 옛 사진 워커가 이미 이 이름으로 쓴 행이 운영 DB에 있을
+   * 수 있어 그대로 읽히도록 맞췄다.
+   */
+  BACKOFF_UNTIL: "backoff_until",
 } as const;
 
 export type CollectorStateKey =
@@ -33,6 +40,19 @@ export interface CollectorStateRepository {
   getCollectorState(key: string): string | null;
   /** 값을 저장한다(있으면 덮어쓴다, 없으면 새로 만든다). */
   setCollectorState(key: string, value: string, options?: { now?: string }): void;
+  /** 백오프 종료 시각. 값이 없거나 파싱할 수 없으면 null. */
+  getBackoffUntil(): Date | null;
+  /**
+   * 백오프 종료 시각을 늘린다. 저장된 값보다 **늦을 때만** 쓴다(짧아지지 않음). 읽기·비교·
+   * 쓰기는 한 트랜잭션이다 — 두 워커가 같은 DB 파일을 쓴다.
+   */
+  extendBackoffUntil(until: Date, options?: { now?: string }): void;
+}
+
+function parseBackoff(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 export function createCollectorStateRepository(db: Db): CollectorStateRepository {
@@ -45,7 +65,22 @@ export function createCollectorStateRepository(db: Db): CollectorStateRepository
     ON CONFLICT(key) DO UPDATE SET value = @value, updated_at = @now
   `);
 
+  const extend = db.transaction((until: Date, now: string) => {
+    const row = selectByKey.get({ key: COLLECTOR_STATE_KEYS.BACKOFF_UNTIL });
+    const current = parseBackoff(row?.value);
+    if (current && current.getTime() >= until.getTime()) return;
+    upsert.run({ key: COLLECTOR_STATE_KEYS.BACKOFF_UNTIL, value: until.toISOString(), now });
+  });
+
   return {
+    getBackoffUntil() {
+      return parseBackoff(selectByKey.get({ key: COLLECTOR_STATE_KEYS.BACKOFF_UNTIL })?.value);
+    },
+
+    extendBackoffUntil(until, options) {
+      extend.immediate(until, options?.now ?? new Date().toISOString());
+    },
+
     getCollectorState(key) {
       const row = selectByKey.get({ key });
       return row ? row.value : null;
@@ -81,4 +116,12 @@ export function setCollectorState(
   options?: { now?: string },
 ): void {
   getCollectorStateRepository().setCollectorState(key, value, options);
+}
+
+export function getBackoffUntil(): Date | null {
+  return getCollectorStateRepository().getBackoffUntil();
+}
+
+export function extendBackoffUntil(until: Date, options?: { now?: string }): void {
+  getCollectorStateRepository().extendBackoffUntil(until, options);
 }

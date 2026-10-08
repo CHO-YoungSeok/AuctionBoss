@@ -21,6 +21,34 @@ function writeConfig(content: string): string {
   return file;
 }
 
+const VALID_PHOTOS = {
+  intervalMs: 1800000,
+  maxItemsPerRun: 5,
+  requestDelayMs: 30000,
+  retryAfterHours: 24,
+};
+
+function fullConfig(photos: unknown): string {
+  return writeConfig(
+    JSON.stringify({
+      scope: {
+        courts: [{ name: "서울중앙지방법원", courtCode: "B000210" }],
+        maxCourtsPerRun: 1,
+        maxRequestsPerRun: 13,
+      },
+      intervalMs: 600000,
+      analysis: {
+        maxItemsPerRun: 5,
+        maxReanalysisPerRun: 2,
+        reanalysisCooldownHours: 24,
+        intervalMs: 600000,
+      },
+      photos,
+      observability: { maxRunsPerWorker: 1000, staleAfterIntervals: 3 },
+    }),
+  );
+}
+
 describe("loadCollectorConfig", () => {
   it("저장소의 실제 config/collector.json을 읽어 검증한다", () => {
     const config = loadCollectorConfig({
@@ -99,6 +127,7 @@ describe("loadCollectorConfig", () => {
           reanalysisCooldownHours: 0,
           intervalMs: 600000,
         },
+        photos: VALID_PHOTOS,
         observability: { maxRunsPerWorker: 1000, staleAfterIntervals: 3 },
       }),
     );
@@ -275,6 +304,7 @@ describe("loadCollectorConfig", () => {
           reanalysisCooldownHours: 24,
           intervalMs: 600000,
         },
+        photos: VALID_PHOTOS,
         observability: { maxRunsPerWorker: 1000, staleAfterIntervals: 3 },
       }),
     );
@@ -320,5 +350,58 @@ describe("loadCollectorConfig", () => {
     expect(() => loadCollectorConfig({ configPath: file, reload: true })).toThrow(
       CollectorConfigError,
     );
+  });
+});
+
+describe("loadCollectorConfig — photos 절 (fix-photo-worker-and-deploy-config 3.4)", () => {
+  it("실제 config/collector.json의 photos 절은 설계 기본값이다", () => {
+    const config = loadCollectorConfig({
+      configPath: path.resolve(process.cwd(), "config/collector.json"),
+      reload: true,
+    });
+    expect(config.photos).toEqual({
+      intervalMs: 1_800_000,
+      maxItemsPerRun: 5,
+      requestDelayMs: 30_000,
+      retryAfterHours: 24,
+    });
+  });
+
+  it("유효한 photos 절은 그대로 로드된다", () => {
+    const config = loadCollectorConfig({ configPath: fullConfig(VALID_PHOTOS), reload: true });
+    expect(config.photos).toEqual(VALID_PHOTOS);
+  });
+
+  it("photos 절이 통째로 없으면 기본값으로 넘어가지 않고 throw한다", () => {
+    expect(() => loadCollectorConfig({ configPath: fullConfig(undefined), reload: true })).toThrow(
+      /photos/,
+    );
+  });
+
+  it.each(["intervalMs", "maxItemsPerRun", "requestDelayMs", "retryAfterHours"] as const)(
+    "photos.%s가 없으면 throw한다",
+    (key) => {
+      const photos: Record<string, number> = { ...VALID_PHOTOS };
+      delete photos[key];
+      expect(() => loadCollectorConfig({ configPath: fullConfig(photos), reload: true })).toThrow(
+        new RegExp(`photos\\.${key}`),
+      );
+    },
+  );
+
+  it.each([
+    ["intervalMs", -1],
+    ["maxItemsPerRun", 0],
+    ["requestDelayMs", -30000],
+    ["retryAfterHours", -24],
+    ["maxItemsPerRun", 1.5],
+    ["requestDelayMs", "30초"],
+  ] as const)("photos.%s가 %s이면 throw한다", (key, value) => {
+    expect(() =>
+      loadCollectorConfig({
+        configPath: fullConfig({ ...VALID_PHOTOS, [key]: value }),
+        reload: true,
+      }),
+    ).toThrow(new RegExp(`photos\\.${key}`));
   });
 });
