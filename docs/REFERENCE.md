@@ -214,6 +214,7 @@ SQLite 테이블 8개로 구성됩니다. 스키마는 `src/lib/db/schema.ts`에
 cp .env.example .env
 docker compose up -d mysql backend        # MySQL이 준비된 뒤 백엔드가 뜨고 시드가 들어갑니다
 scripts/docker-smoke.sh                   # 처음 기동과 재기동(데이터 유지)을 자동으로 확인
+npm run db:up                             # IDE 개발용 MySQL 켜기 (db:down 끄기, db:status 상태. 데이터는 보존)
 (cd backend && ./gradlew bootRun --args='--spring.profiles.active=local,seed')   # IDE 개발용
 (cd backend && ./gradlew check)           # 테스트 (Docker 필요)
 ```
