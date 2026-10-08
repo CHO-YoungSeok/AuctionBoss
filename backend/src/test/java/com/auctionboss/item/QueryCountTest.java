@@ -75,6 +75,7 @@ class QueryCountTest extends AbstractMySqlTest {
 	 */
 	private List<Item> seed(int n) {
 		jdbc.update("DELETE FROM items");
+		jdbc.update("DELETE FROM worker_runs");
 		List<Item> out = new java.util.ArrayList<>();
 		for (int i = 0; i < n; i++) {
 			Item it = items.save(item("2026타경" + (i + 1), "1").usageType(i % 2 == 0 ? "아파트" : "다세대주택")
@@ -94,6 +95,13 @@ class QueryCountTest extends AbstractMySqlTest {
 			}
 		}
 		items.flush();
+		// 회차 목록·집계 측정용: 물건 수와 같은 수의 회차(워커와 결과를 섞는다).
+		for (int i = 0; i < n; i++) {
+			jdbc.update("INSERT INTO worker_runs (worker, started_at, finished_at, outcome, items_changed, created_at) "
+					+ "VALUES (?, ?, ?, ?, ?, ?)", i % 2 == 0 ? "collector" : "analyzer",
+					java.sql.Timestamp.from(OLD.plusSeconds(i)), java.sql.Timestamp.from(OLD.plusSeconds(i + 1)),
+					i % 5 == 0 ? "failed" : "success", i % 2 == 0 ? i : null, java.sql.Timestamp.from(OLD.plusSeconds(i)));
+		}
 		return out;
 	}
 
@@ -105,7 +113,9 @@ class QueryCountTest extends AbstractMySqlTest {
 		long statements = stats.getPrepareStatementCount();
 		var node = JSON.readTree(body);
 		int rows = node.has("items") ? node.get("items").size()
-				: node.has("changes") ? node.get("changes").size() : 1;
+				: node.has("changes") ? node.get("changes").size()
+				: node.has("entries") ? node.get("entries").size()
+				: node.has("runs") ? node.get("runs").size() : 1;
 		return new Measured(statements, rows);
 	}
 
@@ -156,6 +166,30 @@ class QueryCountTest extends AbstractMySqlTest {
 		// 측정값 2: (1) 물건 존재 확인(existsById) 1, (2) 이력 SELECT 1. 이력 행 수와 무관하다.
 		assertConstant("변경 이력", "/api/items/{id}/changes", 2, 4, 30);
 		assertThat(measure("/api/items/" + seed(30).get(0).getId() + "/changes").rows()).isEqualTo(2);
+	}
+
+	@Test
+	void bookmarkListIsCountPlusOneJoinedSelect() throws Exception {
+		// 측정값 2: (1) 건수 1, (2) bookmarks와 items 조인 + lastChangedAt 서브쿼리 SELECT 1. 담긴 물건 수와 무관하다(N+1 없음).
+		assertConstant("관심 목록", "/api/bookmarks?pageSize=50", 2, 4, 30);
+		// 담긴 물건은 i%4==0이므로 30건 중 8건이다.
+		assertThat(measure("/api/bookmarks?pageSize=50").rows()).isEqualTo(8);
+	}
+
+	@Test
+	void feedIsCountPlusListPlusUnreadCount() throws Exception {
+		// 측정값 3: (1) 피드 건수, (2) 피드 목록, (3) 미확인 개수(마지막 확인 시각은 스칼라 서브쿼리).
+		assertConstant("피드", "/api/feed?pageSize=50", 3, 4, 30);
+		// 변경 이력이 있는 담긴 물건은 i%12==0이므로 30건 중 3건(각 변경 1건)이다.
+		assertThat(measure("/api/feed?pageSize=50").rows()).isEqualTo(3);
+		assertConstant("피드(sinceBookmarkedAt)", "/api/feed?pageSize=50&sinceBookmarkedAt=true", 3, 4, 30);
+	}
+
+	@Test
+	void workerRunListIsCountPlusSelectAndSummaryIsOneStatement() throws Exception {
+		assertConstant("회차 목록", "/api/worker-runs?pageSize=50", 2, 4, 30);
+		assertThat(measure("/api/worker-runs?pageSize=50").rows()).isEqualTo(30);
+		assertConstant("회차 집계", "/api/worker-runs/summary", 1, 4, 30);
 	}
 
 }

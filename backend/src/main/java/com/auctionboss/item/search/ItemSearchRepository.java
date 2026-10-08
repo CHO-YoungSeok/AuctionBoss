@@ -232,7 +232,7 @@ public class ItemSearchRepository {
 	}
 
 	/** 목록 행의 "가장 최근 실제 변경 시각": kind='change'인 이력의 MAX(changed_at). 기준점(baseline)은 제외한다. */
-	private static JPQLSubQuery<Instant> lastChangedAt(QItem item) {
+	public static JPQLSubQuery<Instant> lastChangedAt(QItem item) {
 		QItemChange ch = new QItemChange("ch_last");
 		return JPAExpressions.select(ch.changedAt.max()).from(ch)
 				.where(ch.item.id.eq(item.id), ch.kind.eq(ChangeKind.CHANGE));

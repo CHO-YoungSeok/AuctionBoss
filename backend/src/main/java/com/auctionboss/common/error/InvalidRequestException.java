@@ -14,6 +14,12 @@ public class InvalidRequestException extends RuntimeException {
 		this.issues = List.copyOf(issues);
 	}
 
+	/** 요청 본문 검증 실패용. 메시지는 엔드포인트마다 다르고, {@code issues}가 null이면 응답에서 {@code details}를 뺀다. */
+	public InvalidRequestException(String message, List<FieldIssue> issues) {
+		super(message);
+		this.issues = issues == null ? null : List.copyOf(issues);
+	}
+
 	public List<FieldIssue> getIssues() {
 		return issues;
 	}

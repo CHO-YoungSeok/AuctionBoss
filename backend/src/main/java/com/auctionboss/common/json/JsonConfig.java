@@ -14,6 +14,7 @@ import tools.jackson.databind.module.SimpleModule;
  * <ul>
  * <li>Instant: 항상 밀리초 3자리 UTC ({@link InstantMillisSerializer})</li>
  * <li>LocalDate: {@code YYYY-MM-DD}</li>
+ * <li>Double: 정수 값이면 정수로({@code 1.0} -> {@code 1}, JS {@code JSON.stringify}와 같다)</li>
  * </ul>
  */
 @Configuration(proxyBeanMethods = false)
@@ -24,6 +25,9 @@ public class JsonConfig {
 		SimpleModule module = new SimpleModule("auctionboss-json");
 		module.addSerializer(Instant.class, new InstantMillisSerializer());
 		module.addSerializer(LocalDate.class, new LocalDateIsoSerializer());
+		IntegralDoubleSerializer integralDouble = new IntegralDoubleSerializer();
+		module.addSerializer(Double.class, integralDouble);
+		module.addSerializer(Double.TYPE, integralDouble);
 		return module;
 	}
 

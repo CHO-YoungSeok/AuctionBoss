@@ -54,6 +54,54 @@ class SchemaMigrationTest extends AbstractMySqlTest {
 	}
 
 	@Test
+	void v3WidensAnalysisColumnsForWriteApi() {
+		Map<String, Object> v3 = jdbc.queryForMap(
+				"SELECT version, success FROM flyway_schema_history WHERE version = '3'");
+		assertThat(v3.get("success")).isIn(true, 1);
+
+		Map<String, Map<String, Object>> columns = new java.util.HashMap<>();
+		for (Map<String, Object> row : jdbc.queryForList(
+				"SELECT column_name AS name, data_type AS data_type, character_maximum_length AS max_len, "
+						+ "is_nullable AS is_nullable FROM information_schema.columns "
+						+ "WHERE table_schema = DATABASE() AND table_name = 'analyses'")) {
+			columns.put(row.get("name").toString(), row);
+		}
+		assertThat(columns.get("body").get("data_type").toString()).isEqualToIgnoringCase("mediumtext");
+		assertThat(columns.get("body").get("is_nullable").toString()).isEqualToIgnoringCase("NO");
+		assertThat(columns.get("model").get("data_type").toString()).isEqualToIgnoringCase("varchar");
+		assertThat(((Number) columns.get("model").get("max_len")).intValue()).isEqualTo(255);
+		assertThat(columns.get("model").get("is_nullable").toString()).isEqualToIgnoringCase("YES");
+		assertThat(((Number) columns.get("prompt_version").get("max_len")).intValue()).isEqualTo(255);
+		assertThat(columns.get("prompt_version").get("is_nullable").toString()).isEqualToIgnoringCase("NO");
+	}
+
+	/** 기존 DB 파일 경로: V2 상태에서 데이터를 넣고 V3를 적용해도 행이 살아 있고 제약이 유지된다. */
+	@Test
+	void v3AppliedOverExistingV2DataKeepsRowsAndForeignKey() {
+		String db = freshDatabase();
+		Flyway.configure().dataSource(dataSourceFor(db)).locations("classpath:db/migration").target("2").load().migrate();
+		JdbcTemplate old = new JdbcTemplate(dataSourceFor(db));
+		old.update("INSERT INTO items (court, case_no, item_no, first_seen_at, last_seen_at) "
+				+ "VALUES ('c', 'n', '1', NOW(3), NOW(3))");
+		long itemId = old.queryForObject("SELECT id FROM items", Long.class);
+		old.update("INSERT INTO analyses (item_id, body, model, prompt_version, analyzed_at) "
+				+ "VALUES (?, 'old body', 'm', 'v1', '2026-01-02 03:04:05.678')", itemId);
+
+		assertThat(flywayFor(db).migrate().migrationsExecuted).isEqualTo(1);
+
+		assertThat(old.queryForObject("SELECT body FROM analyses", String.class)).isEqualTo("old body");
+		assertThat(old.queryForObject("SELECT model FROM analyses", String.class)).isEqualTo("m");
+		assertThat(old.queryForObject("SELECT prompt_version FROM analyses", String.class)).isEqualTo("v1");
+		assertThat(old.queryForObject("SELECT DATE_FORMAT(analyzed_at, '%Y-%m-%d %H:%i:%s.%f') FROM analyses",
+				String.class)).startsWith("2026-01-02 03:04:05.678");
+		// 넓어진 컬럼에 긴 값이 들어가고, 외래 키(ON DELETE CASCADE)는 그대로다.
+		old.update("INSERT INTO analyses (item_id, body, model, prompt_version, analyzed_at) VALUES (?, ?, ?, ?, NOW(3))",
+				itemId, "x".repeat(200_000), "m".repeat(200), "p".repeat(200));
+		old.update("DELETE FROM items WHERE id = ?", itemId);
+		assertThat(old.queryForObject("SELECT COUNT(*) FROM analyses", Integer.class)).isZero();
+	}
+
+	@Test
 	void createsIndexesAndUniqueConstraints() {
 		List<String> indexes = jdbc.queryForList(
 				"SELECT DISTINCT index_name FROM information_schema.statistics WHERE table_schema = DATABASE()",

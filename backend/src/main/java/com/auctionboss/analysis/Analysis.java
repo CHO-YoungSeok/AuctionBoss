@@ -26,13 +26,13 @@ public class Analysis {
 	@JoinColumn(name = "item_id", nullable = false)
 	private Item item;
 
-	@Column(name = "body", nullable = false, length = 65535)
+	@Column(name = "body", nullable = false, length = 16777215)
 	private String body;
 
-	@Column(name = "model", length = 100)
+	@Column(name = "model", length = 255)
 	private String model;
 
-	@Column(name = "prompt_version", nullable = false, length = 20)
+	@Column(name = "prompt_version", nullable = false, length = 255)
 	private String promptVersion;
 
 	@Column(name = "analyzed_at", nullable = false)
