@@ -70,9 +70,9 @@
 - [x] 9.2 수치를 `docs/DEVELOPMENT_NOTES.md`에 기록한다: 화면별 Spring 요청 수, 새 API SQL 문 수와 `EXPLAIN`, 시나리오·단계 수와 불일치 원인, 포트 계약 사례 수, 두 모드의 화면 응답 시간, 8.2 결과, 테스트 수 변화
 - [x] 9.3 `docs/REFERENCE.md`와 README에 `AUCTIONBOSS_DATA_SOURCE`·`AUCTIONBOSS_SPRING_BASE`, 새 API 5개(Next·Spring), 운영 기본값 `sqlite`, 개발용 `spring` 모드 실행법을 반영한다
 - [x] 9.4 `docs/ROADMAP.md` 3단계를 갱신한다: 완료 기준을 "페이지·컴포넌트·화면용 라우트는 데이터 포트만 쓰고 SQLite 접근은 포트의 SQLite 구현체 한 곳(린트로 강제), 기존 화면 테스트가 두 원천에서 통과"로 고치고, 운영 화면 전환(`AUCTIONBOSS_DATA_SOURCE=spring`)과 기존 JSON API·SQLite 구현체 은퇴를 5단계 할 일에 적는다. 상태·수치·기록 위치를 채운다
-- [ ] 9.5 `regression-verifier` 서브에이전트로 회귀 검증을 받고 지적 사항을 반영한다
-- [ ] 9.6 커밋하고 푸시한 뒤 GitHub Actions의 TS 잡과 Java 잡이 통과하는지 확인한다
-- [ ] 9.7 `openspec validate switch-web-to-data-port --strict`를 통과시킨 뒤 change를 아카이브하고, 메인 스펙 `web-data-port`가 생기고 `spring-backend`에 요구사항이 반영됐는지 확인한다
+- [x] 9.5 `regression-verifier` 서브에이전트로 회귀 검증을 받고 지적 사항을 반영한다
+- [x] 9.6 커밋하고 푸시한 뒤 GitHub Actions의 TS 잡과 Java 잡이 통과하는지 확인한다
+- [x] 9.7 `openspec validate switch-web-to-data-port --strict`를 통과시킨 뒤 change를 아카이브하고, 메인 스펙 `web-data-port`가 생기고 `spring-backend`에 요구사항이 반영됐는지 확인한다
 
 ---
 
