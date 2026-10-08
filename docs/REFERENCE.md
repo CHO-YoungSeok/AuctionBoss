@@ -23,7 +23,7 @@ AuctionBoss의 실행 구성, 설정, API, 데이터 모델을 정리한 문서�
 | 웹 서버 | `npm start` | 화면과 REST API 제공. SQLite를 읽고 씁니다 |
 | 수집 워커 | `npm run collector` | 시작하자마자 1회 실행하고, 이후 설정한 주기마다 반복합니다 |
 | 분석 워커 | `npm run analyzer` | 웹 서버 API로 분석 대상을 받아 Claude로 분석합니다. `-- --once`를 붙이면 1회만 실행합니다 |
-| 사진 워커 | `npm run photos` | 사진이 없는 물건 최대 10건의 사진을 받아 저장하고 종료합니다 |
+| 사진 워커 | `npm run photos` | 상주하며 설정한 주기마다 사진이 없는 물건의 사진을 받아 저장합니다. `-- --once`를 붙이면 1회만 실행합니다 |
 
 분석 워커는 웹 서버에 의존하므로 서버를 먼저 띄웁니다.
 
@@ -41,6 +41,10 @@ AuctionBoss의 실행 구성, 설정, API, 데이터 모델을 정리한 문서�
 | `analysis.maxReanalysisPerRun` | 2 | 실행당 재분석 건수 |
 | `analysis.reanalysisCooldownHours` | 24 | 같은 물건을 다시 분석하기까지의 최소 간격 |
 | `analysis.intervalMs` | 600000 | 분석 주기 (10분) |
+| `photos.intervalMs` | 1800000 | 사진 워커 주기 (30분) |
+| `photos.maxItemsPerRun` | 5 | 회차당 사진을 받을 물건 수 |
+| `photos.requestDelayMs` | 30000 | 사진 요청 사이 간격 (30초) |
+| `photos.retryAfterHours` | 24 | 사진을 받지 못한 물건을 다시 시도하기까지의 간격 |
 | `observability.maxRunsPerWorker` | 1000 | 워커별로 보관할 실행 기록 수 |
 | `observability.staleAfterIntervals` | 3 | 주기의 몇 배 동안 기록이 없으면 "멈춤"으로 볼지 |
 
@@ -65,6 +69,15 @@ AuctionBoss의 실행 구성, 설정, API, 데이터 모델을 정리한 문서�
 | `AUCTIONBOSS_COLLECT_PAGE_SIZE` | 40 | 페이지당 행 수. 소스가 허용하는 최대값이 40입니다 |
 | `AUCTIONBOSS_COLLECT_BID_WINDOW_DAYS` | 60 | 오늘부터 며칠 뒤 매각기일까지 수집할지 |
 | `AUCTIONBOSS_COLLECT_MAX_PAGES` | 50 | 법원 하나에서 요청할 최대 페이지 수 |
+
+**사진 워커**
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `AUCTIONBOSS_PHOTOS_INTERVAL_MS` | 설정 파일 값 | 사진 워커 주기 |
+| `AUCTIONBOSS_PHOTOS_MAX_ITEMS` | 설정 파일 값 | 회차당 물건 수 |
+| `AUCTIONBOSS_PHOTOS_REQUEST_DELAY_MS` | 설정 파일 값 | 요청 사이 간격 |
+| `AUCTIONBOSS_PHOTOS_RETRY_AFTER_HOURS` | 설정 파일 값 | 실패 물건 재시도 간격 |
 
 **분석 워커**
 
@@ -141,14 +154,14 @@ SQLite 테이블 8개로 구성됩니다. 스키마는 `src/lib/db/schema.ts`에
 
 | 테이블 | 내용 |
 | --- | --- |
-| `items` | 경매 물건. 소재지, 용도, 감정가, 최저매각가격, 매각기일, 유찰횟수, 진행상태, 면적 등 |
+| `items` | 경매 물건. 소재지, 용도, 감정가, 최저매각가격, 매각기일, 유찰횟수, 진행상태, 면적 등. `photo_attempted_at`은 마지막 사진 시도 시각 |
 | `item_changes` | 감시 필드(최저매각가격, 유찰횟수, 매각기일, 진행상태)의 변경 이력. 이전 값과 새 값을 저장 |
 | `analyses` | AI 분석 결과. 본문, 모델, 프롬프트 버전, 분석 시각 |
 | `item_photos` | 저장된 물건 사진의 메타데이터. 파일은 `data/photos/`에 저장 |
 | `bookmarks` | 관심 물건 |
 | `feed_reads` | 피드를 어디까지 읽었는지 |
 | `worker_runs` | 워커 실행 기록. 결과는 실행 중 · 성공 · 실패 · 차단 · 건너뜀 중 하나 |
-| `collector_state` | 워커 상태 값. 다음 차례 법원, 사진 수집 백오프 종료 시각 |
+| `collector_state` | 워커 상태 값. 다음 차례 법원, `backoff_until`(접속 차단 백오프 종료 시각. 수집 워커와 사진 워커가 공유) |
 
 ## 6. 워커 동작
 
@@ -158,9 +171,17 @@ SQLite 테이블 8개로 구성됩니다. 스키마는 `src/lib/db/schema.ts`에
 2. 페이지를 하나씩 요청하고, 요청 사이에 5초를 쉽니다. 동시 요청은 하지 않습니다.
 3. 응답마다 세 가지를 확인합니다. 본문이 JSON인지, 접속 허용 플래그가 정상인지, 스키마를 통과하는지입니다.
 4. 정상 응답은 도메인 모델로 바꿔 저장합니다. 감시 필드가 바뀐 물건은 변경 이력을 남깁니다.
-5. 접속 차단을 감지하면 즉시 멈추고, 1시간 동안 다음 실행을 건너뜁니다.
+5. 접속 차단을 감지하면 즉시 멈추고, 1시간 동안 다음 실행을 건너뜁니다. 이 백오프(`backoff_until`)는 사진 워커와 공유합니다.
 
 이전 실행이 아직 끝나지 않았으면 이번 주기는 건너뛰고, 건너뛴 사실도 기록합니다.
+
+### 사진 워커
+
+1. 공유 백오프가 남아 있으면 이번 회차는 건너뛰고 기록합니다.
+2. 사진이 없고 `photo_attempted_at`이 없거나 재시도 간격(24시간)이 지난 물건을 회차 상한(5건)만큼 고릅니다.
+3. `AuctionSource` 어댑터로 물건마다 사진을 요청하고, 요청 사이에 30초를 쉽니다.
+4. 받은 사진은 `data/photos/`에 저장하고 `item_photos`에 기록합니다. 시도한 물건은 `photo_attempted_at`을 갱신합니다.
+5. 접속 차단을 감지하면 즉시 멈추고 공유 백오프를 늘립니다. 수집 워커도 이 백오프 동안 쉽니다.
 
 ### 분석 워커
 
@@ -174,9 +195,9 @@ SQLite 테이블 8개로 구성됩니다. 스키마는 `src/lib/db/schema.ts`에
 | 방식 | 파일 | 내용 |
 | --- | --- | --- |
 | Docker | `Dockerfile` | 멀티 스테이지 빌드. SQLite 파일은 `/app/data` 볼륨에 저장 |
-| Docker Compose | `docker-compose.yml` | 웹 · 수집 · 분석 서비스 구성 |
+| Docker Compose | `docker-compose.yml` | 웹 · 수집 · 사진 · 분석 서비스 구성. 사진 서비스는 web이 healthy가 된 뒤 시작하고, web 헬스체크는 curl 없이 Node 전역 `fetch`로 `/api/health`가 200인지 확인 |
 | Kubernetes | `k8s/` | Kustomize 매니페스트. 웹과 수집 워커는 같은 Pod에서 DB 볼륨을 공유하고, 분석 워커는 별도 Deployment에서 HTTP로만 통신. `/api/health`로 liveness · readiness 프로브 |
-| CI | `.github/workflows/ci.yml` | 타입 검사 → 테스트 → 빌드 → 린트 |
+| CI | `.github/workflows/ci.yml` | 타입 검사 → 테스트 → 빌드 → 린트. OpenSpec 스펙·change 엄격 검증 잡 포함 |
 
 ## 8. Spring 백엔드 (이전 중)
 

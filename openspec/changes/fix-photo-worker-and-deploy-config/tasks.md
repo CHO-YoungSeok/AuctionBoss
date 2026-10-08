@@ -43,10 +43,18 @@
 
 ## 7. 마무리
 
-- [ ] 7.1 사진 워커를 `npm run photos -- --once`로 실제 소스에 1회(회차 상한 1건) 실행해 결과(요청 수, 세션 필요 여부, 사진 장수·형식, 차단 여부)를 `src/lib/sources/courtauction/NOTES.md`에 기록한다. 원본 응답에 개인 이름이 있으면 기록에 옮기지 않는다
-- [ ] 7.2 `npm run collector`와 `npm run photos`를 함께 띄운 상태에서 `backoff_until`을 미래로 직접 기록해 두 워커 모두 `skipped(backoff)`를 남기는지 `/status` 화면과 `worker_runs`로 확인한다
-- [ ] 7.3 README 실행 방법(사진 워커 상주·`--once`, `photos` 설정), `docs/REFERENCE.md`(백오프 공유 키, 사진 워커 구조), `docs/DEVELOPMENT_NOTES.md`(이번 결함과 고친 방식)를 갱신한다
-- [ ] 7.4 게이트 5종(`npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint`, `./gradlew check`)이 모두 통과하는지 확인한다. TS 테스트 개수가 0.1 대비 늘었는지 확인하고, 1.3에서 삭제한 테스트 수와 옮긴 수를 함께 보고한다
-- [ ] 7.5 `regression-verifier` 서브에이전트로 회귀 검증을 받는다. 특히 백오프 공유(양방향), 재시도 간격, 차단 감지, 배포 환경 변수 이름이 테스트로 막혀 있는지 판정받는다
-- [ ] 7.6 커밋하고 푸시한다
+- [x] 7.1 사진 워커를 `npm run photos -- --once`로 실제 소스에 1회(회차 상한 1건) 실행해 결과(요청 수, 세션 필요 여부, 사진 장수·형식, 차단 여부)를 `src/lib/sources/courtauction/NOTES.md`에 기록한다. 원본 응답에 개인 이름이 있으면 기록에 옮기지 않는다
+- [x] 7.2 `npm run collector`와 `npm run photos`를 함께 띄운 상태에서 `backoff_until`을 미래로 직접 기록해 두 워커 모두 `skipped(backoff)`를 남기는지 `/status` 화면과 `worker_runs`로 확인한다
+- [x] 7.3 README 실행 방법(사진 워커 상주·`--once`, `photos` 설정), `docs/REFERENCE.md`(백오프 공유 키, 사진 워커 구조), `docs/DEVELOPMENT_NOTES.md`(이번 결함과 고친 방식)를 갱신한다
+- [x] 7.4 게이트 5종(`npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint`, `./gradlew check`)이 모두 통과하는지 확인한다. TS 테스트 개수가 0.1 대비 늘었는지 확인하고, 1.3에서 삭제한 테스트 수와 옮긴 수를 함께 보고한다
+- [x] 7.5 `regression-verifier` 서브에이전트로 회귀 검증을 받는다. 특히 백오프 공유(양방향), 재시도 간격, 차단 감지, 배포 환경 변수 이름이 테스트로 막혀 있는지 판정받는다
+- [x] 7.6 커밋하고 푸시한다
 - [ ] 7.7 `openspec validate fix-photo-worker-and-deploy-config --strict`를 통과시킨 뒤 아카이브한다. `align-specs-with-code`가 아직 아카이브되지 않았다면 design.md D9의 요구사항 목록이 그대로인지 다시 확인한다
+
+
+---
+
+### 메모: 7.1~7.2 실측 (2026-10-08)
+- 7.1: 실제 소스에 물건 1건 사진 조회. 요청 2건, 사진 16장(GIF), 차단 없음. 요청 본문 래퍼 형식 확인. 기록은 `src/lib/sources/courtauction/NOTES.md` 16절.
+- 7.2: `collector_state.backoff_until`을 30분 뒤로 직접 기록한 뒤 수집 워커와 사진 워커를 한 번씩 실행. 두 워커 모두 `skipped(backoff)`로 기록했고 외부 요청은 나가지 않았다(사진 워커 로그: "소스 차단 백오프 중이라 건너뜁니다"). 확인 후 시험용 값은 삭제.
+- 확인 중 발견: 수집 워커에는 `--once`가 없어 상주 모드로 실행된다(분석·사진 워커에는 있음). 기능 결함은 아니고 후속 개선 후보로 남긴다.

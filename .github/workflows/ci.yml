@@ -36,6 +36,23 @@ jobs:
       - name: Lint
         run: npm run lint
 
+  openspec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # 로컬과 같은 버전으로 고정한다.
+      - name: Validate specs
+        run: npx -y @fission-ai/openspec@1.12.0 validate --specs --strict --no-interactive
+
+      - name: Validate active changes
+        run: npx -y @fission-ai/openspec@1.12.0 validate --changes --strict --no-interactive
+
   backend:
     runs-on: ubuntu-latest
     steps:

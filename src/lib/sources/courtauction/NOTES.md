@@ -1144,3 +1144,11 @@ NOTES.md 전체를 다시 훑었다 — §2.2(검색 요청 파라미터 전체 
   결함의 재발 방지 장치)이 없으면 `npx tsc --noEmit`을 실패시키기 때문이다. 워커가 이
   두 필드를 실제로 쓰는 로직은 없다 — 여전히 stage A의 범위는 `src/lib/**`뿐이고, 이건
   기존 가드를 통과시키기 위한 최소 선언일 뿐이다.
+
+## 16. 사진 조회 첫 실측 (2026-10-08, fix-photo-worker-and-deploy-config 7.1)
+
+- 실행: `AUCTIONBOSS_PHOTOS_MAX_ITEMS=1 npx tsx workers/photos.ts --once` (회차 상한 1건)
+- 결과: 요청 2건(세션 부트스트랩 1 + 사진 상세 조회 1), 차단 없음. 물건 1건에서 사진 16장을 받았다. 형식은 모두 `image/gif`, 장당 약 106KB~206KB.
+- 요청 본문은 어댑터가 보내는 `{dma_srchGdsDtlSrch: {csNo, cortOfcCd, dspslGdsSeq: "", pgmId}}` 래퍼 형식으로 정상 응답을 받았다. 설계 단계에서 이 래퍼가 검색 요청과 같은 구조인지 보장이 없었는데, 실측으로 확인됐다.
+- 회차 기록: `worker_runs`에 `photos` / `success`, `{"attempted":1,"collected":1,"empty":0,"failed":0,"requestsMade":2}`.
+- 원본 응답의 개인 정보는 이 기록에 옮기지 않았다.

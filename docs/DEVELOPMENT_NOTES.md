@@ -1644,3 +1644,34 @@ Spring이 Next보다 p50 기준 약 6배(표의 p50 비율 5.9~6.4배) 길지만
 ### 13.8 마무리 중 고친 compose 결함 (2026-10-08)
 
 7장 보고서를 쓰다가 compose의 필수 변수 검사(`${VAR:?}`)가 파일 전체에 적용된다는 것을 발견했다. compose는 파일을 한 번에 치환하므로 `.env`가 없으면 새 `mysql`·`backend`뿐 아니라 기존 `web`·`collector`·`analyzer`도 `docker compose config` 단계에서 실패했다. 스펙의 "기존 경로 무영향"을 어긴 것이고, 7장 회귀 검증은 `.env`를 숨겼을 때 오류가 나는지만 확인해 놓쳤다. `:-`(빈 기본값)로 바꿔, 값이 없으면 MySQL 컨테이너가 기동 시점에 "password option is not specified"로 스스로 실패하게 했다. 비밀번호는 여전히 저장소에 두지 않는다. 같은 때 `backend`의 8080 포트를 `127.0.0.1`에만 열도록 묶었다(인증 없는 API). 수정 후 `.env` 없이 `docker compose config web`이 성공하고, `.env`를 되돌린 뒤 `scripts/docker-smoke.sh`가 통과했다.
+
+## 14. 1-B: 사진 워커와 배포 설정 결함 수정 (2026-10-08)
+
+### 14.1 결함
+
+- 완료로 체크되어 있었지만 구현되지 않았던 add-item-photos 항목: C.4(상주 루프), D.3, D.4, D.5. 사진 워커는 1회 실행하고 끝났고, 회차 기록과 차단 백오프가 없었다.
+- 사진 워커가 `AuctionSource` 어댑터를 우회해 소스를 직접 호출했다.
+- compose와 K8s의 분석 워커 `BASE_URL`(`AUCTIONBOSS_API_BASE`)이 컨테이너 안에서 닿지 않는 주소였다.
+- Next 이미지에 curl이 없는데 헬스체크가 curl을 썼다.
+- Dockerfile이 `tsconfig`를 복사하지 않아 컨테이너의 analyzer가 기동 중 죽었다.
+- 기본 분석 모델이 은퇴한 Claude 모델이었다.
+
+### 14.2 고친 방식
+
+- 사진 워커를 어댑터 경유, 상주 루프, 회차 기록, 재시도 간격(`items.photo_attempted_at`)으로 다시 썼다. 수집 워커와 사진 워커가 `collector_state.backoff_until` 하나를 공유한다.
+- 설정은 `config/collector.json`의 `photos` 절과 `AUCTIONBOSS_PHOTOS_*` 환경 변수로 뺐다.
+- compose에 `photos` 서비스를 추가하고, web 헬스체크를 Node 전역 `fetch`(200만 정상)로 바꿨다. 분석 워커 주소를 변수로 받는다. Dockerfile에 `tsconfig`를 추가했다.
+- Claude API 호출을 공식 SDK로 바꾸고 기본 모델을 `claude-opus-5-5`로 했다.
+- CI에 OpenSpec 스펙·change 검증 단계를 추가했다.
+
+### 14.3 검증
+
+- 테스트 수: TypeScript 796 → 884, 백엔드 215 → 216.
+- 변이 시험: 구현 변이 10종과 회귀 검증 단계의 변이 15종을 모두 테스트가 잡았다.
+- 실측: 소스에 사진 1건을 요청하는 데 요청 2회, 사진 16장을 받았다. 수집 워커 차단 상태에서 사진 워커가, 사진 워커 차단 상태에서 수집 워커가 모두 `skipped`로 기록됐다(백오프 공유 양쪽 확인).
+
+### 14.4 남은 공백
+
+- MySQL V2 마이그레이션을 데이터가 있는 DB에 적용하는 경로를 검증하는 테스트가 없다.
+- 수집 워커에 `--once` 옵션이 없다.
+- 한쪽 워커의 차단이 다른 쪽에 전파되는 것을 확인하는 통합 테스트가 없다(실측으로만 확인).

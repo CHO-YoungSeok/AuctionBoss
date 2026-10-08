@@ -68,7 +68,7 @@ describe("compose", () => {
     expect(test[1]).toBe("node");
     expect(test.join(" ")).not.toContain("curl");
     expect(test.join(" ")).toContain("/api/health");
-    expect(test.join(" ")).toContain("r.ok");
+    expect(test.join(" ")).toContain("r.status===200");
     expect(compose.services.web.healthcheck.start_period).toBeTruthy();
   });
 
