@@ -4,10 +4,11 @@
 > 지금 구조의 한계와, 그 한계를 어떤 순서로 풀지 적은 문서다. 단계마다 상태와 완료 기준을 함께 둔다.
 > 기능별 상세 설계는 `openspec/changes/`에 따로 쓴다.
 
-## 지금 상태 (2026-10-07)
+## 지금 상태 (2026-10-08)
 
 - TypeScript + Next.js 15 + SQLite. 수집 워커, 웹 앱, 분석 워커가 각각 독립된 프로세스로 돈다.
-- 완료한 기능은 17개다(`openspec/changes/archive/`). 테스트 766개가 있고, CI는 타입 검사·테스트·빌드·린트 4단계로 돈다.
+- 완료한 기능은 18개다(`openspec/changes/archive/`). 테스트는 TypeScript 791개, Java 215개이고, CI는 TypeScript 잡(타입 검사·테스트·빌드·린트)과 Java 잡(`./gradlew check`)을 병렬로 돈다.
+- 1단계로 `backend/`에 Spring Boot + MySQL 읽기 API가 생겼다. 화면·수집·분석 워커는 아직 기존 Next.js + SQLite 경로를 쓴다.
 - 쌓인 데이터: 물건 809건(서울중앙지방법원), 변경 이력 4,008건, 분석 12건.
 - Docker 이미지, `docker-compose.yml`, Kubernetes 매니페스트(`k8s/`)는 있다. 하지만 상시로 운영하는 환경은 아직 없다.
 
@@ -41,7 +42,7 @@ flowchart LR
 
 | 단계 | 할 일 | 완료 기준 (잴 것) | 상태 |
 | --- | --- | --- | --- |
-| **1. Spring 읽기 API** | `backend/`에 Spring Boot + MySQL 8을 세운다. Flyway로 테이블 8개를 1:1로 옮기고, 읽기 API 5개를 JPA + QueryDSL로 만든다. 개인 이름을 가린 시드 데이터를 적재한다 | 기존 Next.js API와 응답 JSON이 정렬 5종 × 방향 2종 × 주요 필터 조합에서 같다(계약 테스트). 목록 조회에 N+1이 없다 | 🔄 스펙 작성 완료 (`openspec/changes/add-spring-mysql-backend/`) |
+| **1. Spring 읽기 API** | `backend/`에 Spring Boot + MySQL 8을 세운다. Flyway로 테이블 8개를 1:1로 옮기고, 읽기 API 5개를 JPA + QueryDSL로 만든다. 개인 이름을 가린 시드 데이터를 적재한다 | 기존 Next.js API와 응답 JSON이 정렬 5종 × 방향 2종 × 주요 필터 조합에서 같다(계약 테스트). 목록 조회에 N+1이 없다 | ✅ 완료 (2026-10-08). 계약 테스트 90개 일치, 목록 조회 SQL 2개 고정. 기록: `openspec/changes/archive/2026-10-08-add-spring-mysql-backend/`, `docs/DEVELOPMENT_NOTES.md` 13절 |
 | **2. 쓰기 API + 분석 워커 연결** | `POST /api/analyses`, 워커 회차 기록, 관심 물건 API를 옮긴다. 분석 워커의 주소만 Spring으로 바꾼다 | **분석 워커 코드 변경 0줄**로 Spring에 분석 결과가 저장된다 | ⏳ |
 | **3. 화면 전환** | Next.js 화면이 DB를 직접 열지 않고 Spring API를 부르게 바꾼다 | `src/` 안에서 `better-sqlite3`를 쓰는 화면 코드가 0개다. 기존 화면 테스트가 통과한다 | ⏳ |
 | **4. 수집 워커 이식** | 수집을 Spring `@Scheduled`로 옮긴다. 물건 저장과 변경 이력 기록을 한 트랜잭션으로 묶는다. 차단 대응(1시간 쉬기)과 요청 상한을 그대로 옮긴다 | 같은 응답 샘플로 기존 수집기와 같은 저장 결과가 나온다. 수집 회차가 겹쳐 실행되지 않는다 | ⏳ |

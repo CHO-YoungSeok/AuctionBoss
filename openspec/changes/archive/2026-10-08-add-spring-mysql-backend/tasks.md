@@ -34,7 +34,7 @@
 
 ## 6. 기존 API와의 계약 비교
 
-- [x] 6.1 `export-seed.ts`에 골든 생성 단계를 추가한다. 가림 처리된 같은 데이터로 임시 SQLite를 만들고, 기존 Next 라우트 핸들러를 직접 호출해 요청 목록(기본 목록, 정렬 5종 × 방향 2종, 주요 필터 조합, 페이지 경계, 상세·이력·용도, 400·404 사례)의 응답을 `backend/src/test/resources/contracts/`에 저장한다. 시각에 의존하는 요청은 제외한다
+- [x] 6.1 골든 생성 스크립트 `scripts/seed/generate-contracts.ts`를 만든다(처음에는 `export-seed.ts`에 단계를 더할 계획이었으나 책임이 달라 분리, design.md D7). 가림 처리된 같은 데이터로 임시 SQLite를 만들고, 기존 Next 라우트 핸들러를 직접 호출해 요청 목록(기본 목록, 정렬 5종 × 방향 2종, 주요 필터 조합, 페이지 경계, 상세·이력·용도, 400·404 사례)의 응답을 `backend/src/test/resources/contracts/`에 저장한다. 시각에 의존하는 요청은 제외한다
 - [x] 6.2 Spring 계약 테스트가 시드를 적재한 MySQL에 같은 요청을 보내 골든과 JSON을 엄격 비교한다(400은 `error`와 `details[].field`만). 모든 골든이 일치할 때까지 차이를 수정한다
 
 ## 7. Docker와 CI
