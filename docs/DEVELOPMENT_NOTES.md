@@ -1675,3 +1675,77 @@ Spring이 Next보다 p50 기준 약 6배(표의 p50 비율 5.9~6.4배) 길지만
 - MySQL V2 마이그레이션을 데이터가 있는 DB에 적용하는 경로를 검증하는 테스트가 없다.
 - 수집 워커에 `--once` 옵션이 없다.
 - 한쪽 워커의 차단이 다른 쪽에 전파되는 것을 확인하는 통합 테스트가 없다(실측으로만 확인).
+
+## 15. 2단계: Spring 쓰기 API와 분석 워커 연결 (add-spring-write-api, 2026-10-09)
+
+이 절은 2단계(쓰기·나머지 API 이식과 분석 워커 무수정 연결 검증)가 끝난 시점의 실측값과 남은 공백을 적는다. 수치는 이 절을 쓰는 날 직접 다시 센 값이다.
+
+### 15.1 계약 비교
+
+기존 Next 핸들러와 Spring에 같은 요청을 같은 순서, 같은 고정 시각으로 보내 응답을 비교하는 시나리오 골든을 만들었다. 시나리오 7개, 115단계다(`worker-runs-lifecycle`, `worker-runs-errors`, `worker-runs-prune`, `bookmarks-feed`, `bookmarks-errors`, `analyses`, `photos`). 최종 결과는 115단계 모두 일치다. 1단계의 읽기 골든 90개도 계속 일치한다.
+
+- 불일치 1건: `worker-runs-lifecycle` 19단계(`summary?since=...+09:00`). 원인은 Next 쪽 버그였다. `since`를 SQLite에서 문자열로 비교해 시간대 오프셋을 UTC로 바꾸지 않았고, 같은 순간의 `...Z`와 결과가 달랐다(Next 0건, Spring 4건). Spring이 아니라 Next를 고쳤다(`since`를 UTC ISO로 정규화). 계약 테스트가 기존 구현의 버그를 찾은 사례다. 이식 실수로 생긴 불일치는 0건이다.
+- 컬럼 길이 차이: Next(SQLite)가 받는 입력을 MySQL 컬럼 길이 때문에 Spring이 500으로 거부했다(`prompt_version` 20자, `model` 100자, `body` 약 65KB). Flyway V3로 넓혔다(VARCHAR(255), VARCHAR(255), MEDIUMTEXT).
+- 의도된 차이: 회차 종료 `detail.changed`의 소수와 INT 초과 값. 호출자는 항상 0 이상 정수이므로 맞추지 않았다(design.md D4).
+- 변이 3종(관심 정렬 방향, 읽음 응답의 `lastReadAt` 출처, 분석 저장 상태 코드 201→200)을 모두 시나리오 테스트가 잡았다.
+
+### 15.2 EXPLAIN (관심 목록·피드)
+
+개발용 MySQL 8.4(시드 809건)에 Spring을 `local,seed` 프로필로 띄우고, `spring.jpa.show-sql`과 바인딩 로그로 Hibernate가 실제로 낸 SQL을 얻었다. 관심 0건이면 계획이 무의미해서 관심 물건 9건(변경 이력이 있는 물건)을 담고 `EXPLAIN`을 실행한 뒤 모두 지웠다. 물건 컬럼 전체는 계획에 영향이 없어 일부 줄였고, 조인·정렬·조건·서브쿼리는 로그 그대로다. `rows`는 추정치다.
+
+| 쿼리 | 테이블 | type | key | rows | Extra |
+|---|---|---|---|---|---|
+| 관심 목록 SELECT(`bookmarks` join `items`, `created_at desc, item_id desc`) | bookmarks | ALL | NULL | 9 | Using filesort |
+| | items | eq_ref | PRIMARY | 1 | |
+| | 서브쿼리: item_changes (마지막 변경 시각) | ref | idx_item_changes_item_id | 4 | Using where |
+| | 서브쿼리: bookmarks (담김 여부) | eq_ref | PRIMARY | 1 | Using index |
+| 관심 목록 COUNT | bookmarks | index | PRIMARY | 9 | Using index |
+| 피드 목록 SELECT(`item_changes` join `bookmarks` join `items`, `changed_at desc, id desc`) | bookmarks | ALL | NULL | 9 | Using temporary; Using filesort |
+| | item_changes | ref | idx_item_changes_item_id | 4 | Using where |
+| | items | eq_ref | PRIMARY | 1 | |
+| 피드 전체 COUNT | bookmarks | index | PRIMARY | 9 | Using index |
+| | item_changes | ref | idx_item_changes_item_id | 4 | Using where |
+| 피드 미확인 COUNT(`feed_reads` 서브쿼리 2개) | bookmarks | index | PRIMARY | 9 | Using index |
+| | item_changes | ref | idx_item_changes_item_id | 4 | Using where |
+| | feed_reads 서브쿼리 | (const) | - | - | no matching row in const table (읽음 행이 없을 때) |
+
+해석: 관심 테이블이 구동 테이블(driving table)이라 `ALL`이지만 행이 관심 건수(9)뿐이고, 물건·이력 쪽은 모두 인덱스로 찾는다. 물건 수에 비례해 커지는 곳이 없다. 피드 목록의 임시 테이블과 filesort는 정렬 키(`changed_at`)가 이력 테이블의 인덱스 순서와 다른 조인 결과를 정렬하기 때문이다. 관심·이력이 수만 건으로 늘면 다시 재야 하고, 지금 규모에서는 개선하지 않는다. 관심 9건, 이력 약 36건 규모의 계획이라 큰 규모를 보장하지 않는다.
+
+### 15.3 쓰기 API 응답 시간
+
+시드 809건, 맥 한 대, 로컬 Docker MySQL 8.4 + `bootRun`(local,seed)에서 쓰기 요청을 직렬로 보냈다. 요청마다 워밍업 5회를 버리고 30회를 `curl -w '%{time_total}'`로 쟀다. **부하 테스트가 아니다.** 단일 요청을 순서대로 보낸 값이며 동시성은 반영하지 않는다. 측정으로 생긴 행은 모두 지웠다(15.5).
+
+| 요청 | p50 | p95 | max |
+|---|---|---|---|
+| 분석 저장 `POST /api/analyses` | 10.9 | 14.3 | 15.5 |
+| 회차 시작 + 종료(`POST` 후 `PATCH`, 두 요청 합) | 23.8 | 31.6 | 38.9 |
+| 관심 등록 `POST /api/bookmarks` | 9.6 | 14.9 | 15.4 |
+| 피드 읽음 `POST /api/feed/read` | 6.1 | 9.4 | 13.8 |
+
+단위는 밀리초다. p95는 30개 중 29번째 값이다. 회차 행은 두 요청의 합이라 다른 행보다 약 2배다.
+
+### 15.4 분석 워커 무수정 연결(7.3)
+
+`scripts/dev/verify-analyzer-on-spring.sh`를 개발 환경에서 1회 실행했다. 시드 MySQL + Spring(`local,seed`) + 분석 워커(`AUCTIONBOSS_API_BASE=http://localhost:8080`, 가짜 CLI `scripts/dev/fake-claude`, `ANTHROPIC_API_KEY` 비움).
+
+- 분석 12 → 15건(신규 2, 재분석 1, 모델 `fake-claude`). `analyzer` 회차 success, `detail`은 `{"newCount":2,"reanalysisCount":1,"succeeded":3,"failed":0}`. `GET /api/items/{id}`의 최신 분석이 새 행이었다. 약 3초.
+- `git diff --stat adda943 -- workers/` 0줄. 분석 워커 코드 변경 없음.
+- Claude 호출 0건(가짜 CLI). compose·K8s 분석 워커의 기본 주소는 Next 그대로다(운영 경로 유지).
+
+### 15.5 테스트 수와 개발 DB 상태
+
+| 구분 | 1단계 끝 | 2단계 끝 | 비고 |
+|---|---|---|---|
+| TypeScript(`npm test`) | 885 | 923 | 61개 파일 |
+| 백엔드(`./gradlew clean check`) | 216 | 332 | 31개 클래스, 실패·건너뜀 0 |
+
+(885 → 904는 2단계 변경, 904 → 923(+19)은 2단계 구현 뒤 들어간 returnTo 오픈 리다이렉트 수정(826f033)의 테스트다. 13.1의 791은 1단계 종료 시점이고, 1-B(14절)를 거쳐 2단계 시작 때 885였다.) 줄어든 테스트는 없다.
+
+측정 뒤 개발 DB는 측정 전과 같다(`analyses` 15, `worker_runs` 8, `bookmarks` 0, `feed_reads` 0, 두 테이블 행 덤프가 바이트 단위로 같음). 7.3 실행의 가짜 분석 3건과 회차 1건은 시드 재적재 전까지 남아 있다.
+
+### 15.6 남은 공백
+
+1. 분석 워커 연결 검증은 수동 스크립트다. CI가 실행하지 않는다. 주소와 계약이 바뀌면 사람이 다시 돌려야 한다.
+2. 1단계 읽기 골든 생성기는 운영 DB에 의존해서 다시 만들면 값이 흔들린다. 2단계 시나리오 생성기는 시드 기반이라 결정적이다(생성을 두 번 돌려 바이트가 같음).
+3. 쓰기 API가 인증 없이 열려 있다. Spring 포트는 compose에서 루프백에만 열리며, 인증은 7단계다.
+4. 운영은 여전히 Next + SQLite다. MySQL에는 시드만 있다. 운영 전환은 5단계에서 데이터 이전과 함께 한다.

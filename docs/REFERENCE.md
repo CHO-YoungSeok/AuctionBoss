@@ -201,13 +201,17 @@ SQLite 테이블 8개로 구성됩니다. 스키마는 `src/lib/db/schema.ts`에
 
 ## 8. Spring 백엔드 (이전 중)
 
-`backend/`는 기존 백엔드를 Spring Boot + MySQL로 옮기는 중인 새 백엔드입니다. 1단계에서 읽기 API를 옮겼고, 화면·수집·분석 워커는 아직 위의 기존 구조를 씁니다. 단계는 [로드맵](ROADMAP.md)에 있습니다.
+`backend/`는 기존 백엔드를 Spring Boot + MySQL로 옮기는 중인 새 백엔드입니다. 1단계에서 읽기 API를, 2단계에서 쓰기 API를 옮겼고, 화면·수집·분석 워커의 운영 경로는 아직 위의 기존 구조(Next + SQLite)를 씁니다. 단계는 [로드맵](ROADMAP.md)에 있습니다.
 
 | 항목 | 내용 |
 | --- | --- |
 | 스택 | Java 21, Spring Boot 4.1, JPA + QueryDSL 7, Flyway, MySQL 8.4 |
 | 포트 | 8080 |
 | 제공 API | `GET /api/items`, `/api/items/:id`, `/api/items/:id/changes`, `/api/items/usage-types`, `/api/health`. 경로·파라미터·응답 형태는 4절의 기존 API와 같습니다 |
+| 쓰기·나머지 API | `POST /api/analyses`, `POST /api/worker-runs`, `PATCH /api/worker-runs/:id`, `GET /api/worker-runs`, `GET /api/worker-runs/summary`, `GET·POST /api/bookmarks`, `DELETE /api/bookmarks/:itemId`, `GET /api/feed`, `POST /api/feed/read`, `GET /api/photos/:itemId/:seq`. 요청 검증과 응답은 기존 API와 같고, 시나리오 계약 테스트 7개·115단계로 비교합니다 |
+| 인증·노출 | 인증이 없습니다(7단계 예정). 쓰기 API가 열려 있으므로 compose는 8080을 루프백(`127.0.0.1`)에만 엽니다. 외부에 노출하지 않습니다 |
+| 아직 없는 것 | 화면 전용 폼 엔드포인트(`POST /api/bookmarks/toggle`, `POST /api/feed/mark-read`의 303 리다이렉트)는 3단계 화면 전환의 몫입니다 |
+| 분석 워커 연결 | 분석 워커는 코드 변경 없이 `AUCTIONBOSS_API_BASE`만 바꿔 Spring에 저장할 수 있습니다(개발 환경 검증: `scripts/dev/verify-analyzer-on-spring.sh`, 수동). 운영 전환은 5단계입니다 |
 | 스키마 | `backend/src/main/resources/db/migration/V1__baseline.sql`. 5절의 테이블 8개를 컬럼 이름까지 그대로 옮겼습니다. 금액은 BIGINT, 시각은 UTC `DATETIME(3)` |
 | 시드 | `seed` 프로필에서 DB가 비어 있을 때만 `db/seed/*.sql`을 넣습니다. 실명을 가린 물건 809건, 변경 이력 4,008건, 분석 12건 |
 | 계약 테스트 | 기존 API 응답 90개를 정답으로 저장해 두고, 같은 요청에 같은 JSON이 나오는지 비교합니다 |

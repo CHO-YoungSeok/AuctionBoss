@@ -9,7 +9,7 @@
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4-6DB33F?logo=springboot&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)
 ![Claude](https://img.shields.io/badge/Claude-API-D97757)
-![Tests](https://img.shields.io/badge/tests-791%20TS%20%2B%20215%20Java-success)
+![Tests](https://img.shields.io/badge/tests-923%20TS%20%2B%20332%20Java-success)
 
 > 개인 프로젝트 · 1인 개발 · 2026.09 ~ · 지금은 백엔드를 Spring Boot + MySQL로 옮기는 중입니다 ([로드맵](docs/ROADMAP.md))
 
@@ -90,6 +90,8 @@ flowchart LR
 
 **1단계 완료 (읽기 API)**: `backend/`에 Spring Boot 4 백엔드를 세우고, SQLite 테이블 8개를 Flyway로 MySQL에 옮겼습니다. 읽기 API 5개를 JPA + QueryDSL로 구현했고, **기존 API와 응답이 같은지 계약 테스트 90개로 비교해 모두 일치**합니다. 실명을 가린 실제 데이터 809건을 시드로 씁니다. 화면과 수집 워커는 아직 기존 구조를 씁니다.
 
+**2단계 완료 (쓰기 API)**: 분석 저장, 워커 회차, 관심 물건, 변동 피드, 사진 파일 API를 옮겼고(`POST /api/analyses`, `/api/worker-runs`, `/api/bookmarks`, `/api/feed/read`, `GET /api/photos/...` 등), 시나리오 계약 테스트 7개·115단계가 모두 일치합니다. 개발 환경(시드 MySQL + Spring)에서 **분석 워커 코드 변경 0줄**, 환경 변수만 바꿔 분석 결과가 Spring에 저장되는 것을 확인했습니다. 쓰기 API에는 인증이 없어 Spring 포트는 루프백에만 엽니다. 화면 전용 폼 엔드포인트(`bookmarks/toggle`, `feed/mark-read`)는 3단계에서 다룹니다. 운영은 아직 Next + SQLite이고, 전환은 5단계 데이터 이전과 함께 합니다.
+
 **설계에서 지킨 두 가지 원칙**
 
 - **외부 소스는 어댑터 뒤에 격리했습니다.** 수집 대상 사이트의 응답 형식은 `AuctionSource` 어댑터 안에서만 다룹니다. 소스가 바뀌거나 다른 데이터 제공처를 붙여도 서비스 본체는 수정하지 않습니다.
@@ -142,7 +144,7 @@ flowchart LR
 | 백엔드 | Spring Boot 4, Java 21, JPA + QueryDSL, Flyway | 동적 검색은 QueryDSL, 스키마는 버전 관리되는 마이그레이션으로 |
 | 검증 | zod | 외부 응답, API 입력, 설정 파일을 런타임에 검증 |
 | AI | Claude | API 키가 있으면 Messages API, 없으면 Claude Code CLI로 자동 전환 |
-| 테스트 | Vitest, JUnit 5, Testcontainers | TS 791개, Java 215개(실제 MySQL 컨테이너, 기존 API와의 계약 테스트 90개 포함) |
+| 테스트 | Vitest, JUnit 5, Testcontainers | TS 923개, Java 332개(실제 MySQL 컨테이너, 기존 API와의 계약 테스트 읽기 90개 + 쓰기 시나리오 115단계 포함) |
 | 인프라 | Docker Compose, GitHub Actions | 멀티 스테이지 빌드, 헬스체크, TS와 Java 검사를 CI에서 병렬 실행. Kubernetes 매니페스트는 있지만 클러스터에 배포한 적은 없음 |
 
 ## 개발 방식
