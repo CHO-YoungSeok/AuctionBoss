@@ -39,9 +39,9 @@
 
 ## 7. Docker와 CI
 
-- [ ] 7.1 `backend/Dockerfile` 멀티 스테이지 이미지를 만들고 `docker build`가 성공하는지 확인한다
-- [ ] 7.2 `docker-compose.yml`에 `mysql`(볼륨, 헬스체크)과 `backend`(헬스체크, `depends_on: service_healthy`, `config/collector.json` 읽기 전용 마운트, `.env` 주입) 서비스를 추가하고 `.env.example`을 커밋한다. 빈 상태에서 `docker compose up mysql backend`로 헬스체크 200과 시드 목록 응답을 확인한다
-- [ ] 7.3 컨테이너를 내렸다 다시 올려 데이터가 유지되고 시드가 중복 적재되지 않는지 확인한다
+- [x] 7.1 `backend/Dockerfile` 멀티 스테이지 이미지를 만들고 `docker build`가 성공하는지 확인한다
+- [x] 7.2 `docker-compose.yml`에 `mysql`(볼륨, 헬스체크)과 `backend`(헬스체크, `depends_on: service_healthy`, `config/collector.json` 읽기 전용 마운트, `.env` 주입) 서비스를 추가하고 `.env.example`을 커밋한다. 빈 상태에서 `docker compose up mysql backend`로 헬스체크 200과 시드 목록 응답을 확인한다
+- [x] 7.3 컨테이너를 내렸다 다시 올려 데이터가 유지되고 시드가 중복 적재되지 않는지 확인한다
 - [ ] 7.4 `.github/workflows/ci.yml`에 `backend` 잡(Temurin 21, Gradle 캐시, `./gradlew check`)을 추가하고 GitHub Actions에서 통과하는지 확인한다
 
 ## 8. 마무리

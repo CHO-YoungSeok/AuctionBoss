@@ -35,3 +35,21 @@ jobs:
         
       - name: Lint
         run: npm run lint
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      # 계약 테스트가 저장소 루트의 config/collector.json을 ../config 로 찾는다(작업 디렉터리 backend/).
+      # Testcontainers는 러너의 Docker를 쓴다.
+      - name: Gradle check
+        working-directory: backend
+        run: ./gradlew check --no-daemon

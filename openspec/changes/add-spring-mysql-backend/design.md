@@ -64,7 +64,7 @@ com.auctionboss
 - 목록 행의 `lastChangedAt`과 `bookmarked`는 스칼라 서브쿼리 식으로 한 번에 가져온다. 행마다 추가 쿼리를 날리는 N+1을 만들지 않는다.
 - **MySQL에서 결과가 달라질 수 있는 지점과 대응**
   - 비율 정렬(`bidRatio`, `pricePerArea`): MySQL의 정수 나눗셈은 소수 4자리 `DECIMAL`이라 SQLite의 실수 나눗셈과 순서가 달라질 수 있다. `cast(... as double)`로 실수 나눗셈을 강제한다.
-  - NULL 정렬: SQLite는 `(expr) IS NULL, expr`로 NULL을 항상 뒤로 보낸다. 같은 식을 QueryDSL `nullsLast()`와 `id ASC` 보조 정렬로 재현한다.
+  - NULL 정렬: SQLite는 `(expr) IS NULL, expr`로 NULL을 항상 뒤로 보낸다. MySQL에는 `NULLS LAST` 문법이 없어 Hibernate 렌더링에 기대지 않고, `CASE WHEN expr IS NULL THEN 1 ELSE 0 END ASC, expr <방향>, id ASC`를 QueryDSL로 명시한다.
   - "최신 분석" 서브쿼리: 원본은 `ORDER BY analyzed_at DESC, id DESC LIMIT 1`이다. JPQL 서브쿼리의 LIMIT 지원이 불확실하므로 `MAX` 서브쿼리 두 단계(최신 시각 → 그 시각의 최대 id)로 같은 행을 고른다. 재분석 대상 조회(`needsAnalysis`)가 이 식에 의존하며, 끝내 표현이 안 되면 이 쿼리 하나만 네이티브 SQL로 둔다.
   - 키워드 검색: `%`, `_`, `\`를 이스케이프하는 원본 규칙(`escapeLikePattern`)을 그대로 옮기고 `ESCAPE`를 명시한다.
 
@@ -81,7 +81,7 @@ com.auctionboss
 - **적재**: Flyway 버전에 섞지 않는다. 시드를 V 마이그레이션으로 넣으면 이후 스키마 마이그레이션과 버전 순서가 꼬인다. 대신 `seed` 프로필에서만 켜지는 시드 로더가 `items`가 비어 있을 때만 시드 SQL을 실행한다. 재기동해도 중복 적재되지 않고, 운영 프로필에는 로더 자체가 없다.
 
 ### D7. 테스트: Testcontainers + 기존 API와의 골든 비교
-- **골든 생성**: `scripts/seed/export-seed.ts`가 시드와 같은 가림 데이터로 임시 SQLite를 만들고, 기존 Next 라우트 핸들러를 직접 호출해 정해진 요청 목록의 응답을 `backend/src/test/resources/contracts/*.json`으로 저장한다. 기존 라우트 테스트(`src/app/api/**/__tests__`)도 핸들러를 직접 호출하는 방식이라 같은 방법을 쓴다.
+- **골든 생성**: 별도 스크립트 `scripts/seed/generate-contracts.ts`가 원본 SQLite를 `VACUUM INTO`로 스냅샷하고, 시드와 같은 가림 함수로 note와 body를 가린 뒤, 기존 Next 라우트 핸들러를 직접 호출해 정해진 요청 목록의 응답을 `backend/src/test/resources/contracts/*.json`으로 저장한다. 처음에는 시드 내보내기 스크립트에 단계를 더할 계획이었지만, 요청 목록 관리와 핸들러 호출은 책임이 달라 파일을 나눴다. 가림 함수는 같은 모듈을 import해 규칙이 갈라지지 않는다. 기존 라우트 테스트(`src/app/api/**/__tests__`)도 핸들러를 직접 호출하는 방식이라 같은 방법을 쓴다.
 - **골든 비교**: Spring 테스트가 Testcontainers MySQL에 시드를 적재하고 같은 요청을 MockMvc로 보내 JSON을 엄격 비교한다. 400 응답은 `error`와 `details[].field`만 비교한다(메시지 문구는 비교하지 않음).
 - **시각 의존 요청**(지난 기일 제외, 재분석 간격)은 골든에서 빼고, 고정 `Clock`을 쓰는 Spring 단위 테스트로 따로 검증한다. 원본 핸들러는 시각을 주입할 수 없어 골든이 날짜에 따라 흔들리기 때문이다.
 - **저장소 테스트**: 작은 픽스처로 재분석 판정, LIKE 이스케이프, NULL 정렬, 큰 금액, 시간대 독립성을 검증한다.
