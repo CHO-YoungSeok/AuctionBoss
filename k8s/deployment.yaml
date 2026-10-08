@@ -68,6 +68,27 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+
+        # SQLite 파일·사진 디렉터리를 쓰므로 web·collector와 같은 Pod에서 같은 PVC를 공유한다.
+        - name: photos
+          image: auctionboss:latest
+          imagePullPolicy: IfNotPresent
+          command: ["npm", "run", "photos"]
+          envFrom:
+            - configMapRef:
+                name: auctionboss-config
+            - secretRef:
+                name: auctionboss-secret
+          volumeMounts:
+            - name: data-volume
+              mountPath: /app/data
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
       volumes:
         - name: data-volume
           persistentVolumeClaim:

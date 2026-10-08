@@ -8,10 +8,12 @@ services:
     volumes:
       - auctionboss-data:/app/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      # 이미지에 curl이 없으므로 Node 22 전역 fetch로 확인한다. 200이 아니면 실패.
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
     environment:
       - NODE_ENV=production
       - AUCTIONBOSS_DB=/app/data/auctionboss.db
@@ -22,7 +24,20 @@ services:
     volumes:
       - auctionboss-data:/app/data
     depends_on:
-      - web
+      web:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      - AUCTIONBOSS_DB=/app/data/auctionboss.db
+
+  photos:
+    build: .
+    command: npm run photos
+    volumes:
+      - auctionboss-data:/app/data
+    depends_on:
+      web:
+        condition: service_healthy
     environment:
       - NODE_ENV=production
       - AUCTIONBOSS_DB=/app/data/auctionboss.db
@@ -32,9 +47,12 @@ services:
     command: npm run analyzer
     depends_on:
       - web
+    # ${VAR:-}: 값이 없어도 compose 파일 전체 해석이 실패하지 않는다(빈 키는 CLI 모드로 간다).
     environment:
       - NODE_ENV=production
-      - BASE_URL=http://web:3000
+      - AUCTIONBOSS_API_BASE=http://web:3000
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - AUCTIONBOSS_ANALYZE_MODEL=${AUCTIONBOSS_ANALYZE_MODEL:-}
 
   # --- Spring Boot + MySQL 백엔드 (기존 web/collector/analyzer와 독립) ---
   mysql:

@@ -32,6 +32,8 @@ COPY --from=builder /app/src ./src
 COPY --from=builder /app/workers ./workers
 COPY --from=builder /app/config ./config
 COPY --from=builder /app/next.config.ts ./
+# tsx가 워커의 "@/*" 경로 별칭을 해석하는 데 필요하다(없으면 MODULE_NOT_FOUND).
+COPY --from=builder /app/tsconfig.json ./
 
 # Create data directory for sqlite DB
 RUN mkdir -p /app/data && chown -R node:node /app/data
