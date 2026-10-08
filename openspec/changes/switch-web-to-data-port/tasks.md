@@ -1,34 +1,34 @@
 ## 1. 화면 데이터 접근 목록화와 포트 인터페이스
 
-- [ ] 1.1 시작 기준을 확인한다. `add-spring-write-api`가 아카이브됐는지 확인하고, 게이트 5종(`npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint`, `cd backend && ./gradlew check`)이 통과하는지, TS·Java 테스트 수와 change 시작 커밋 해시를 이 파일 하단 메모에 남긴다
-- [ ] 1.2 `grep -rn "@/lib/db\|better-sqlite3\|lib/storage" src/app`으로 design.md Context의 화면 데이터 접근 표가 코드와 같은지 다시 확인하고, 다른 점이 있으면 표와 메모를 고친다. 결과(파일별 호출 목록)를 메모에 남긴다
-- [ ] 1.3 동작 무변경 기준선을 만든다. 시드 SQLite(`seed-to-sqlite`)와 고정 시계로 화면 5개와 변형(목록 필터·정렬·2페이지, 상세 분석 있음·없음·사진 대기, 관심·피드 빈 상태)을 서버 컴포넌트 직접 호출로 렌더해 HTML을 임시 디렉터리에 저장하는 스크립트(`scripts/dev/snapshot-screens.ts`)를 만든다. 두 번 돌려 같은지(결정성) 확인한다
-- [ ] 1.4 `ItemNotFoundError`, `WorkerRunNotFoundError`를 `src/lib/domain/errors.ts`로 옮기고 `@/lib/db`는 재수출한다. 기존 테스트가 그대로 통과하는지 확인한다
-- [ ] 1.5 `itemQuerySearchParams`를 `src/lib/domain/item-query.ts`로 옮기고 `src/app/_lib/item-query-url.ts`는 재수출한다. `needsAnalysis`·`promptVersion`·`reanalysisCooldownHours`가 든 조건은 던지게 한다. 왕복 테스트(`parseItemQuery(serialize(q))`가 `q`와 같음, 필터·정렬·반복 파라미터·페이지 사례)를 더한다. 변이 확인: `sido` 직렬화를 빼면 왕복 테스트가 실패한다
-- [ ] 1.6 `src/lib/data-port/port.ts`에 `DataPort`(design.md D1의 읽기 13, 쓰기 3, 파일 1), `ItemPhotoMeta`, `PhotoFile`, `DataSourceError`를 정의한다. `server-only`를 Next가 처리하는지 확인하고 결과에 따라 D3의 서버 전용 방식을 정한다. `npx tsc --noEmit` 통과로 확인한다
+- [x] 1.1 시작 기준을 확인한다. `add-spring-write-api`가 아카이브됐는지 확인하고, 게이트 5종(`npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint`, `cd backend && ./gradlew check`)이 통과하는지, TS·Java 테스트 수와 change 시작 커밋 해시를 이 파일 하단 메모에 남긴다
+- [x] 1.2 `grep -rn "@/lib/db\|better-sqlite3\|lib/storage" src/app`으로 design.md Context의 화면 데이터 접근 표가 코드와 같은지 다시 확인하고, 다른 점이 있으면 표와 메모를 고친다. 결과(파일별 호출 목록)를 메모에 남긴다
+- [x] 1.3 동작 무변경 기준선을 만든다. 시드 SQLite(`seed-to-sqlite`)와 고정 시계로 화면 5개와 변형(목록 필터·정렬·2페이지, 상세 분석 있음·없음·사진 대기, 관심·피드 빈 상태)을 서버 컴포넌트 직접 호출로 렌더해 HTML을 임시 디렉터리에 저장하는 스크립트(`scripts/dev/snapshot-screens.ts`)를 만든다. 두 번 돌려 같은지(결정성) 확인한다
+- [x] 1.4 `ItemNotFoundError`, `WorkerRunNotFoundError`를 `src/lib/domain/errors.ts`로 옮기고 `@/lib/db`는 재수출한다. 기존 테스트가 그대로 통과하는지 확인한다
+- [x] 1.5 `itemQuerySearchParams`를 `src/lib/domain/item-query.ts`로 옮기고 `src/app/_lib/item-query-url.ts`는 재수출한다. `needsAnalysis`·`promptVersion`·`reanalysisCooldownHours`가 든 조건은 던지게 한다. 왕복 테스트(`parseItemQuery(serialize(q))`가 `q`와 같음, 필터·정렬·반복 파라미터·페이지 사례)를 더한다. 변이 확인: `sido` 직렬화를 빼면 왕복 테스트가 실패한다
+- [x] 1.6 `src/lib/data-port/port.ts`에 `DataPort`(design.md D1의 읽기 13, 쓰기 3, 파일 1), `ItemPhotoMeta`, `PhotoFile`, `DataSourceError`를 정의한다. `server-only`를 Next가 처리하는지 확인하고 결과에 따라 D3의 서버 전용 방식을 정한다. `npx tsc --noEmit` 통과로 확인한다
 
 ## 2. SQLite 구현체와 화면 이전(동작 무변경)
 
-- [ ] 2.1 `src/lib/data-port/sqlite.ts`(`createSqlitePort(db?)`, 첫 호출 때 연결)를 만든다. 메서드마다 임시 SQLite 단위 테스트를 둔다(분석 이력의 `limit`·`total`, 사진 목록에 `filePath` 없음, 로테이션 기록 없음 `null`, 없는 물건 등록 `ItemNotFoundError`, 사진 파일의 `Not Found`·`File Not Found` 구분)
-- [ ] 2.2 `src/lib/data-port/index.ts`(`getDataPort()`, `setDataPortForTesting()`)를 만든다. 기본값 `sqlite`, `spring`인데 주소 없음·잘못된 주소·알 수 없는 값이면 허용 값을 담은 오류, 다른 원천으로 대신 동작하지 않음을 테스트한다. 변이 확인: 알 수 없는 값을 `sqlite`로 처리하게 바꾸면 테스트가 실패한다
-- [ ] 2.3 `/bookmarks`, `/feed`를 포트로 옮긴다(맨 위 `Promise.all`). 1.3 기준선과 HTML이 같은지 확인한다
-- [ ] 2.4 `/`(목록)을 포트로 옮긴다(선택지는 `listFilterOptions`, 수집 워커 상태는 `getWorkerStatus("collector")`). 기존 목록 렌더 테스트 4개와 1.3 기준선이 같은지 확인한다
-- [ ] 2.5 `/items/{id}`를 포트로 옮긴다(물건 1회 뒤 분석 이력·변경 이력·미확인·사진 목록 병렬). 기존 상세 렌더 테스트 8개(404 2개 포함)와 1.3 기준선을 확인한다
-- [ ] 2.6 `/status`를 `async`로 바꾸고 `WorkerStatusCard`·`RotationInfo`가 데이터를 props로 받게 한다. 렌더 테스트는 호출 방식만 `await`로 바꾸고 기대값은 그대로 둔다. 설정 오류 안내(`loadCollectorConfig` 실패) 경로를 렌더 테스트로 더한다. 1.3 기준선과 같은지 확인한다
-- [ ] 2.7 관심 목록·피드 화면 렌더 테스트를 새로 만든다(빈 상태 안내, 담은 물건 행과 해제 폼의 `returnTo`, 미확인 강조와 읽음 버튼 노출 조건)
+- [x] 2.1 `src/lib/data-port/sqlite.ts`(`createSqlitePort(db?)`, 첫 호출 때 연결)를 만든다. 메서드마다 임시 SQLite 단위 테스트를 둔다(분석 이력의 `limit`·`total`, 사진 목록에 `filePath` 없음, 로테이션 기록 없음 `null`, 없는 물건 등록 `ItemNotFoundError`, 사진 파일의 `Not Found`·`File Not Found` 구분)
+- [x] 2.2 `src/lib/data-port/index.ts`(`getDataPort()`, `setDataPortForTesting()`)를 만든다. 기본값 `sqlite`, `spring`인데 주소 없음·잘못된 주소·알 수 없는 값이면 허용 값을 담은 오류, 다른 원천으로 대신 동작하지 않음을 테스트한다. 변이 확인: 알 수 없는 값을 `sqlite`로 처리하게 바꾸면 테스트가 실패한다
+- [x] 2.3 `/bookmarks`, `/feed`를 포트로 옮긴다(맨 위 `Promise.all`). 1.3 기준선과 HTML이 같은지 확인한다
+- [x] 2.4 `/`(목록)을 포트로 옮긴다(선택지는 `listFilterOptions`, 수집 워커 상태는 `getWorkerStatus("collector")`). 기존 목록 렌더 테스트 4개와 1.3 기준선이 같은지 확인한다
+- [x] 2.5 `/items/{id}`를 포트로 옮긴다(물건 1회 뒤 분석 이력·변경 이력·미확인·사진 목록 병렬). 기존 상세 렌더 테스트 8개(404 2개 포함)와 1.3 기준선을 확인한다
+- [x] 2.6 `/status`를 `async`로 바꾸고 `WorkerStatusCard`·`RotationInfo`가 데이터를 props로 받게 한다. 렌더 테스트는 호출 방식만 `await`로 바꾸고 기대값은 그대로 둔다. 설정 오류 안내(`loadCollectorConfig` 실패) 경로를 렌더 테스트로 더한다. 1.3 기준선과 같은지 확인한다
+- [x] 2.7 관심 목록·피드 화면 렌더 테스트를 새로 만든다(빈 상태 안내, 담은 물건 행과 해제 폼의 `returnTo`, 미확인 강조와 읽음 버튼 노출 조건)
 
 ## 3. Spring 화면용 읽기 API와 골든
 
-- [ ] 3.1 Next 계약 원본 라우트 5개를 만든다(design.md D5: `filter-options`, `{id}/analyses`, `{id}/photos`, `worker-runs/status`, `collector-state/rotation`). 분석 이력 `limit` 파서(1~50, 기본 10, 정수 형식, 빈 값)와 `worker` 검증을 라우트 테스트로 고정한다. 정적 경로가 동적 경로에 잡히지 않는지(`filter-options` vs `{id}`, `status` vs `{id}`) 확인한다
-- [ ] 3.2 Next 저장소 테스트에 선택지의 문자 그대로 구분(`A법원`, `a법원`, `A법원 `, 빈 문자열)과 정렬 사례를 더한다
-- [ ] 3.3 골든 형식에 단계별 `advanceMs`와 `config`의 `intervalMs`·`staleAfterIntervals` 덮어쓰기를 더한다(생성기 `scripts/seed/generate-scenarios.ts`, Spring `ScenarioContractTest`). 기존 7개 시나리오를 다시 생성해 바이트 단위로 같은지 확인한다. 고정 시계 vitest에 `advanceMs` 사례를 더한다
-- [ ] 3.4 시나리오 `screen-reads`, `worker-status`(design.md D6 표)를 정의하고 생성한다. 두 번 생성해 같은지, `"<iso-ms>"` 표식 0개, 원본 500 단계 없음을 확인한다
-- [ ] 3.5 Spring `GET /api/items/filter-options`를 만든다(`COLLATE utf8mb4_0900_bin`의 `DISTINCT`·`ORDER BY`, 용도는 1단계 구현 재사용). Testcontainers 통합 테스트에 3.2와 같은 사례를 넣는다. 변이 확인: 정렬 규칙을 `utf8mb4_bin`으로 바꾸면 뒤쪽 공백 사례가, 기본 정렬 규칙으로 두면 대소문자 사례가 실패한다
-- [ ] 3.6 Spring `GET /api/items/{id}/analyses`(Java `limit` 파서, 존재·목록·건수 3문장)와 `GET /api/items/{id}/photos`(파일 경로 제외)를 만든다. MockMvc 테스트로 `total`과 순서, 400 `limit`, 404, 응답에 `filePath` 키가 없음을 확인한다
-- [ ] 3.7 `WorkerSettings`에 워커별 기대 주기와 `staleAfterIntervals` 읽기·덮어쓰기를 더하고, Spring `GET /api/worker-runs/status`를 만든다(주입된 `Clock`). `MutableClock` 통합 테스트로 기록 없음, 정상, 진행 중 뒤 차단, 건너뜀 뒤 차단(`TestData`로 삽입), 실패, 시간이 지나 미실행, 성공 없이 오래된 진행 중 회차를 확인한다. 변이 확인: 판정에서 `skipped` 제외 조건을 빼면 건너뜀 사례가 실패한다
-- [ ] 3.8 Spring `GET /api/collector-state/rotation`을 만들고 기록 있음·없음을 테스트한다
-- [ ] 3.9 `ScenarioContractTest`가 새 시나리오 2개까지 모두 일치할 때까지 고친다. 불일치 건수와 원인을 메모에 남긴다. 기존 읽기 골든 90개와 시나리오 7개도 계속 일치하는지 확인한다
-- [ ] 3.10 `QueryCountTest`에 새 API 5개(선택지 4, 분석 이력 3, 사진 목록 2, 워커 상태 3, 로테이션 1)를 더하고 행 수를 바꿔도 같은지 확인한다
+- [x] 3.1 Next 계약 원본 라우트 5개를 만든다(design.md D5: `filter-options`, `{id}/analyses`, `{id}/photos`, `worker-runs/status`, `collector-state/rotation`). 분석 이력 `limit` 파서(1~50, 기본 10, 정수 형식, 빈 값)와 `worker` 검증을 라우트 테스트로 고정한다. 정적 경로가 동적 경로에 잡히지 않는지(`filter-options` vs `{id}`, `status` vs `{id}`) 확인한다
+- [x] 3.2 Next 저장소 테스트에 선택지의 문자 그대로 구분(`A법원`, `a법원`, `A법원 `, 빈 문자열)과 정렬 사례를 더한다
+- [x] 3.3 골든 형식에 단계별 `advanceMs`와 `config`의 `intervalMs`·`staleAfterIntervals` 덮어쓰기를 더한다(생성기 `scripts/seed/generate-scenarios.ts`, Spring `ScenarioContractTest`). 기존 7개 시나리오를 다시 생성해 바이트 단위로 같은지 확인한다. 고정 시계 vitest에 `advanceMs` 사례를 더한다
+- [x] 3.4 시나리오 `screen-reads`, `worker-status`(design.md D6 표)를 정의하고 생성한다. 두 번 생성해 같은지, `"<iso-ms>"` 표식 0개, 원본 500 단계 없음을 확인한다
+- [x] 3.5 Spring `GET /api/items/filter-options`를 만든다(`COLLATE utf8mb4_0900_bin`의 `DISTINCT`·`ORDER BY`, 용도는 1단계 구현 재사용). Testcontainers 통합 테스트에 3.2와 같은 사례를 넣는다. 변이 확인: 정렬 규칙을 `utf8mb4_bin`으로 바꾸면 뒤쪽 공백 사례가, 기본 정렬 규칙으로 두면 대소문자 사례가 실패한다
+- [x] 3.6 Spring `GET /api/items/{id}/analyses`(Java `limit` 파서, 존재·목록·건수 3문장)와 `GET /api/items/{id}/photos`(파일 경로 제외)를 만든다. MockMvc 테스트로 `total`과 순서, 400 `limit`, 404, 응답에 `filePath` 키가 없음을 확인한다
+- [x] 3.7 `WorkerSettings`에 워커별 기대 주기와 `staleAfterIntervals` 읽기·덮어쓰기를 더하고, Spring `GET /api/worker-runs/status`를 만든다(주입된 `Clock`). `MutableClock` 통합 테스트로 기록 없음, 정상, 진행 중 뒤 차단, 건너뜀 뒤 차단(`TestData`로 삽입), 실패, 시간이 지나 미실행, 성공 없이 오래된 진행 중 회차를 확인한다. 변이 확인: 판정에서 `skipped` 제외 조건을 빼면 건너뜀 사례가 실패한다
+- [x] 3.8 Spring `GET /api/collector-state/rotation`을 만들고 기록 있음·없음을 테스트한다
+- [x] 3.9 `ScenarioContractTest`가 새 시나리오 2개까지 모두 일치할 때까지 고친다. 불일치 건수와 원인을 메모에 남긴다. 기존 읽기 골든 90개와 시나리오 7개도 계속 일치하는지 확인한다
+- [x] 3.10 `QueryCountTest`에 새 API 5개(선택지 4, 분석 이력 3, 사진 목록 2, 워커 상태 3, 로테이션 1)를 더하고 행 수를 바꿔도 같은지 확인한다
 
 ## 4. Spring 구현체
 
