@@ -11,7 +11,7 @@
  *
  * - form-urlencoded 본문 `itemId`(대상), `bookmarked`(제출 시점의 현재 상태 — "true"면
  *   해제, 아니면 등록), `returnTo`(복귀할 경로)를 받는다.
- * - 실제 등록/해제는 `addBookmark`/`removeBookmark`(bookmarks.ts)를 그대로 호출한다 —
+ * - 실제 등록/해제는 데이터 포트의 `addBookmark`/`removeBookmark`를 호출한다 —
  *   비즈니스 로직이 두 벌 존재하지 않는다.
  * - 처리 후 `returnTo`로 303 리다이렉트한다. `returnTo`는 반드시 같은 오리진의 상대
  *   경로인지 검증한다(`safe-redirect.ts`) — 오픈 리다이렉트 방지.
@@ -21,7 +21,7 @@
  */
 import { NextResponse } from "next/server";
 
-import { ItemNotFoundError, addBookmark, removeBookmark } from "@/lib/db";
+import { ItemNotFoundError, getDataPort } from "@/lib/data-port";
 
 import { resolveSafeReturnTo } from "../../../_lib/safe-redirect";
 
@@ -49,10 +49,11 @@ export async function POST(request: Request): Promise<NextResponse> {
   const returnTo = resolveSafeReturnTo(typeof returnToRaw === "string" ? returnToRaw : undefined);
 
   try {
+    const port = getDataPort();
     if (currentlyBookmarked) {
-      removeBookmark(itemId);
+      await port.removeBookmark(itemId);
     } else {
-      addBookmark(itemId);
+      await port.addBookmark(itemId);
     }
     return NextResponse.redirect(new URL(returnTo, request.url), 303);
   } catch (error) {

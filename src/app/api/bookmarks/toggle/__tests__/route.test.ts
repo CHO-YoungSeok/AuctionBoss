@@ -10,7 +10,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { closeDb, getRepository, isBookmarked } from "@/lib/db";
+import { closeDb, getRepository, isBookmarked, listBookmarkedItems } from "@/lib/db";
+import { DATA_SOURCES_UNDER_TEST, useDataSource } from "@/lib/data-port/__tests__/data-sources";
 import type { AuctionItemInput } from "@/lib/domain";
 
 import { POST } from "../route";
@@ -55,7 +56,9 @@ function formRequest(fields: Record<string, string>): Request {
   });
 }
 
-describe("POST /api/bookmarks/toggle", () => {
+describe.each(DATA_SOURCES_UNDER_TEST)("POST /api/bookmarks/toggle (원천: %s)", (source) => {
+  useDataSource(source);
+
   it("bookmarked=false(현재 상태)로 제출하면 등록하고 returnTo로 303 리다이렉트한다", async () => {
     const repo = getRepository();
     repo.upsertItems([makeItem()]);
@@ -144,10 +147,16 @@ describe("POST /api/bookmarks/toggle", () => {
     expect(response.status).toBe(400);
   });
 
-  it("존재하지 않는 물건은 404다", async () => {
+  it("존재하지 않는 물건은 404이고 관심 목록은 바뀌지 않는다", async () => {
+    const repo = getRepository();
+    repo.upsertItems([makeItem()]);
+    const existingId = repo.listItems().items[0]!.id;
+    const before = listBookmarkedItems().total;
     const response = await POST(
       formRequest({ itemId: "999999", bookmarked: "false", returnTo: "/" }),
     );
     expect(response.status).toBe(404);
+    expect(isBookmarked(existingId)).toBe(false);
+    expect(listBookmarkedItems().total).toBe(before);
   });
 });

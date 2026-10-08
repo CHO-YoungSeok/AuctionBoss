@@ -16,7 +16,7 @@
  */
 import { NextResponse } from "next/server";
 
-import { markFeedRead } from "@/lib/db";
+import { getDataPort } from "@/lib/data-port";
 
 import { resolveSafeReturnTo } from "../../../_lib/safe-redirect";
 
@@ -34,7 +34,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   const returnTo = resolveSafeReturnTo(typeof returnToRaw === "string" ? returnToRaw : undefined);
 
   try {
-    markFeedRead(new Date().toISOString());
+    await getDataPort().markFeedRead();
     return NextResponse.redirect(new URL(returnTo, request.url), 303);
   } catch (error) {
     console.error("[POST /api/feed/mark-read] 읽음 처리 실패", error);
