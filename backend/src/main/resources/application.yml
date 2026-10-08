@@ -25,5 +25,5 @@ spring:
   flyway:
     enabled: true
   jackson:
-    # 시각 직렬화기는 5장에서 따로 정한다. 지금은 Jackson 기본값을 따른다.
+    # 시각(Instant)은 common/json의 전용 직렬화기가 항상 밀리초 3자리 UTC(.SSSZ)로 쓴다.
     default-property-inclusion: always

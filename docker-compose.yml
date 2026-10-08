@@ -42,11 +42,15 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
+    # 값은 .env에서 주입한다(cp .env.example .env). `:?`(필수 검사)를 쓰지 않는 이유:
+    # compose는 파일 전체를 한 번에 치환하므로 `:?`가 있으면 .env가 없을 때 기존 web/collector/
+    # analyzer까지 실행할 수 없게 된다. 값이 비면 MySQL 컨테이너가 기동 시점에
+    # "password option is not specified"로 스스로 실패하므로 비밀은 여전히 저장소에 두지 않는다.
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?.env에 MYSQL_ROOT_PASSWORD가 필요합니다}
-      MYSQL_DATABASE: ${DB_NAME:?.env에 DB_NAME이 필요합니다}
-      MYSQL_USER: ${DB_USER:?.env에 DB_USER가 필요합니다}
-      MYSQL_PASSWORD: ${DB_PASSWORD:?.env에 DB_PASSWORD가 필요합니다}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-}
+      MYSQL_DATABASE: ${DB_NAME:-}
+      MYSQL_USER: ${DB_USER:-}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-}
     volumes:
       - mysql-data:/var/lib/mysql
     # 호스트 3306은 로컬 개발용 MySQL이 쓰는 경우가 많아 기본 3307로 연다(로컬 루프백만).
@@ -64,15 +68,16 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    # 로컬 루프백에만 연다. 인증이 없는 API라 같은 네트워크의 다른 기기에 노출하지 않는다.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       SPRING_PROFILES_ACTIVE: local,seed
       DB_HOST: mysql
       DB_PORT: "3306"
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-}
+      DB_USER: ${DB_USER:-}
+      DB_PASSWORD: ${DB_PASSWORD:-}
       AUCTIONBOSS_CONFIG_PATH: /app/config/collector.json
     volumes:
       - ./config/collector.json:/app/config/collector.json:ro

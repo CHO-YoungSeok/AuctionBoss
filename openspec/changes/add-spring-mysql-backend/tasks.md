@@ -42,15 +42,15 @@
 - [x] 7.1 `backend/Dockerfile` 멀티 스테이지 이미지를 만들고 `docker build`가 성공하는지 확인한다
 - [x] 7.2 `docker-compose.yml`에 `mysql`(볼륨, 헬스체크)과 `backend`(헬스체크, `depends_on: service_healthy`, `config/collector.json` 읽기 전용 마운트, `.env` 주입) 서비스를 추가하고 `.env.example`을 커밋한다. 빈 상태에서 `docker compose up mysql backend`로 헬스체크 200과 시드 목록 응답을 확인한다
 - [x] 7.3 컨테이너를 내렸다 다시 올려 데이터가 유지되고 시드가 중복 적재되지 않는지 확인한다
-- [ ] 7.4 `.github/workflows/ci.yml`에 `backend` 잡(Temurin 21, Gradle 캐시, `./gradlew check`)을 추가하고 GitHub Actions에서 통과하는지 확인한다
+- [x] 7.4 `.github/workflows/ci.yml`에 `backend` 잡(Temurin 21, Gradle 캐시, `./gradlew check`)을 추가하고 GitHub Actions에서 통과하는지 확인한다
 
 ## 8. 마무리
 
-- [ ] 8.1 기존 게이트(`npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint`)와 `./gradlew check`가 모두 통과하는지 확인한다. 기존 TS 테스트 766개가 그대로이고 가림 함수 테스트만큼 늘었는지 확인한다
-- [ ] 8.2 목록 조회 1회에 실행되는 SQL 문 수를 세는 테스트를 추가해 N+1이 없음을 확인한다(기준: 목록 1개 + 전체 건수 1개)
-- [ ] 8.3 전후 수치를 `docs/DEVELOPMENT_NOTES.md`에 기록한다: 계약 테스트 개수, 골든 불일치 건수와 원인, 목록 쿼리 `EXPLAIN` 결과, 시드 데이터 기준 목록 API 응답 시간
-- [ ] 8.4 `CLAUDE.md` 게이트 목록, README 아키텍처와 실행 방법(수집 법원 수 문구를 실제 데이터 기준으로 정정), `docs/REFERENCE.md`에 백엔드 구성을 반영한다
-- [ ] 8.5 `regression-verifier` 서브에이전트로 회귀 검증을 받은 뒤 커밋한다
+- [x] 8.1 기존 게이트(`npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint`)와 `./gradlew check`가 모두 통과하는지 확인한다. 기존 TS 테스트 766개가 그대로이고 가림 함수 테스트만큼 늘었는지 확인한다
+- [x] 8.2 목록 조회 1회에 실행되는 SQL 문 수를 세는 테스트를 추가해 N+1이 없음을 확인한다(기준: 목록 1개 + 전체 건수 1개)
+- [x] 8.3 전후 수치를 `docs/DEVELOPMENT_NOTES.md`에 기록한다: 계약 테스트 개수, 골든 불일치 건수와 원인, 목록 쿼리 `EXPLAIN` 결과, 시드 데이터 기준 목록 API 응답 시간
+- [x] 8.4 `CLAUDE.md` 게이트 목록, README 아키텍처와 실행 방법(수집 법원 수 문구를 실제 데이터 기준으로 정정), `docs/REFERENCE.md`에 백엔드 구성을 반영한다
+- [x] 8.5 `regression-verifier` 서브에이전트로 회귀 검증을 받은 뒤 커밋한다
 
 ---
 

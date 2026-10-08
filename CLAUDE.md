@@ -26,7 +26,7 @@
 
 ## 게이트
 
-`npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint` — 작업 시작·종료 시점에 모두 통과해야 한다. 테스트 개수가 줄면 이유를 보고한다.
+`npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint`, `cd backend && ./gradlew check`(Docker 필요, Testcontainers) — 작업 시작·종료 시점에 모두 통과해야 한다. 테스트 개수가 줄면 이유를 보고한다.
 
 모든 변경은 테스트로 회귀를 막는다. 구현 후 커밋 전에 `regression-verifier` 서브에이전트에 회귀 검증을 위임한다.
 

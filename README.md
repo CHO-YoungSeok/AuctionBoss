@@ -6,10 +6,12 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs)
 ![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4-6DB33F?logo=springboot&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)
 ![Claude](https://img.shields.io/badge/Claude-API-D97757)
-![Tests](https://img.shields.io/badge/tests-766%20passed-success)
+![Tests](https://img.shields.io/badge/tests-791%20TS%20%2B%20215%20Java-success)
 
-> 개인 프로젝트 · 1인 개발 · 2026.09
+> 개인 프로젝트 · 1인 개발 · 2026.09 ~ · 지금은 백엔드를 Spring Boot + MySQL로 옮기는 중입니다 ([로드맵](docs/ROADMAP.md))
 
 <p align="center">
   <img src="docs/images/list.png" alt="물건 목록 화면" width="900">
@@ -30,7 +32,7 @@ AuctionBoss는 물건을 주기적으로 수집해 변화를 기록합니다.
 
 | 기능 | 설명 |
 | --- | --- |
-| **자동 수집** | 서울 5개 법원의 진행 물건을 10분마다 수집해 저장 |
+| **자동 수집** | 법원의 진행 물건을 10분마다 수집해 저장. 법원은 한 번에 한 곳씩 돌아가며 수집하며, 지금 쌓인 데이터는 서울중앙지방법원 809건 |
 | **변동 추적** | 최저가 · 유찰횟수 · 매각기일 · 진행상태가 바뀌면 이력으로 기록 |
 | **관심 물건 피드** | 관심 등록한 물건의 변동만 모아서 보기 |
 | **검색 · 필터** | 지역 · 용도 · 가격대 · 저감률 · 매각기일 등 조건 검색, 조건이 URL에 남아 공유 가능 |
@@ -55,6 +57,8 @@ AuctionBoss는 물건을 주기적으로 수집해 변화를 기록합니다.
 
 ## 아키텍처
 
+### 지금 운영 구조
+
 웹 서버와 수집 · 분석 워커가 각각 **독립 프로세스**로 동작합니다. 하나가 멈춰도 나머지는 영향을 받지 않습니다.
 
 ```mermaid
@@ -72,6 +76,19 @@ flowchart LR
 | **Collector** | 외부 소스에서 물건을 가져와 도메인 모델로 바꾼 뒤 저장. 바뀐 값은 변경 이력으로 기록 |
 | **Next.js 앱** | 목록 · 상세 · 피드 · 상태 화면과 REST API 제공 |
 | **Analyzer** | 분석이 필요한 물건을 API로 받아 Claude로 분석하고 결과를 API로 저장 |
+
+### 이전 중인 구조: Spring Boot + MySQL
+
+SQLite 파일 하나를 웹 앱과 수집 워커가 함께 여는 구조는 서버를 늘리거나 워커를 따로 배포할 수 없습니다. 그래서 백엔드를 Spring Boot + MySQL로 옮기고 있습니다. 단계와 완료 기준은 [로드맵](docs/ROADMAP.md)에 있습니다.
+
+```mermaid
+flowchart LR
+    WEB[Next.js<br/>화면] -->|HTTP| API[Spring Boot<br/>REST API]
+    ANA[Analyzer] -->|HTTP| API
+    API --> MY[(MySQL 8.4)]
+```
+
+**1단계 완료 (읽기 API)**: `backend/`에 Spring Boot 4 백엔드를 세우고, SQLite 테이블 8개를 Flyway로 MySQL에 옮겼습니다. 읽기 API 5개를 JPA + QueryDSL로 구현했고, **기존 API와 응답이 같은지 계약 테스트 90개로 비교해 모두 일치**합니다. 실명을 가린 실제 데이터 809건을 시드로 씁니다. 화면과 수집 워커는 아직 기존 구조를 씁니다.
 
 **설계에서 지킨 두 가지 원칙**
 
@@ -121,11 +138,12 @@ flowchart LR
 | --- | --- | --- |
 | 언어 | TypeScript (strict) | 외부 응답을 도메인 모델로 바꾸는 과정을 타입으로 검증 |
 | 웹 | Next.js 15 (App Router), React 19 | 서버 컴포넌트에서 DB를 바로 조회하고, 같은 앱에서 REST API 제공 |
-| DB | SQLite (better-sqlite3) | 단일 서버와 수천 건 규모에 맞는 가장 단순한 선택 |
+| DB | SQLite (better-sqlite3) → MySQL 8.4 | 처음에는 단일 서버에 맞는 가장 단순한 선택. 서버 분리를 위해 MySQL로 옮기는 중 |
+| 백엔드 | Spring Boot 4, Java 21, JPA + QueryDSL, Flyway | 동적 검색은 QueryDSL, 스키마는 버전 관리되는 마이그레이션으로 |
 | 검증 | zod | 외부 응답, API 입력, 설정 파일을 런타임에 검증 |
 | AI | Claude | API 키가 있으면 Messages API, 없으면 Claude Code CLI로 자동 전환 |
-| 테스트 | Vitest | 테스트 766개를 2초 안에 실행 |
-| 인프라 | Docker, Kubernetes, GitHub Actions | 멀티 스테이지 빌드, 헬스체크 기반 프로브, CI 4단계 검사 |
+| 테스트 | Vitest, JUnit 5, Testcontainers | TS 791개, Java 215개(실제 MySQL 컨테이너, 기존 API와의 계약 테스트 90개 포함) |
+| 인프라 | Docker Compose, GitHub Actions | 멀티 스테이지 빌드, 헬스체크, TS와 Java 검사를 CI에서 병렬 실행. Kubernetes 매니페스트는 있지만 클러스터에 배포한 적은 없음 |
 
 ## 개발 방식
 
@@ -153,8 +171,20 @@ npm run analyzer             # 터미널 3: 분석 워커
 분석 워커는 `ANTHROPIC_API_KEY` 환경 변수가 있으면 Claude API를 사용합니다. 없으면 로컬에 로그인된 Claude Code CLI를 사용합니다.
 수집 대상 법원, 실행 주기, 분석 건수 한도는 `config/collector.json`에서 바꿀 수 있습니다.
 
+### Spring 백엔드 (이전 중)
+
+Docker만 있으면 됩니다. 실명을 가린 시드 809건이 자동으로 들어갑니다.
+
 ```bash
-npx tsc --noEmit && npm test && npm run build && npm run lint   # 전체 검사
+cp .env.example .env
+docker compose up -d mysql backend   # http://localhost:8080/api/items
+```
+
+### 전체 검사
+
+```bash
+npx tsc --noEmit && npm test && npm run build && npm run lint   # TypeScript
+(cd backend && ./gradlew check)                                  # Java (Docker 필요)
 ```
 
 ## 폴더 구조
@@ -167,6 +197,8 @@ src/
     ├── sources/    # 외부 소스 어댑터 (격리 경계)
     └── db/         # 스키마와 저장소
 workers/            # 수집 · 분석 · 사진 워커, AI 프롬프트
+backend/            # Spring Boot 백엔드 (Flyway 스키마, JPA 엔티티, QueryDSL 검색, 계약 테스트)
+scripts/seed/       # 실명 가림 시드 생성, 계약 테스트용 정답 응답 생성
 openspec/           # 기능별 스펙과 설계 기록
 k8s/                # Kubernetes 매니페스트
 ```

@@ -12,6 +12,7 @@ AuctionBoss의 실행 구성, 설정, API, 데이터 모델을 정리한 문서�
 5. [데이터 모델](#5-데이터-모델)
 6. [워커 동작](#6-워커-동작)
 7. [배포](#7-배포)
+8. [Spring 백엔드 (이전 중)](#8-spring-백엔드-이전-중)
 
 ---
 
@@ -176,6 +177,46 @@ SQLite 테이블 8개로 구성됩니다. 스키마는 `src/lib/db/schema.ts`에
 | Docker Compose | `docker-compose.yml` | 웹 · 수집 · 분석 서비스 구성 |
 | Kubernetes | `k8s/` | Kustomize 매니페스트. 웹과 수집 워커는 같은 Pod에서 DB 볼륨을 공유하고, 분석 워커는 별도 Deployment에서 HTTP로만 통신. `/api/health`로 liveness · readiness 프로브 |
 | CI | `.github/workflows/ci.yml` | 타입 검사 → 테스트 → 빌드 → 린트 |
+
+## 8. Spring 백엔드 (이전 중)
+
+`backend/`는 기존 백엔드를 Spring Boot + MySQL로 옮기는 중인 새 백엔드입니다. 1단계에서 읽기 API를 옮겼고, 화면·수집·분석 워커는 아직 위의 기존 구조를 씁니다. 단계는 [로드맵](ROADMAP.md)에 있습니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 스택 | Java 21, Spring Boot 4.1, JPA + QueryDSL 7, Flyway, MySQL 8.4 |
+| 포트 | 8080 |
+| 제공 API | `GET /api/items`, `/api/items/:id`, `/api/items/:id/changes`, `/api/items/usage-types`, `/api/health`. 경로·파라미터·응답 형태는 4절의 기존 API와 같습니다 |
+| 스키마 | `backend/src/main/resources/db/migration/V1__baseline.sql`. 5절의 테이블 8개를 컬럼 이름까지 그대로 옮겼습니다. 금액은 BIGINT, 시각은 UTC `DATETIME(3)` |
+| 시드 | `seed` 프로필에서 DB가 비어 있을 때만 `db/seed/*.sql`을 넣습니다. 실명을 가린 물건 809건, 변경 이력 4,008건, 분석 12건 |
+| 계약 테스트 | 기존 API 응답 90개를 정답으로 저장해 두고, 같은 요청에 같은 JSON이 나오는지 비교합니다 |
+
+**프로필**
+
+| 프로필 | 용도 |
+| --- | --- |
+| `local` | 로컬 MySQL 접속. 저장소 루트 `.env`(git 미추적)에서 `DB_*` 값을 읽습니다 |
+| `seed` | 시드 로더를 켭니다. 운영에서는 쓰지 않습니다 |
+| `test` | Testcontainers MySQL로 테스트합니다 |
+
+**환경 변수**
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | `localhost`, `3306`, `auctionboss`, … | MySQL 접속 정보. `.env.example` 참고 |
+| `AUCTIONBOSS_CONFIG_PATH` | `../config/collector.json` 또는 `config/collector.json` | 재분석 최소 간격을 읽을 설정 파일 |
+| `MYSQL_ROOT_PASSWORD` | 없음 | compose의 MySQL 컨테이너 root 비밀번호 |
+| `MYSQL_HOST_PORT` | `3307` | compose의 MySQL을 내 컴퓨터에서 접속할 포트 |
+
+**실행**
+
+```bash
+cp .env.example .env
+docker compose up -d mysql backend        # MySQL이 준비된 뒤 백엔드가 뜨고 시드가 들어갑니다
+scripts/docker-smoke.sh                   # 처음 기동과 재기동(데이터 유지)을 자동으로 확인
+(cd backend && ./gradlew bootRun --args='--spring.profiles.active=local,seed')   # IDE 개발용
+(cd backend && ./gradlew check)           # 테스트 (Docker 필요)
+```
 
 ---
 
