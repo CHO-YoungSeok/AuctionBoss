@@ -1,0 +1,13 @@
+{
+  "request": {
+    "path": "/api/items",
+    "query": "usage=%EC%97%86%EB%8A%94%EC%9A%A9%EB%8F%84"
+  },
+  "status": 200,
+  "body": {
+    "items": [],
+    "total": 0,
+    "page": 1,
+    "pageSize": 20
+  }
+}

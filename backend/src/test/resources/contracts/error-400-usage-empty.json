@@ -1,0 +1,16 @@
+{
+  "request": {
+    "path": "/api/items",
+    "query": "usage="
+  },
+  "status": 400,
+  "body": {
+    "error": "잘못된 요청 파라미터입니다",
+    "details": [
+      {
+        "field": "usage",
+        "message": "usage 값은 비어 있을 수 없습니다"
+      }
+    ]
+  }
+}

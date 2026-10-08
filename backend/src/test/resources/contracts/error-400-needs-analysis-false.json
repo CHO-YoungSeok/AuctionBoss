@@ -1,0 +1,16 @@
+{
+  "request": {
+    "path": "/api/items",
+    "query": "needsAnalysis=false"
+  },
+  "status": 400,
+  "body": {
+    "error": "잘못된 요청 파라미터입니다",
+    "details": [
+      {
+        "field": "needsAnalysis",
+        "message": "needsAnalysis는 true만 지원합니다"
+      }
+    ]
+  }
+}

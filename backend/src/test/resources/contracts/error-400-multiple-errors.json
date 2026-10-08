@@ -1,0 +1,24 @@
+{
+  "request": {
+    "path": "/api/items",
+    "query": "page=abc&pageSize=999&sort=nope"
+  },
+  "status": 400,
+  "body": {
+    "error": "잘못된 요청 파라미터입니다",
+    "details": [
+      {
+        "field": "page",
+        "message": "page은(는) 정수여야 합니다"
+      },
+      {
+        "field": "pageSize",
+        "message": "pageSize는 200 이하여야 합니다"
+      },
+      {
+        "field": "sort",
+        "message": "sort는 auctionDate, minBidPrice, bidRatio, failedBidCount, pricePerArea 중 하나여야 합니다"
+      }
+    ]
+  }
+}

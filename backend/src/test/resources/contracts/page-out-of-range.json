@@ -1,0 +1,13 @@
+{
+  "request": {
+    "path": "/api/items",
+    "query": "page=18&pageSize=50"
+  },
+  "status": 200,
+  "body": {
+    "items": [],
+    "total": 809,
+    "page": 18,
+    "pageSize": 50
+  }
+}

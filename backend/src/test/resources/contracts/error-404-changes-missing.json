@@ -1,0 +1,10 @@
+{
+  "request": {
+    "path": "/api/items/999999/changes",
+    "query": ""
+  },
+  "status": 404,
+  "body": {
+    "error": "물건을 찾을 수 없습니다: id=999999"
+  }
+}

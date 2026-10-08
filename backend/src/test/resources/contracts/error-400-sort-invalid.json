@@ -1,0 +1,16 @@
+{
+  "request": {
+    "path": "/api/items",
+    "query": "sort=nope"
+  },
+  "status": 400,
+  "body": {
+    "error": "잘못된 요청 파라미터입니다",
+    "details": [
+      {
+        "field": "sort",
+        "message": "sort는 auctionDate, minBidPrice, bidRatio, failedBidCount, pricePerArea 중 하나여야 합니다"
+      }
+    ]
+  }
+}

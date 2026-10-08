@@ -1,0 +1,16 @@
+{
+  "request": {
+    "path": "/api/items",
+    "query": "dateFrom=2026/09/01"
+  },
+  "status": 400,
+  "body": {
+    "error": "잘못된 요청 파라미터입니다",
+    "details": [
+      {
+        "field": "dateFrom",
+        "message": "dateFrom은(는) YYYY-MM-DD 형식이어야 합니다"
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "request": {
+    "path": "/api/items",
+    "query": "minPrice=500&maxPrice=100"
+  },
+  "status": 400,
+  "body": {
+    "error": "잘못된 요청 파라미터입니다",
+    "details": [
+      {
+        "field": "minPrice",
+        "message": "minPrice는 maxPrice보다 클 수 없습니다"
+      },
+      {
+        "field": "maxPrice",
+        "message": "minPrice는 maxPrice보다 클 수 없습니다"
+      }
+    ]
+  }
+}

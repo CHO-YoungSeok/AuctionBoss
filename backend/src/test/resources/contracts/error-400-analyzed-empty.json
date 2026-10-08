@@ -1,0 +1,16 @@
+{
+  "request": {
+    "path": "/api/items",
+    "query": "analyzed="
+  },
+  "status": 400,
+  "body": {
+    "error": "잘못된 요청 파라미터입니다",
+    "details": [
+      {
+        "field": "analyzed",
+        "message": "analyzed 값은 비어 있을 수 없습니다"
+      }
+    ]
+  }
+}

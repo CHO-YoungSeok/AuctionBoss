@@ -1,0 +1,20 @@
+{
+  "request": {
+    "path": "/api/items",
+    "query": "minEok=3&maxEok=1"
+  },
+  "status": 400,
+  "body": {
+    "error": "잘못된 요청 파라미터입니다",
+    "details": [
+      {
+        "field": "minEok",
+        "message": "최소 가격(억/만원 합산 포함)은 최대 가격보다 클 수 없습니다"
+      },
+      {
+        "field": "maxEok",
+        "message": "최소 가격(억/만원 합산 포함)은 최대 가격보다 클 수 없습니다"
+      }
+    ]
+  }
+}

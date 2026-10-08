@@ -1,0 +1,16 @@
+{
+  "request": {
+    "path": "/api/items",
+    "query": "dir=sideways"
+  },
+  "status": 400,
+  "body": {
+    "error": "잘못된 요청 파라미터입니다",
+    "details": [
+      {
+        "field": "dir",
+        "message": "dir는 asc 또는 desc여야 합니다"
+      }
+    ]
+  }
+}

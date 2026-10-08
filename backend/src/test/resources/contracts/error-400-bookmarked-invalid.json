@@ -1,0 +1,16 @@
+{
+  "request": {
+    "path": "/api/items",
+    "query": "bookmarked=yes"
+  },
+  "status": 400,
+  "body": {
+    "error": "잘못된 요청 파라미터입니다",
+    "details": [
+      {
+        "field": "bookmarked",
+        "message": "bookmarked는 true 또는 false여야 합니다"
+      }
+    ]
+  }
+}

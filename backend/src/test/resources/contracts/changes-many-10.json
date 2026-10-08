@@ -1,0 +1,83 @@
+{
+  "request": {
+    "path": "/api/items/10/changes",
+    "query": ""
+  },
+  "status": 200,
+  "body": {
+    "changes": [
+      {
+        "id": 37,
+        "itemId": 10,
+        "field": "minBidPrice",
+        "oldValue": null,
+        "newValue": "290000000",
+        "changedAt": "2026-09-08T11:48:38.617Z",
+        "kind": "baseline"
+      },
+      {
+        "id": 38,
+        "itemId": 10,
+        "field": "failedBidCount",
+        "oldValue": null,
+        "newValue": "0",
+        "changedAt": "2026-09-08T11:48:38.617Z",
+        "kind": "baseline"
+      },
+      {
+        "id": 39,
+        "itemId": 10,
+        "field": "auctionDate",
+        "oldValue": null,
+        "newValue": "2026-09-09",
+        "changedAt": "2026-09-08T11:48:38.617Z",
+        "kind": "baseline"
+      },
+      {
+        "id": 40,
+        "itemId": 10,
+        "field": "status",
+        "oldValue": null,
+        "newValue": "신건",
+        "changedAt": "2026-09-08T11:48:38.617Z",
+        "kind": "baseline"
+      },
+      {
+        "id": 1869,
+        "itemId": 10,
+        "field": "minBidPrice",
+        "oldValue": "290000000",
+        "newValue": "232000000",
+        "changedAt": "2026-10-01T18:57:20.909Z",
+        "kind": "change"
+      },
+      {
+        "id": 1870,
+        "itemId": 10,
+        "field": "failedBidCount",
+        "oldValue": "0",
+        "newValue": "1",
+        "changedAt": "2026-10-01T18:57:20.909Z",
+        "kind": "change"
+      },
+      {
+        "id": 1871,
+        "itemId": 10,
+        "field": "auctionDate",
+        "oldValue": "2026-09-09",
+        "newValue": "2026-10-14",
+        "changedAt": "2026-10-01T18:57:20.909Z",
+        "kind": "change"
+      },
+      {
+        "id": 1872,
+        "itemId": 10,
+        "field": "status",
+        "oldValue": "신건",
+        "newValue": "유찰 1회",
+        "changedAt": "2026-10-01T18:57:20.909Z",
+        "kind": "change"
+      }
+    ]
+  }
+}
