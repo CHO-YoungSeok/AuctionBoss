@@ -105,6 +105,32 @@ describe("K8s", () => {
   });
 });
 
+describe("운영 데이터 원천 유지(switch-web-to-data-port D2)", () => {
+  // 웹 서비스에 spring을 넣으면 화면이 수집이 멈춘 MySQL 시드를 보여 준다. 전환은 5단계 이전 직후 한 번.
+  const isSpring = (v: string | undefined) => v?.trim().toLowerCase() === "spring";
+  it("compose 웹 서비스는 AUCTIONBOSS_DATA_SOURCE를 spring으로 두지 않는다", () => {
+    const env = compose.services.web.environment;
+    expect(isSpring(envValue(env, "AUCTIONBOSS_DATA_SOURCE"))).toBe(false);
+    expect(envNames(env)).not.toContain("AUCTIONBOSS_SPRING_BASE");
+  });
+
+  it("K8s 웹 배포와 configmap은 AUCTIONBOSS_DATA_SOURCE를 spring으로 두지 않는다", () => {
+    for (const c of containers(k8sWeb)) {
+      expect(isSpring(envValue(c.env, "AUCTIONBOSS_DATA_SOURCE"))).toBe(false);
+      expect(envNames(c.env)).not.toContain("AUCTIONBOSS_SPRING_BASE");
+    }
+    const cm = load("k8s/configmap.yaml");
+    expect(isSpring(cm.data?.AUCTIONBOSS_DATA_SOURCE)).toBe(false);
+    expect(Object.keys(cm.data ?? {})).not.toContain("AUCTIONBOSS_SPRING_BASE");
+  });
+
+  it("어느 배포 파일에도 AUCTIONBOSS_DATA_SOURCE=spring 문자열이 없다", () => {
+    for (const f of ["docker-compose.yml", ...["configmap", "deployment", "deployment-analyzer"].map((n) => `k8s/${n}.yaml`)]) {
+      expect(read(f)).not.toMatch(/AUCTIONBOSS_DATA_SOURCE["']?\s*[:=]\s*["']?spring/i);
+    }
+  });
+});
+
 describe("Next 이미지(Dockerfile)", () => {
   // 회귀 방지: runner 단계에 tsconfig.json이 빠지면 컨테이너 안의 워커(tsx)가 `@/` 경로 별칭을
   // 풀지 못해 `Cannot find module '@/lib/domain'`으로 시작하자마자 죽었다(1-B 5장에서 발견).

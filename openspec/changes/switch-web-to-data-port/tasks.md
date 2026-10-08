@@ -32,31 +32,31 @@
 
 ## 4. Spring 구현체
 
-- [ ] 4.1 `src/lib/data-port/spring/schemas.ts`에 응답 zod 스키마를 만들고 도메인 타입과의 일치를 타입 단언으로 고정한다. 변이 확인: `AuctionItem`에 필드를 하나 더하면 `tsc`가 실패한다
-- [ ] 4.2 `spring/client.ts`를 만든다(`no-store`, 5초 시간 제한, 허용 상태, `DataSourceError` 변환, 요청 기록 훅, 로그에 검색어 값 제외). 가짜 `fetch`로 연결 실패, 시간 초과, 500, 스키마 불일치, 허용 404를 테스트한다
-- [ ] 4.3 `spring/port.ts`(`createSpringPort({ baseUrl, fetch? })`)의 메서드 17개를 만든다. 사진 파일은 상태·바이트·`Content-Type`·`Cache-Control`을 그대로 넘긴다. 가짜 `fetch`로 요청 경로·쿼리·메서드·본문이 design.md D1 표와 같은지 메서드마다 확인한다
-- [ ] 4.4 `spring` 모드에서 SQLite를 열지 않는지 확인한다: `@/lib/db`의 `getDb`를 던지게 바꾼 상태로 Spring 구현체 테스트가 통과한다
+- [x] 4.1 `src/lib/data-port/spring/schemas.ts`에 응답 zod 스키마를 만들고 도메인 타입과의 일치를 타입 단언으로 고정한다. 변이 확인: `AuctionItem`에 필드를 하나 더하면 `tsc`가 실패한다
+- [x] 4.2 `spring/client.ts`를 만든다(`no-store`, 5초 시간 제한, 허용 상태, `DataSourceError` 변환, 요청 기록 훅, 로그에 검색어 값 제외). 가짜 `fetch`로 연결 실패, 시간 초과, 500, 스키마 불일치, 허용 404를 테스트한다
+- [x] 4.3 `spring/port.ts`(`createSpringPort({ baseUrl, fetch? })`)의 메서드 17개를 만든다. 사진 파일은 상태·바이트·`Content-Type`·`Cache-Control`을 그대로 넘긴다. 가짜 `fetch`로 요청 경로·쿼리·메서드·본문이 design.md D1 표와 같은지 메서드마다 확인한다
+- [x] 4.4 `spring` 모드에서 SQLite를 열지 않는지 확인한다: `@/lib/db`의 `getDb`를 던지게 바꾼 상태로 Spring 구현체 테스트가 통과한다
 
 ## 5. 동등성·렌더·요청 수 테스트
 
-- [ ] 5.1 Next 핸들러 대역 `fetch`(`src/lib/data-port/__tests__/next-stand-in.ts`)를 만든다. 경로 틀을 기존 JSON API와 3.1의 라우트 핸들러에 연결하고, 받은 요청을 `(메서드, 경로 틀, 쿼리 키 집합)`으로 기록한다
-- [ ] 5.2 포트 계약 테스트(`port-contract.test.ts`)를 만든다. 시드 SQLite에서 design.md D6 ②의 사례 표를 두 구현체로 불러 `toStrictEqual`로 비교한다. 쓰기 후 읽기(관심 2건 등록, 1건 해제, 읽음 처리 뒤 관심 목록·피드·미확인)도 두 구현체로 같은 결과인지 본다. 변이 확인: Spring 구현체에서 `listBookmarkedItems`의 `page` 전달을 빼면 실패한다
-- [ ] 5.3 골든 포함 검사를 더한다. 5.2에서 기록된 요청 틀이 모두 커밋된 골든에 있는지 확인하고, 없는 틀은 시나리오 단계를 더해 3.4·3.9를 다시 돌린다. 변이 확인: 미확인 개수 요청에 새 쿼리 키를 붙이면 검사가 실패한다
-- [ ] 5.4 렌더 테스트 5개 파일(목록, 상세, 상태, 관심, 피드)을 `describe.each(["sqlite", "spring"])`로 두 원천에서 돌린다. 기대값은 하나로 둔다. 렌더 테스트 수가 두 배가 되는 것을 메모에 남긴다
-- [ ] 5.5 요청 수 테스트를 만든다. 대역 기록으로 화면별 요청 수가 design.md D7 상한 이하인지, 관심 물건·피드·회차 행 4건과 30건에서 같은지 확인한다. 변이 확인: 관심 목록 화면에서 물건마다 `getItemById`를 부르게 바꾸면 실패한다
-- [ ] 5.6 실패 처리 렌더 테스트를 만든다. Spring 모드에서 대역이 500·형식이 다른 본문·연결 실패를 돌려주면 페이지가 던지고(부분 렌더 없음), 없는 물건 상세는 `notFound()`인지 확인한다
+- [x] 5.1 Next 핸들러 대역 `fetch`(`src/lib/data-port/__tests__/next-stand-in.ts`)를 만든다. 경로 틀을 기존 JSON API와 3.1의 라우트 핸들러에 연결하고, 받은 요청을 `(메서드, 경로 틀, 쿼리 키 집합)`으로 기록한다
+- [x] 5.2 포트 계약 테스트(`port-contract.test.ts`)를 만든다. 시드 SQLite에서 design.md D6 ②의 사례 표를 두 구현체로 불러 `toStrictEqual`로 비교한다. 쓰기 후 읽기(관심 2건 등록, 1건 해제, 읽음 처리 뒤 관심 목록·피드·미확인)도 두 구현체로 같은 결과인지 본다. 변이 확인: Spring 구현체에서 `listBookmarkedItems`의 `page` 전달을 빼면 실패한다
+- [x] 5.3 골든 포함 검사를 더한다. 5.2에서 기록된 요청 틀이 모두 커밋된 골든에 있는지 확인하고, 없는 틀은 시나리오 단계를 더해 3.4·3.9를 다시 돌린다. 변이 확인: 미확인 개수 요청에 새 쿼리 키를 붙이면 검사가 실패한다
+- [x] 5.4 렌더 테스트 5개 파일(목록, 상세, 상태, 관심, 피드)을 `describe.each(["sqlite", "spring"])`로 두 원천에서 돌린다. 기대값은 하나로 둔다. 렌더 테스트 수가 두 배가 되는 것을 메모에 남긴다
+- [x] 5.5 요청 수 테스트를 만든다. 대역 기록으로 화면별 요청 수가 design.md D7 상한 이하인지, 관심 물건·피드·회차 행 4건과 30건에서 같은지 확인한다. 변이 확인: 관심 목록 화면에서 물건마다 `getItemById`를 부르게 바꾸면 실패한다
+- [x] 5.6 실패 처리 렌더 테스트를 만든다. Spring 모드에서 대역이 500·형식이 다른 본문·연결 실패를 돌려주면 페이지가 던지고(부분 렌더 없음), 없는 물건 상세는 `notFound()`인지 확인한다
 
 ## 6. 폼 엔드포인트와 사진 라우트
 
-- [ ] 6.1 `POST /api/bookmarks/toggle`을 포트로 옮긴다. 기존 라우트 테스트를 두 원천으로 돌려 303과 `Location`, 없는 물건 404와 관심 목록 불변, `returnTo` 검증(외부 주소·`//`·없음 → `/`)을 확인한다
-- [ ] 6.2 `POST /api/feed/mark-read`를 포트로 옮기고 같은 방식의 라우트 테스트를 새로 만든다(303, `returnTo`, 처리 후 미확인 0, 피드 조회만으로는 미확인 불변)
-- [ ] 6.3 `GET /api/photos/{itemId}/{seq}`를 포트로 옮긴다. 2단계 `photos` 시나리오의 사진 픽스처로 두 원천에서 상태·본문(SHA-256)·헤더·텍스트 오류(`Invalid ID`, `Not Found`, `File Not Found`)가 같은지 테스트한다
+- [x] 6.1 `POST /api/bookmarks/toggle`을 포트로 옮긴다. 기존 라우트 테스트를 두 원천으로 돌려 303과 `Location`, 없는 물건 404와 관심 목록 불변, `returnTo` 검증(외부 주소·`//`·없음 → `/`)을 확인한다
+- [x] 6.2 `POST /api/feed/mark-read`를 포트로 옮기고 같은 방식의 라우트 테스트를 새로 만든다(303, `returnTo`, 처리 후 미확인 0, 피드 조회만으로는 미확인 불변)
+- [x] 6.3 `GET /api/photos/{itemId}/{seq}`를 포트로 옮긴다. 2단계 `photos` 시나리오의 사진 픽스처로 두 원천에서 상태·본문(SHA-256)·헤더·텍스트 오류(`Invalid ID`, `Not Found`, `File Not Found`)가 같은지 테스트한다
 
 ## 7. lint 강제
 
-- [ ] 7.1 `eslint.config.mjs`에 design.md D8의 `no-restricted-imports` 규칙(화면 대상, 화면용 라우트 3개 재포함, Spring 구현체 대상, 테스트·기존 JSON API 제외)을 더한다. `npm run lint`가 통과하는지 확인한다
-- [ ] 7.2 변이 확인: 페이지, `_components` 파일, 화면용 라우트 하나, Spring 구현체에 각각 `@/lib/db`(또는 상대 경로, `better-sqlite3`) 가져오기를 넣으면 lint가 실패하고, 기존 JSON API 라우트는 통과하는지 확인하고 되돌린다. 결과를 메모에 남긴다
-- [ ] 7.3 `src/__tests__/deploy-config.test.ts`에 compose·K8s 웹 서비스가 `AUCTIONBOSS_DATA_SOURCE=spring`을 설정하지 않음을 고정한다(spec "운영 데이터 원천 유지")
+- [x] 7.1 `eslint.config.mjs`에 design.md D8의 `no-restricted-imports` 규칙(화면 대상, 화면용 라우트 3개 재포함, Spring 구현체 대상, 테스트·기존 JSON API 제외)을 더한다. `npm run lint`가 통과하는지 확인한다
+- [x] 7.2 변이 확인: 페이지, `_components` 파일, 화면용 라우트 하나, Spring 구현체에 각각 `@/lib/db`(또는 상대 경로, `better-sqlite3`) 가져오기를 넣으면 lint가 실패하고, 기존 JSON API 라우트는 통과하는지 확인하고 되돌린다. 결과를 메모에 남긴다
+- [x] 7.3 `src/__tests__/deploy-config.test.ts`에 compose·K8s 웹 서비스가 `AUCTIONBOSS_DATA_SOURCE=spring`을 설정하지 않음을 고정한다(spec "운영 데이터 원천 유지")
 
 ## 8. 개발 환경 spring 모드 캡처 검증
 
