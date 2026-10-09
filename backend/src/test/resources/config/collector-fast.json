@@ -1,0 +1,24 @@
+{
+  "scope": {
+    "courts": [{ "name": "테스트법원", "courtCode": "B000210" }],
+    "maxCourtsPerRun": 1,
+    "maxRequestsPerRun": 13
+  },
+  "intervalMs": 100,
+  "analysis": {
+    "maxItemsPerRun": 5,
+    "maxReanalysisPerRun": 2,
+    "reanalysisCooldownHours": 24,
+    "intervalMs": 600000
+  },
+  "photos": {
+    "intervalMs": 100,
+    "maxItemsPerRun": 5,
+    "requestDelayMs": 1,
+    "retryAfterHours": 24
+  },
+  "observability": {
+    "maxRunsPerWorker": 1000,
+    "staleAfterIntervals": 3
+  }
+}

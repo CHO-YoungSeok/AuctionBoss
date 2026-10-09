@@ -8,6 +8,7 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -21,6 +22,8 @@ import java.util.stream.Stream;
 import com.auctionboss.collect.collector.CollectorRun;
 import com.auctionboss.collect.run.BackoffStore;
 import com.auctionboss.collect.run.CollectorSettings;
+import com.auctionboss.collect.run.RunLock;
+import com.auctionboss.collect.run.WorkerTicker;
 import com.auctionboss.collect.source.CollectScope;
 import com.auctionboss.collect.source.CourtRef;
 import com.auctionboss.collect.source.FetchActiveItemsResult;
@@ -60,8 +63,7 @@ import tools.jackson.databind.node.ObjectNode;
  * 단계 뒤)는 6.4가 재생한다.
  *
  * <p>
- * 틱: 겹침·잠금은 5장이라 아직 없다. {@link #tick}이 TS 틱의 "백오프가 남았으면 {@code skipped(backoff)}, 아니면 회차" 부분만 그대로
- * 한다(5.2의 {@code WorkerTicker}가 생기면 그것으로 바꾼다).
+ * 틱: 실제 {@link WorkerTicker}(단일 실행 잠금, 백오프 확인, 전용 스레드 회차)를 거친다(5.2에서 임시 틱을 바꿨다).
  */
 @Import({ FixedClockConfig.class, FakeSourceConfig.class })
 class StoreContractTest extends AbstractMySqlTest {
@@ -82,6 +84,9 @@ class StoreContractTest extends AbstractMySqlTest {
 
 	@Autowired
 	BackoffStore backoff;
+
+	@Autowired
+	RunLock runLock;
 
 	@Autowired
 	WorkerRunService runs;
@@ -145,12 +150,17 @@ class StoreContractTest extends AbstractMySqlTest {
 
 	// ------------------------------------------------------------------ 단계 실행
 
+	/** 실제 틱 경로: 단일 실행 잠금 -> 백오프 확인 -> 전용 스레드 회차. 회차가 끝나고 잠금이 풀릴 때까지 기다린다. */
 	private void tick(CollectorSettings.Scope scope) {
-		if (backoff.remainingMs(clock.instant()) > 0) {
-			runs.recordSkipped("collector", "backoff");
+		WorkerTicker ticker = new WorkerTicker("collector", "auctionboss.collector", runLock,
+				() -> backoff.remainingMs(clock.instant()), reason -> runs.recordSkipped("collector", reason),
+				() -> collectorRun.run(scope));
+		try {
+			ticker.tick();
+			assertThat(ticker.awaitIdle(Duration.ofSeconds(30))).as("회차가 끝나야 한다").isTrue();
 		}
-		else {
-			collectorRun.run(scope);
+		finally {
+			ticker.shutdown(Duration.ofSeconds(5));
 		}
 	}
 

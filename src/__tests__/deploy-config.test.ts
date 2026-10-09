@@ -131,6 +131,90 @@ describe("운영 데이터 원천 유지(switch-web-to-data-port D2)", () => {
   });
 });
 
+describe("백엔드 수집·사진 워커 기본 꺼짐 유지(port-collector-to-spring D4, D14)", () => {
+  // 백엔드 수집기를 켜는 설정이 배포 구성에 들어가면 TS 수집기와 같은 소스에 동시에 요청한다(서로의 백오프를 못 본다).
+  // 운영 수집·사진은 기존 TS 서비스가 계속 맡는다. 켜는 전환은 5단계 런북에서 기존 워커를 멈춘 뒤 한다.
+  const SWITCHES = [
+    "AUCTIONBOSS_COLLECTOR_ENABLED",
+    "AUCTIONBOSS_PHOTOS_ENABLED",
+    "AUCTIONBOSS_SOURCE_EXTERNAL_REQUESTS_ALLOWED",
+  ];
+  // Spring이 같은 설정으로 읽는 점 표기(SPRING_APPLICATION_JSON, 명령 인자 등으로 들어올 수 있다).
+  const DOTTED = [
+    "auctionboss.collector.enabled",
+    "auctionboss.photos.enabled",
+    "auctionboss.source.external-requests-allowed",
+  ];
+  const isOn = (v: unknown) => /^(true|1|yes|on)$/i.test(String(v ?? "").trim());
+  const deployFiles = [
+    "docker-compose.yml",
+    // 환경 변수·인자를 심을 수 있는 나머지 경로: 이미지, CI, 개발 스크립트(백엔드 서비스를 local 프로필로 띄운다)
+    "Dockerfile",
+    "backend/Dockerfile",
+    ".github/workflows/ci.yml",
+    "scripts/dev/compare-screens.sh",
+    ...[
+      "configmap",
+      "deployment",
+      "deployment-analyzer",
+      "secret",
+      "service",
+      "ingress",
+      "kustomization",
+      "namespace",
+      "pvc",
+    ].map((n) => `k8s/${n}.yaml`),
+  ];
+
+  it("compose 서비스 어디에도 세 설정을 켜지 않는다", () => {
+    for (const [name, svc] of Object.entries<Any>(compose.services)) {
+      for (const key of SWITCHES) {
+        expect(isOn(envValue(svc.environment, key)), `${name} ${key}`).toBe(false);
+      }
+    }
+  });
+
+  it("K8s 컨테이너와 configmap 어디에도 세 설정을 켜지 않는다", () => {
+    for (const d of [k8sWeb, k8sAnalyzer]) {
+      for (const c of containers(d)) {
+        for (const key of SWITCHES) {
+          expect(isOn(envValue(c.env, key)), `${c.name} ${key}`).toBe(false);
+        }
+      }
+    }
+    const cm = load("k8s/configmap.yaml");
+    for (const key of SWITCHES) expect(isOn(cm.data?.[key]), `configmap ${key}`).toBe(false);
+  });
+
+  it("어느 배포 파일에도 세 설정을 켜는 문자열이 없다(이름 표기와 점 표기, 값 표기 변형 포함)", () => {
+    for (const f of deployFiles) {
+      const text = read(f);
+      for (const key of [...SWITCHES, ...DOTTED]) {
+        const escaped = key.replace(/[.]/g, "\\.");
+        expect(text, `${f} ${key}`).not.toMatch(
+          new RegExp(`${escaped}["']?\\s*[:=]\\s*["']?(true|1|yes|on)\\b`, "i"),
+        );
+      }
+    }
+  });
+
+  it("배포 구성에 외부 요청 허용 이름 자체가 없다(켜지 않을 뿐 아니라 꺼 둔 값도 두지 않는다)", () => {
+    for (const f of deployFiles) {
+      expect(read(f), f).not.toContain("EXTERNAL_REQUESTS_ALLOWED");
+    }
+  });
+
+  it("운영 수집·사진은 기존 TS 서비스가 그대로 맡는다", () => {
+    expect(compose.services.collector.command).toBe("npm run collector");
+    expect(compose.services.photos.command).toBe("npm run photos");
+    const names = containers(k8sWeb).map((c: Any) => c.name);
+    expect(names).toEqual(expect.arrayContaining(["web", "collector", "photos"]));
+    const byName = (n: string) => containers(k8sWeb).find((c: Any) => c.name === n);
+    expect(byName("collector").command).toEqual(["npm", "run", "collector"]);
+    expect(byName("photos").command).toEqual(["npm", "run", "photos"]);
+  });
+});
+
 describe("Next 이미지(Dockerfile)", () => {
   // 회귀 방지: runner 단계에 tsconfig.json이 빠지면 컨테이너 안의 워커(tsx)가 `@/` 경로 별칭을
   // 풀지 못해 `Cannot find module '@/lib/domain'`으로 시작하자마자 죽었다(1-B 5장에서 발견).
