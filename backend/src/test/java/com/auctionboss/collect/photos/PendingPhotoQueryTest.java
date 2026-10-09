@@ -111,4 +111,17 @@ class PendingPhotoQueryTest extends AbstractPhotoTest {
 		assertThat(query.find(10, NOW, 3)).isEmpty();
 	}
 
+	@Test
+	void 물건_지정은_대기_조건을_통과한_그_물건만_돌려준다() {
+		long target = item(null, null);
+		item(null, null);
+		long collected = item("collected", NOW.minusSeconds(100 * 3600));
+		long noIdentifier = item(null, "B000210", null, null);
+
+		assertThat(query.find(10, NOW, 24, target)).extracting(PendingPhoto::id).containsExactly(target);
+		assertThat(query.find(10, NOW, 24, collected)).as("대기 조건 밖이면 지정해도 제외").isEmpty();
+		assertThat(query.find(10, NOW, 24, noIdentifier)).isEmpty();
+		assertThat(query.find(10, NOW, 24, null)).as("지정 없음은 좁히지 않는다").hasSize(2);
+	}
+
 }

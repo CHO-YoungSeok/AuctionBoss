@@ -204,6 +204,15 @@ describe("백엔드 수집·사진 워커 기본 꺼짐 유지(port-collector-to
     }
   });
 
+  it("배포 구성에 1회 실행 모드 이름이 없다(컨테이너가 회차 한 번 뒤 종료·재시작하며 실제 소스에 요청하게 된다)", () => {
+    for (const f of deployFiles) {
+      expect(read(f), f).not.toMatch(/AUCTIONBOSS_RUN_ONCE|auctionboss\.run-once/i);
+    }
+    for (const [name, svc] of Object.entries<Any>(compose.services)) {
+      expect(envNames(svc.environment), name).not.toContain("AUCTIONBOSS_RUN_ONCE");
+    }
+  });
+
   it("운영 수집·사진은 기존 TS 서비스가 그대로 맡는다", () => {
     expect(compose.services.collector.command).toBe("npm run collector");
     expect(compose.services.photos.command).toBe("npm run photos");

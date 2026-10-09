@@ -20,9 +20,9 @@ import org.springframework.context.annotation.Configuration;
 @ConditionalOnProperty(name = "auctionboss.photos.enabled", havingValue = "true")
 class PhotoScheduleConfig {
 
-	static final String WORKER = "photos";
+	static final String WORKER = PhotoRun.WORKER;
 
-	static final String LOCK_NAME = "auctionboss.photos";
+	static final String LOCK_NAME = PhotoRun.LOCK_NAME;
 
 	@Bean
 	WorkerSchedule photosSchedule(PhotoRun run, RunLock lock, BackoffStore backoff, WorkerRunService runs,

@@ -5,8 +5,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import com.auctionboss.collect.source.CourtRef;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -20,7 +22,7 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>
  * 파일 경로는 {@code auctionboss.config-path}(비우면 {@code WorkerSettings}와 같은 후보). 덮어쓰기 속성은 1회 실행 모드와 개발 확인용이다:
  * {@code auctionboss.collector.max-courts-per-run}, {@code auctionboss.collector.max-requests-per-run},
- * {@code auctionboss.photos.max-items-per-run}. 차단 백오프 길이는 {@code auctionboss.collector.block-backoff-ms}(기본 1시간)다.
+ * {@code auctionboss.photos.max-items-per-run}, 사진 대상 물건 지정 {@code auctionboss.photos.only-item-id}. 차단 백오프 길이는 {@code auctionboss.collector.block-backoff-ms}(기본 1시간)다.
  */
 @Component
 public class CollectorSettings {
@@ -55,11 +57,21 @@ public class CollectorSettings {
 
 	private final long blockBackoffMs;
 
+	private final Long photosOnlyItemId;
+
+	public CollectorSettings(String configPath, Long maxCourtsOverride, Long maxRequestsOverride,
+			Long photosMaxItemsOverride, long blockBackoffMs) {
+		this(configPath, maxCourtsOverride, maxRequestsOverride, photosMaxItemsOverride, blockBackoffMs, null);
+	}
+
+	@Autowired
 	public CollectorSettings(@Value("${auctionboss.config-path:}") String configPath,
 			@Value("${auctionboss.collector.max-courts-per-run:#{null}}") Long maxCourtsOverride,
 			@Value("${auctionboss.collector.max-requests-per-run:#{null}}") Long maxRequestsOverride,
 			@Value("${auctionboss.photos.max-items-per-run:#{null}}") Long photosMaxItemsOverride,
-			@Value("${auctionboss.collector.block-backoff-ms:" + DEFAULT_BLOCK_BACKOFF_MS + "}") long blockBackoffMs) {
+			@Value("${auctionboss.collector.block-backoff-ms:" + DEFAULT_BLOCK_BACKOFF_MS + "}") long blockBackoffMs,
+			@Value("${auctionboss.photos.only-item-id:#{null}}") Long photosOnlyItemId) {
+		this.photosOnlyItemId = checkOverride(photosOnlyItemId, "auctionboss.photos.only-item-id");
 		this.configPath = configPath;
 		this.maxCourtsOverride = checkOverride(maxCourtsOverride, "auctionboss.collector.max-courts-per-run");
 		this.maxRequestsOverride = checkOverride(maxRequestsOverride, "auctionboss.collector.max-requests-per-run");
@@ -105,6 +117,11 @@ public class CollectorSettings {
 		return new Photos(positiveInt(photos.path("intervalMs"), "photos.intervalMs"), maxItems,
 				positiveInt(photos.path("requestDelayMs"), "photos.requestDelayMs"),
 				positiveInt(photos.path("retryAfterHours"), "photos.retryAfterHours"));
+	}
+
+	/** 1회 실행용: 사진 대상을 이 물건 하나로 좁힌다(대기 조건은 그대로 적용). 없으면 좁히지 않는다. */
+	public Optional<Long> photosOnlyItemId() {
+		return Optional.ofNullable(photosOnlyItemId);
 	}
 
 	/** 차단 감지 시 백오프 길이(ms). */

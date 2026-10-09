@@ -41,6 +41,11 @@ public class CollectorRun {
 
 	private static final Logger log = LoggerFactory.getLogger(CollectorRun.class);
 
+	/** 틱·1회 실행이 쓰는 워커 이름과 단일 실행 잠금 이름. */
+	public static final String WORKER = "collector";
+
+	public static final String LOCK_NAME = "auctionboss.collector";
+
 	/** 회차 결과. {@code outcome}은 success·failed·blocked 중 하나다. */
 	public record Result(RunOutcome outcome, String errorKind, String errorMessage, CollectorRunDetail detail) {
 	}

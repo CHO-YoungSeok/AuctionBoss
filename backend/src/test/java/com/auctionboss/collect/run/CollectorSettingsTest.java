@@ -79,6 +79,16 @@ class CollectorSettingsTest {
 	}
 
 	@Test
+	void 사진_대상_물건_지정은_없으면_비어_있고_0_이하이면_거절한다() throws Exception {
+		String path = write(VALID).toString();
+
+		assertThat(new CollectorSettings(path, null, null, null, 1).photosOnlyItemId()).isEmpty();
+		assertThat(new CollectorSettings(path, null, null, null, 1, 42L).photosOnlyItemId()).contains(42L);
+		assertThatThrownBy(() -> new CollectorSettings(path, null, null, null, 1, 0L))
+			.isInstanceOf(IllegalStateException.class);
+	}
+
+	@Test
 	void 덮어쓰기_속성이_0_이하이면_거절한다() throws Exception {
 		String path = write(VALID).toString();
 

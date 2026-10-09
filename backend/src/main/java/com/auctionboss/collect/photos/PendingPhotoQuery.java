@@ -30,6 +30,7 @@ public class PendingPhotoQuery {
 			    photo_status IS NULL OR photo_status = 'uncollected'
 			    OR (photo_status = 'failed' AND (photo_attempted_at IS NULL OR photo_attempted_at <= ?))
 			  )
+			  AND (? IS NULL OR id = ?)
 			ORDER BY
 			  CASE WHEN (photo_status IS NULL OR photo_status = 'uncollected') THEN 0 ELSE 1 END,
 			  photo_attempted_at ASC,
@@ -43,11 +44,16 @@ public class PendingPhotoQuery {
 	}
 
 	public List<PendingPhoto> find(long limit, Instant now, long retryAfterHours) {
+		return find(limit, now, retryAfterHours, null);
+	}
+
+	/** {@code onlyItemId}가 있으면 대기 조건을 통과한 물건 중 그 물건만(1회 실행 확인용). */
+	public List<PendingPhoto> find(long limit, Instant now, long retryAfterHours, Long onlyItemId) {
 		Instant retryBefore = now.minusMillis(retryAfterHours * 3_600_000L);
 		return jdbc.query(SQL,
 				(rs, i) -> new PendingPhoto(rs.getLong("id"), rs.getString("internal_case_no"),
 						rs.getString("court_code")),
-				LocalDateTime.ofInstant(retryBefore, ZoneOffset.UTC), limit);
+				LocalDateTime.ofInstant(retryBefore, ZoneOffset.UTC), onlyItemId, onlyItemId, limit);
 	}
 
 }

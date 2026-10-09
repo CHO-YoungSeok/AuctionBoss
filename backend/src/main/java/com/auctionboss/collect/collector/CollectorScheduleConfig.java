@@ -20,9 +20,9 @@ import org.springframework.context.annotation.Configuration;
 @ConditionalOnProperty(name = "auctionboss.collector.enabled", havingValue = "true")
 class CollectorScheduleConfig {
 
-	static final String WORKER = "collector";
+	static final String WORKER = CollectorRun.WORKER;
 
-	static final String LOCK_NAME = "auctionboss.collector";
+	static final String LOCK_NAME = CollectorRun.LOCK_NAME;
 
 	@Bean
 	WorkerSchedule collectorSchedule(CollectorRun run, RunLock lock, BackoffStore backoff, WorkerRunService runs,

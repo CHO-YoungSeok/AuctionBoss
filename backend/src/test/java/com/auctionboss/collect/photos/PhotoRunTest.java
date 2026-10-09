@@ -530,7 +530,7 @@ class PhotoRunTest extends AbstractPhotoTest {
 	void 대기_물건_조회가_던지면_회차를_failed로_기록하고_다음_회차는_정상_시도한다() {
 		pendingItem();
 		source.onPhotos(ref -> photos(1, GIF));
-		doThrow(new IllegalStateException("query failed")).doCallRealMethod().when(pendingQuery).find(anyLong(), any(), anyLong());
+		doThrow(new IllegalStateException("query failed")).doCallRealMethod().when(pendingQuery).find(anyLong(), any(), anyLong(), any());
 
 		PhotoRun.Result failed = run.run(CONFIG);
 		PhotoRun.Result next = run.run(CONFIG);

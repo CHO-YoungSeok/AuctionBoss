@@ -45,6 +45,11 @@ public class PhotoRun {
 
 	private static final Logger log = LoggerFactory.getLogger(PhotoRun.class);
 
+	/** 틱·1회 실행이 쓰는 워커 이름과 단일 실행 잠금 이름(수집과 다르다). */
+	public static final String WORKER = "photos";
+
+	public static final String LOCK_NAME = "auctionboss.photos";
+
 	/** 회차 결과. {@code outcome}은 success·failed·blocked 중 하나다. */
 	public record Result(RunOutcome outcome, String errorKind, String errorMessage, PhotosRunDetail detail) {
 	}
@@ -100,7 +105,8 @@ public class PhotoRun {
 		ErrorInfo lastError = null;
 
 		try {
-			List<PendingPhoto> items = pending.find(config.maxItemsPerRun(), clock.now(), config.retryAfterHours());
+			List<PendingPhoto> items = pending.find(config.maxItemsPerRun(), clock.now(), config.retryAfterHours(),
+					settings.photosOnlyItemId().orElse(null));
 			log.info("[photos] 수집 시작 - 대기 물건 {}건", items.size());
 			if (!items.isEmpty()) {
 				AuctionSource source = sources.getObject();
