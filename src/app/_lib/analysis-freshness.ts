@@ -3,7 +3,7 @@
  * tasks.md 3.1~3.2).
  *
  * **재분석 대상 선정과 같은 규칙을 재사용한다.** 판정 로직을 여기서 새로 만들면 이
- * 화면과 워커(`src/lib/db/repository.ts`의 `NEEDS_ANALYSIS_PREDICATE`)가 다른 답을 낼 수
+ * 화면과 워커(백엔드의 재분석 후보 조건(`ItemSearchRepositoryTest`의 `needsAnalysis*`가 증명))가 다른 답을 낼 수
  * 있다 — 그게 이 파일이 그 SQL 조건과 정확히 같은 두 갈래(조건 1: 최신 분석 이후 실제
  * 변경 / 조건 2: 프롬프트 버전이 다름)로 판정하는 이유다:
  *

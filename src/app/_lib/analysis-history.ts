@@ -19,7 +19,7 @@ export interface AnalysisHistorySplit {
 
 /**
  * `listAnalyses(itemId)`가 반환하는 배열(레포지토리 계약상 `analyzed_at DESC, id DESC`로
- * 이미 정렬돼 있다 — `src/lib/db/repository.ts`의 `selectAnalyses`)을 최신 1건과 나머지로
+ * 이미 정렬돼 있다 — 백엔드의 분석 이력 조회)을 최신 1건과 나머지로
  * 나눈다.
  *
  * 여기서 다시 정렬하지 않는다 — 정렬 기준은 레포지토리의 책임이고 표시 계층은 그 계약을

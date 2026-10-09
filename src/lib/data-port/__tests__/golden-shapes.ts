@@ -2,13 +2,13 @@
  * 커밋된 계약 골든(1단계 읽기 골든 + 시나리오 골든)에 든 요청 틀의 집합(switch-web-to-data-port 5.3).
  *
  * 골든은 Spring이 실제로 같은 응답을 낸다고 `ContractTest`·`ScenarioContractTest`가 증명한 요청이다.
- * 포트 계약 테스트에서 Spring 구현체가 보낸 요청 틀이 모두 여기 있어야, "Spring 구현체 ≡ SQLite 구현체"
- * (대역 기준)와 "Spring ≡ Next 핸들러"(골든 기준)가 같은 요청 위에서 이어진다.
+ * `spring-requests-golden.test.ts`에서 Spring 구현체가 보낸 요청 틀이 모두 여기 있어야, "구현체가 이 요청을
+ * 보낸다"(대역 fetch 테스트)와 "백엔드가 이 요청에 이 응답을 낸다"(골든)가 같은 요청 위에서 이어진다.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { requestShape, shapeKey, type RequestShape } from "./next-stand-in";
+import { requestShape, shapeKey, type RequestShape } from "./fake-backend";
 
 export const CONTRACTS_DIR = path.resolve(__dirname, "../../../../backend/src/test/resources/contracts");
 

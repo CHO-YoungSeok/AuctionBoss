@@ -3,33 +3,15 @@
  *
  * 목록/상세의 관심 토글 폼이 실제로 거치는 경로다 — form-urlencoded 본문을 받아 등록/해제
  * 하고, 검증된 `returnTo`로 303 리다이렉트한다는 것이 핵심 계약이다(design.md D5: 필터·
- * 정렬·페이지가 유지된 URL로 복귀).
+ * 정렬·페이지가 유지된 URL로 복귀). 백엔드는 대역 `fetch`(Spring 원천)다
+ * (migrate-data-and-cutover 8.2).
  */
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { closeDb, getRepository, isBookmarked, listBookmarkedItems } from "@/lib/db";
-import { DATA_SOURCES_UNDER_TEST, useDataSource } from "@/lib/data-port/__tests__/data-sources";
+import { useFakeBackend } from "@/lib/data-port/__tests__/fake-backend";
 import type { AuctionItemInput } from "@/lib/domain";
 
 import { POST } from "../route";
-
-const originalEnv = process.env.AUCTIONBOSS_DB;
-let workDir: string;
-
-beforeEach(() => {
-  workDir = mkdtempSync(path.join(tmpdir(), "auctionboss-route-bookmark-toggle-"));
-  process.env.AUCTIONBOSS_DB = path.join(workDir, "test.db");
-});
-
-afterEach(() => {
-  closeDb();
-  if (originalEnv === undefined) delete process.env.AUCTIONBOSS_DB;
-  else process.env.AUCTIONBOSS_DB = originalEnv;
-  rmSync(workDir, { recursive: true, force: true });
-});
 
 function makeItem(overrides: Partial<AuctionItemInput> = {}): AuctionItemInput {
   return {
@@ -56,13 +38,12 @@ function formRequest(fields: Record<string, string>): Request {
   });
 }
 
-describe.each(DATA_SOURCES_UNDER_TEST)("POST /api/bookmarks/toggle (원천: %s)", (source) => {
-  useDataSource(source);
+describe("POST /api/bookmarks/toggle (원천: Spring)", () => {
+  const backend = useFakeBackend();
+  const bookmarkedIds = () => backend.bookmarks.map((b) => b.itemId);
 
   it("bookmarked=false(현재 상태)로 제출하면 등록하고 returnTo로 303 리다이렉트한다", async () => {
-    const repo = getRepository();
-    repo.upsertItems([makeItem()]);
-    const itemId = repo.listItems().items[0]!.id;
+    const itemId = backend.addItem(makeItem()).id;
 
     const response = await POST(
       formRequest({ itemId: String(itemId), bookmarked: "false", returnTo: "/?sort=minBidPrice" }),
@@ -72,28 +53,23 @@ describe.each(DATA_SOURCES_UNDER_TEST)("POST /api/bookmarks/toggle (원천: %s)"
     expect(new URL(response.headers.get("location")!).pathname + new URL(response.headers.get("location")!).search).toBe(
       "/?sort=minBidPrice",
     );
-    expect(isBookmarked(itemId)).toBe(true);
+    expect(bookmarkedIds()).toEqual([itemId]);
   });
 
   it("bookmarked=true(현재 상태)로 제출하면 해제한다", async () => {
-    const repo = getRepository();
-    repo.upsertItems([makeItem()]);
-    const itemId = repo.listItems().items[0]!.id;
-    const { addBookmark } = await import("@/lib/db");
-    addBookmark(itemId);
+    const itemId = backend.addItem(makeItem()).id;
+    backend.bookmark(itemId);
 
     const response = await POST(
       formRequest({ itemId: String(itemId), bookmarked: "true", returnTo: `/items/${itemId}` }),
     );
 
     expect(response.status).toBe(303);
-    expect(isBookmarked(itemId)).toBe(false);
+    expect(bookmarkedIds()).toEqual([]);
   });
 
   it("returnTo가 외부 오리진이면(오픈 리다이렉트 시도) 기본 경로(/)로 안전하게 되돌린다", async () => {
-    const repo = getRepository();
-    repo.upsertItems([makeItem()]);
-    const itemId = repo.listItems().items[0]!.id;
+    const itemId = backend.addItem(makeItem()).id;
 
     const response = await POST(
       formRequest({
@@ -114,9 +90,7 @@ describe.each(DATA_SOURCES_UNDER_TEST)("POST /api/bookmarks/toggle (원천: %s)"
   it.each(["/\\evil.example", "/\t/evil.example"])(
     "백슬래시·제어 문자로 외부 오리진을 노린 returnTo(%j)도 기본 경로로 되돌린다",
     async (returnTo) => {
-      const repo = getRepository();
-      repo.upsertItems([makeItem()]);
-      const itemId = repo.listItems().items[0]!.id;
+      const itemId = backend.addItem(makeItem()).id;
 
       const response = await POST(formRequest({ itemId: String(itemId), bookmarked: "false", returnTo }));
 
@@ -128,9 +102,7 @@ describe.each(DATA_SOURCES_UNDER_TEST)("POST /api/bookmarks/toggle (원천: %s)"
   );
 
   it("returnTo가 프로토콜 상대 경로(//evil.example)여도 기본 경로로 되돌린다", async () => {
-    const repo = getRepository();
-    repo.upsertItems([makeItem()]);
-    const itemId = repo.listItems().items[0]!.id;
+    const itemId = backend.addItem(makeItem()).id;
 
     const response = await POST(
       formRequest({ itemId: String(itemId), bookmarked: "false", returnTo: "//evil.example" }),
@@ -140,23 +112,21 @@ describe.each(DATA_SOURCES_UNDER_TEST)("POST /api/bookmarks/toggle (원천: %s)"
     expect(location.hostname).toBe("localhost");
   });
 
-  it("itemId가 올바르지 않으면 400이다", async () => {
+  it("itemId가 올바르지 않으면 400이고 백엔드를 부르지 않는다", async () => {
     const response = await POST(
       formRequest({ itemId: "not-a-number", bookmarked: "false", returnTo: "/" }),
     );
     expect(response.status).toBe(400);
+    expect(backend.requests).toEqual([]);
   });
 
   it("존재하지 않는 물건은 404이고 관심 목록은 바뀌지 않는다", async () => {
-    const repo = getRepository();
-    repo.upsertItems([makeItem()]);
-    const existingId = repo.listItems().items[0]!.id;
-    const before = listBookmarkedItems().total;
+    const existingId = backend.addItem(makeItem()).id;
     const response = await POST(
       formRequest({ itemId: "999999", bookmarked: "false", returnTo: "/" }),
     );
     expect(response.status).toBe(404);
-    expect(isBookmarked(existingId)).toBe(false);
-    expect(listBookmarkedItems().total).toBe(before);
+    expect(bookmarkedIds()).not.toContain(existingId);
+    expect(bookmarkedIds()).toEqual([]);
   });
 });

@@ -1,13 +1,5 @@
-# Base node image
+# Base node image. 네이티브 모듈이 없어 빌드 도구를 설치하지 않는다(SQLite 은퇴: migrate-data-and-cutover 8.5).
 FROM node:22-slim AS base
-
-# Install python and build-essential for better-sqlite3 native bindings
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    make \
-    g++ \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
 
 # Builder stage
 FROM base AS builder
@@ -34,10 +26,6 @@ COPY --from=builder /app/config ./config
 COPY --from=builder /app/next.config.ts ./
 # tsx가 워커의 "@/*" 경로 별칭을 해석하는 데 필요하다(없으면 MODULE_NOT_FOUND).
 COPY --from=builder /app/tsconfig.json ./
-
-# Create data directory for sqlite DB
-RUN mkdir -p /app/data && chown -R node:node /app/data
-VOLUME /app/data
 
 EXPOSE 3000
 

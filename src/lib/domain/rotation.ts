@@ -3,7 +3,7 @@
  *
  * DB·워커 상태를 전혀 모른다 — "법원 목록 + 저장된 위치 + 회차당 상한"만 받아
  * "이번 회차 대상 법원들 + 다음 회차 시작 위치"를 계산한다. 저장/조회는
- * `src/lib/db/collector-state.ts`가, 회차 실행은 `workers/collector.ts`가 맡는다.
+ * 백엔드(`RotationSelector`)가, 회차 실행은 백엔드 수집 스케줄러가 맡는다.
  */
 import type { CourtRef } from "./types";
 

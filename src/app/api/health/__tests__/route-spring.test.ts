@@ -1,29 +1,7 @@
 /**
  * /api/health, Spring 원천(migrate-data-and-cutover D9, 5.2). 웹은 DB를 직접 열지 않고 백엔드 헬스체크로 판정한다.
- * 이 파일은 `@/lib/db`의 모든 접근과 `better-sqlite3`를 던지게 한 채로 돈다 - SQLite를 열면 실패한다.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-
-vi.mock(
-  "@/lib/db",
-  () =>
-    new Proxy(
-      {},
-      {
-        get: (_target, name) =>
-          typeof name === "symbol" || name === "then"
-            ? undefined
-            : () => {
-                throw new Error(`spring 모드에서 @/lib/db를 썼습니다: ${String(name)}`);
-              },
-      },
-    ),
-);
-vi.mock("better-sqlite3", () => ({
-  default: function Database() {
-    throw new Error("spring 모드에서 SQLite를 열었습니다");
-  },
-}));
 
 import { setDataPortForTesting } from "@/lib/data-port";
 import { createSpringPort } from "@/lib/data-port/spring/port";

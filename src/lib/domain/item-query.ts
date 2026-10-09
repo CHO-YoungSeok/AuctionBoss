@@ -30,7 +30,7 @@ import { z } from "zod";
 
 import type { IsoDate, Won } from "./types";
 
-/** 정렬 기준. SQL 표현식 매핑은 저장소(`src/lib/db/repository.ts`)가 갖는다. */
+/** 정렬 기준. SQL 표현식 매핑은 백엔드가 갖는다. */
 export const SORT_KEYS = [
   "auctionDate",
   "minBidPrice",

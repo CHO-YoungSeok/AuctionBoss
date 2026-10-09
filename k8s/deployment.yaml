@@ -1,4 +1,4 @@
-# 웹: 단일 컨테이너. 데이터 볼륨·SQLite 없음 - 데이터 원천은 백엔드(spring)다.
+# 웹: 단일 컨테이너. 데이터 볼륨 없음 - 데이터 원천은 백엔드(spring)다.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

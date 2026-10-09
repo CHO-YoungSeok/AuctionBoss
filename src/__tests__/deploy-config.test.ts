@@ -63,7 +63,6 @@ const DEPLOY_FILES = [
   "Dockerfile",
   "backend/Dockerfile",
   ".github/workflows/ci.yml",
-  "scripts/dev/compare-screens.sh",
   "scripts/docker-smoke.sh",
   ...K8S_FILES,
 ];
@@ -344,16 +343,40 @@ describe("웹은 spring 원천(migrate-data-and-cutover D9)", () => {
     }
     expect(Object.keys(k8sConfigMap.data ?? {})).not.toContain("AUCTIONBOSS_DB");
   });
+});
 
-  it("SQLite 볼륨·PVC는 선언만 남고 어느 서비스·워크로드도 마운트하지 않는다(롤백 창)", () => {
-    expect(Object.keys(compose.volumes)).toContain("auctionboss-data");
+describe("SQLite 흔적 없음(migrate-data-and-cutover 8.5)", () => {
+  it("compose·K8s에 SQLite 볼륨·PVC 선언이 없고 어느 서비스·워크로드도 데이터 디렉터리를 마운트하지 않는다", () => {
+    expect(Object.keys(compose.volumes).sort()).toEqual(["mysql-data", "photos-data"]);
+    expect(Object.keys(load("docker-compose.smoke.yml").volumes ?? {})).not.toContain("auctionboss-data");
     for (const [name, svc] of Object.entries<Any>(compose.services)) {
-      for (const v of svc.volumes ?? []) expect(String(v), name).not.toMatch(/^auctionboss-data:/);
+      for (const v of svc.volumes ?? []) {
+        expect(String(v), name).not.toMatch(/^auctionboss-data:|:\/app\/data\b/);
+      }
     }
-    expect(k8sPvcs.map((p) => p.metadata.name)).toContain("auctionboss-data-pvc");
+    expect(k8sPvcs.map((p) => p.metadata.name)).toEqual(["auctionboss-photos-pvc"]);
     for (const d of [k8sWeb, k8sAnalyzer, k8sBackend, k8sMysql]) {
-      expect(JSON.stringify(d.spec.template.spec.volumes ?? [])).not.toContain("auctionboss-data-pvc");
+      const text = JSON.stringify(d.spec.template.spec);
+      expect(text).not.toContain("auctionboss-data-pvc");
+      expect(text).not.toContain("/app/data");
     }
+  });
+
+  it("Next 이미지는 네이티브 빌드 도구를 설치하지 않고 /app/data 볼륨이 없으며, CI도 build-essential을 설치하지 않는다", () => {
+    const dockerfile = stripComments(read("Dockerfile"));
+    expect(dockerfile).not.toMatch(/\b(python3|make|g\+\+|gcc|build-essential)\b/);
+    expect(dockerfile).not.toMatch(/\/app\/data|^\s*VOLUME\b/m);
+    expect(stripComments(read(".github/workflows/ci.yml"))).not.toMatch(/build-essential|python3|g\+\+/);
+  });
+
+  it("package.json에 SQLite 드라이버와 TS 수집기·사진 워커 실행 명령이 없다", () => {
+    const pkg = JSON.parse(read("package.json"));
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    expect(Object.keys(deps).filter((n) => /sqlite/i.test(n))).toEqual([]);
+    expect(Object.keys(pkg.scripts)).not.toContain("collector");
+    expect(Object.keys(pkg.scripts)).not.toContain("photos");
+    expect(Object.keys(pkg.scripts)).toContain("analyzer");
+    expect(read("next.config.ts")).not.toMatch(/sqlite/i);
   });
 });
 
@@ -447,114 +470,5 @@ describe("Next 이미지(Dockerfile)", () => {
     const dockerfile = readFileSync(join(root, "Dockerfile"), "utf8");
     const runner = dockerfile.slice(dockerfile.lastIndexOf("FROM "));
     expect(runner).toMatch(/COPY\s+--from=builder\s+\S*tsconfig\.json/);
-  });
-});
-
-
-describe("리허설 구성: 실제 사이트 0요청·운영 자원 격리(migrate-data-and-cutover D13)", () => {
-  // compose 덮어쓰기 태그(!override, !reset)는 병합 방식 지시라 값 검사에는 필요 없다. 태그만 떼고 읽는다.
-  const loadTagged = (p: string): Any => yaml.load(read(p).replace(/\s!(override|reset)\b/g, ""));
-
-  const rehearsal = loadTagged("scripts/dev/rehearsal.override.yml");
-  const rollbackOverride = loadTagged("scripts/dev/rehearsal-rollback.override.yml");
-  const rehearsalCollector = JSON.parse(read("scripts/dev/rehearsal-collector.json"));
-  const productionCollector = JSON.parse(read("config/collector.json"));
-  const script = read("scripts/dev/rehearse-cutover.sh");
-  const env = rehearsal.services.backend.environment;
-
-  const sourceUrl = new URL(String(envValue(env, "AUCTIONBOSS_SOURCE_BASE_URL")));
-
-  it("backend는 외부 요청 허용이 거짓이고 소스 주소가 루프백이다(사이드카 가짜 서버)", () => {
-    expect(envValue(env, "AUCTIONBOSS_SOURCE_EXTERNAL_REQUESTS_ALLOWED")).toBe("false");
-    expect(["127.0.0.1", "localhost", "[::1]"]).toContain(sourceUrl.hostname);
-    // 이 덮어쓰기가 세 설정 중 허용 쪽을 켜는 일은 없다(수집·사진 켬은 운영 파일의 값을 그대로 쓴다)
-    for (const key of Object.keys(env)) {
-      if (key === "AUCTIONBOSS_SOURCE_EXTERNAL_REQUESTS_ALLOWED") continue;
-      if (/ENABLED|ALLOWED/.test(key)) expect(String(env[key]), key).not.toMatch(/^true$/i);
-    }
-    // 첫 틱은 사이드카가 뜬 뒤(주기 후)에 돈다
-    expect(envValue(env, "AUCTIONBOSS_COLLECTOR_RUN_IMMEDIATELY")).toBe("false");
-    expect(envValue(env, "AUCTIONBOSS_PHOTOS_RUN_IMMEDIATELY")).toBe("false");
-  });
-
-  it("가짜 서버 사이드카는 backend와 같은 네트워크 네임스페이스에서 소스 주소의 포트를 받고 npx를 쓰지 않는다", () => {
-    const fake = rehearsal.services["source-fake"];
-    expect(fake.network_mode).toBe("service:backend");
-    const cmd: string[] = fake.command.map(String);
-    expect(cmd[cmd.indexOf("--port") + 1]).toBe(sourceUrl.port);
-    // npx는 npm 레지스트리에 접속할 수 있다(외부 연결). 설치된 tsx를 직접 부른다.
-    expect(cmd.join(" ")).not.toMatch(/\bnpx\b/);
-    expect(cmd.join(" ")).toContain("fake-source-server.ts");
-  });
-
-  it("호스트 포트는 루프백에만 열고 운영 구성의 8080·3000·3307과 겹치지 않는다", () => {
-    for (const name of ["mysql", "backend", "web"]) {
-      const ports: string[] = rehearsal.services[name].ports.map(String);
-      expect(ports.length, name).toBeGreaterThan(0);
-      for (const p of ports) {
-        expect(p, name).toMatch(/^127\.0\.0\.1:/);
-        expect(p, name).not.toMatch(/:(8080|3000|3307)(\}|:)/);
-        expect(p, name).not.toMatch(/^127\.0\.0\.1:(8080|3000|3307):/);
-      }
-    }
-    for (const p of rollbackOverride.services.web.ports.map(String)) {
-      expect(p).toMatch(/^127\.0\.0\.1:/);
-      expect(p).not.toMatch(/^127\.0\.0\.1:(3000|8080|3307):/);
-    }
-  });
-
-  it("분석 워커는 가짜 CLI와 빈 API 키를 쓴다(실제 Claude 호출 0)", () => {
-    const e = rehearsal.services.analyzer.environment;
-    expect(envValue(e, "ANTHROPIC_API_KEY")).toBe("");
-    expect(String(envValue(e, "AUCTIONBOSS_CLAUDE_BIN"))).toMatch(/scripts\/dev\/fake-claude$/);
-    const e2 = rollbackOverride.services.analyzer.environment;
-    expect(envValue(e2, "ANTHROPIC_API_KEY")).toBe("");
-    expect(String(envValue(e2, "AUCTIONBOSS_CLAUDE_BIN"))).toMatch(/scripts\/dev\/fake-claude$/);
-  });
-
-  it("롤백 리허설의 옛 TS 수집기·사진 워커는 네트워크가 끊겨 있다(소스 주소를 바꿀 수 없어 실제 사이트로 향하기 때문)", () => {
-    expect(rollbackOverride.services.collector.network_mode).toBe("none");
-    expect(rollbackOverride.services.photos.network_mode).toBe("none");
-  });
-
-  it("리허설 수집 설정은 운영과 같은 법원·예산에 주기만 1분이다", () => {
-    expect(rehearsalCollector.scope).toEqual(productionCollector.scope);
-    expect(rehearsalCollector.intervalMs).toBe(60000);
-    expect(rehearsalCollector.photos.intervalMs).toBe(60000);
-    expect(rehearsalCollector.photos.retryAfterHours).toBe(productionCollector.photos.retryAfterHours);
-  });
-
-  it("리허설 스크립트의 compose 호출은 별도 프로젝트 이름만 쓰고 운영 프로젝트(auctionboss)를 가리키지 않는다", () => {
-    const lines = stripComments(script).split("\n");
-    const composeLines = lines.filter((l) => /docker compose/.test(l) && !/^\s*echo\b/.test(l));
-    expect(composeLines.length).toBeGreaterThan(0);
-    for (const l of composeLines) {
-      expect(l, l).toMatch(/-p "?\$(PROJECT|\{PROJECT\})(-old)?"?\s/);
-      expect(l, l).not.toMatch(/-p auctionboss(\s|$)/);
-    }
-    expect(script).toMatch(/^PROJECT=auctionboss-rehearsal$/m);
-    // 운영 볼륨 이름을 직접 다루지 않는다(copy·삭제 대상은 리허설 옛 볼륨뿐)
-    expect(stripComments(script)).not.toMatch(/auctionboss_auctionboss-data|auctionboss_mysql-data|auctionboss-mysql-dev/);
-    // 원본을 쓰기로 열지 않는다: 원본 경로는 내보내기와 해시 계산, 복사의 원본으로만 나온다
-    for (const l of stripComments(script).split("\n").filter((l) => /\$SRC_DB|data\/auctionboss\.db/.test(l))) {
-      expect(l, l).toMatch(/^SRC_DB=|shasum|--source|cp -p |readonly:true/);
-    }
-  });
-  it("clean은 data/migration 전체가 아니라 리허설이 만든 내보내기 디렉터리만 지운다(실제 전환 백업 보호)", () => {
-    const code = stripComments(script);
-    expect(code).not.toMatch(/rm -rf[^\n]*data\/migration\/\*/);
-    expect(code).toMatch(/exports\.list/);
-    // down -v는 리허설 프로젝트(dc 또는 -p $PROJECT[-old])에만 건다
-    for (const l of code.split("\n").filter((l) => /\bdown\b.*-v|volume rm/.test(l))) {
-      expect(l, l).toMatch(/^\s*dc down|-p "\$PROJECT-old"/);
-    }
-  });
-
-  it("운영 런북 7은 analyzer를 분리해 올리는 선택지를 적는다(전환 즉시 실제 Claude 호출 방지)", () => {
-    const ref = read("docs/REFERENCE.md");
-    const sec = ref.slice(ref.indexOf("## 9. 운영 전환 런북"), ref.indexOf("## 10. 롤백 런북"));
-    expect(sec).toMatch(/analyzer[\s\S]*실제 Claude/);
-    expect(sec).toContain("docker compose up -d --remove-orphans backend web`");
-    expect(sec).toContain("docker compose up -d analyzer");
   });
 });

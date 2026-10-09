@@ -1,17 +1,3 @@
-# auctionboss-data-pvc: 이전 전 TS 구성의 SQLite·사진 PVC. 롤백 창 동안 남긴다(어느 워크로드도 마운트하지 않는다).
-# 은퇴(migrate-data-and-cutover 8장) 때 지운다.
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: auctionboss-data-pvc
-  namespace: auctionboss
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
----
 # 백엔드 사진 볼륨(/app/photos). 사진 파일은 이 볼륨에 둔다.
 apiVersion: v1
 kind: PersistentVolumeClaim

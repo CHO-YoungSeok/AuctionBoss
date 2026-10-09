@@ -1,35 +1,16 @@
 /**
- * 변동 피드 화면(`/feed`) 렌더 테스트(switch-web-to-data-port 2.7). `/bookmarks` 렌더 테스트와 같은 방식.
+ * 변동 피드 화면(`/feed`) 렌더 테스트(switch-web-to-data-port 2.7). `/bookmarks` 렌더 테스트와 같은 방식
+ * (백엔드 대역 `fetch`, migrate-data-and-cutover 8.2). 미확인 판정(읽음 시각 이후의 변동)은 백엔드의 일이고
+ * 대역은 같은 규칙으로 개수를 낸다 — 화면은 받은 개수와 표시를 그대로 그리는지만 본다.
  */
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { addBookmark, closeDb, getRepository, getUnreadCount, markFeedRead } from "@/lib/db";
 import type { AuctionItemInput } from "@/lib/domain";
 
-import { DATA_SOURCES_UNDER_TEST, useDataSource } from "@/lib/data-port/__tests__/data-sources";
+import { useFakeBackend, type FakeBackend } from "@/lib/data-port/__tests__/fake-backend";
 import FeedPage from "../page";
-
-let workDir: string;
-let originalDbEnv: string | undefined;
-
-beforeEach(() => {
-  workDir = mkdtempSync(path.join(tmpdir(), "auctionboss-feed-render-"));
-  originalDbEnv = process.env.AUCTIONBOSS_DB;
-  process.env.AUCTIONBOSS_DB = path.join(workDir, "test.db");
-  closeDb();
-});
-
-afterEach(() => {
-  closeDb();
-  if (originalDbEnv === undefined) delete process.env.AUCTIONBOSS_DB;
-  else process.env.AUCTIONBOSS_DB = originalDbEnv;
-  rmSync(workDir, { recursive: true, force: true });
-});
 
 function makeItem(overrides: Partial<AuctionItemInput> = {}): AuctionItemInput {
   return {
@@ -47,14 +28,12 @@ function makeItem(overrides: Partial<AuctionItemInput> = {}): AuctionItemInput {
   };
 }
 
-/** 물건 하나를 담고 가격을 두 번 바꿔(2026-01-02, 2026-01-03) 변동을 만든다. */
-function seedBookmarkedItemWithChanges(): number {
-  const repo = getRepository();
-  repo.upsertItems([makeItem()], { now: "2026-01-01T00:00:00.000Z" });
-  const id = repo.listItems().items[0].id;
-  addBookmark(id, { now: "2026-01-01T12:00:00.000Z" });
-  repo.upsertItems([makeItem({ minBidPrice: 320_000_000 })], { now: "2026-01-02T00:00:00.000Z" });
-  repo.upsertItems([makeItem({ minBidPrice: 256_000_000 })], { now: "2026-01-03T00:00:00.000Z" });
+/** 물건 하나를 담고 가격이 두 번 바뀐 변동(2026-01-02, 2026-01-03)을 피드에 넣는다. */
+function seedBookmarkedItemWithChanges(backend: FakeBackend): number {
+  const id = backend.addItem(makeItem()).id;
+  backend.bookmark(id, "2026-01-01T12:00:00.000Z");
+  backend.addFeedEntry(id, "minBidPrice", "400000000", "320000000", "2026-01-02T00:00:00.000Z");
+  backend.addFeedEntry(id, "minBidPrice", "320000000", "256000000", "2026-01-03T00:00:00.000Z");
   return id;
 }
 
@@ -63,8 +42,9 @@ async function renderFeed(page?: string): Promise<string> {
   return renderToStaticMarkup(createElement(() => element));
 }
 
-describe.each(DATA_SOURCES_UNDER_TEST)("변동 피드 화면 렌더링 [%s 원천]", (source) => {
-  useDataSource(source);
+describe("변동 피드 화면 렌더링 [Spring 원천]", () => {
+  const backend = useFakeBackend();
+
   it("변동이 없으면 빈 상태 안내만 있고 읽음 버튼도 없다", async () => {
     const html = await renderFeed();
 
@@ -75,9 +55,8 @@ describe.each(DATA_SOURCES_UNDER_TEST)("변동 피드 화면 렌더링 [%s 원�
   });
 
   it("한 번도 읽지 않았으면 모든 변동이 미확인이고, 읽음 버튼은 현재 경로를 returnTo로 갖는다", async () => {
-    seedBookmarkedItemWithChanges();
-    const unread = getUnreadCount();
-    expect(unread).toBeGreaterThan(0);
+    seedBookmarkedItemWithChanges(backend);
+    const unread = 2;
 
     const html = await renderFeed();
 
@@ -91,8 +70,8 @@ describe.each(DATA_SOURCES_UNDER_TEST)("변동 피드 화면 렌더링 [%s 원�
   });
 
   it("읽음 처리 뒤에는 읽음 버튼과 미확인 표시가 사라지지만 변동 행은 그대로 보인다", async () => {
-    seedBookmarkedItemWithChanges();
-    markFeedRead("2026-01-04T00:00:00.000Z");
+    seedBookmarkedItemWithChanges(backend);
+    backend.lastReadAt = "2026-01-04T00:00:00.000Z";
 
     const html = await renderFeed();
 
@@ -104,31 +83,27 @@ describe.each(DATA_SOURCES_UNDER_TEST)("변동 피드 화면 렌더링 [%s 원�
   });
 
   it("일부만 읽었으면 최근 변동 몇 건만 미확인으로 강조된다", async () => {
-    seedBookmarkedItemWithChanges();
-    const total = getUnreadCount();
-    markFeedRead("2026-01-02T12:00:00.000Z"); // 01-03 변동만 남는다
-    const unread = getUnreadCount();
-    expect(unread).toBeGreaterThan(0);
-    expect(unread).toBeLessThan(total);
+    seedBookmarkedItemWithChanges(backend);
+    backend.lastReadAt = "2026-01-02T12:00:00.000Z"; // 01-03 변동만 남는다
 
     const html = await renderFeed();
 
-    expect(html.split("feed-row-unread").length - 1).toBe(unread);
-    expect(html).toContain(`전체 읽음 처리 (미확인 ${unread}건)`);
+    expect(html.split("feed-row-unread").length - 1).toBe(1);
+    expect(html).toContain("전체 읽음 처리 (미확인 1건)");
   });
 
-  it("피드를 여는 것만으로는 읽음 처리가 일어나지 않는다", async () => {
-    seedBookmarkedItemWithChanges();
-    const before = getUnreadCount();
+  it("피드를 여는 것만으로는 읽음 처리가 일어나지 않는다(읽음 요청을 보내지 않는다)", async () => {
+    seedBookmarkedItemWithChanges(backend);
 
     await renderFeed();
     await renderFeed();
 
-    expect(getUnreadCount()).toBe(before);
+    expect(backend.lastReadAt).toBeNull();
+    expect(backend.requests.some((r) => r.method !== "GET")).toBe(false);
   });
 
   it("잘못된 page는 1페이지로 복구한다", async () => {
-    seedBookmarkedItemWithChanges();
+    seedBookmarkedItemWithChanges(backend);
     expect(await renderFeed("abc")).toContain("1 / 1");
     expect(await renderFeed("-3")).toContain("1 / 1");
   });

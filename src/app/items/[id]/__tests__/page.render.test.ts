@@ -2,58 +2,22 @@
  * 물건 상세 페이지(`page.tsx`)를 실제로 렌더링해 HTML을 검사하는 테스트
  * (hardening-round1 task 3, design.md D2).
  *
- * 이 프로젝트에는 지금까지 서버 컴포넌트를 실제로 렌더링하는 테스트가 하나도 없었다 —
- * "필드가 화면에 실제로 배선됐는가"가 타입 검사와 수동 curl에만 의존해 왔다(1번
- * 인수인계 항목이 실제로 그 결과였다: `AnalysisBody`가 만들어지고 테스트도 있었는데
- * 페이지에는 배선되지 않은 채로 한 사이클을 넘겼다).
+ * 서버 컴포넌트를 실제로 렌더링해야만 "필드가 화면에 실제로 배선됐는가"를 확인할 수 있다 —
+ * `AnalysisBody`가 만들어지고 테스트도 있었는데 페이지에는 배선되지 않은 채로 한 사이클을 넘긴
+ * 실례가 있다. 페이지 함수는 `async function` + `params: Promise<...>`라 그냥 `await`로 호출하면
+ * JSX 엘리먼트가 나오고, 여기에 `renderToStaticMarkup`을 씌운다. `notFound()`는 Next 요청 컨텍스트
+ * 밖에서도 특정 에러를 던진다.
  *
- * 8회차가 `AnalysisBody`(순수 컴포넌트, DB 의존 없음)를 `renderToStaticMarkup`으로
- * 테스트한 방식이 그대로 확장되는지 시험해 본 결과: **페이지 전체(async 서버 컴포넌트 +
- * 실제 DB 조회)까지는 확장된다.** 필요했던 것:
- *  - `getRepository()`가 읽는 DB 경로(`AUCTIONBOSS_DB`)를 테스트마다 새 임시 파일로
- *    돌려 끼우고, `closeDb()`로 싱글턴 캐시를 초기화한다(client.ts의 `getDb()`는 경로가
- *    바뀌면 자동으로 재연결하므로 이것만으로 충분하다 — 리포지토리 계층을 흉내 낼
- *    필요가 없다).
- *  - 페이지 함수는 `async function` + `params: Promise<...>`라 그냥 `await`로 직접
- *    호출하면 JSX 엘리먼트가 나온다. 여기에 `renderToStaticMarkup`을 씌우면 끝이다.
- *  - `notFound()`(next/navigation)는 Next 요청 컨텍스트 밖에서도 그냥 특정 에러를
- *    던진다 — try/catch로 잡아 "404 결과"로 확인할 수 있다.
- *
- * 비용은 실제로 있다: 임시 DB 파일 생성/정리, 시드 데이터 조립(확장 필드 다수)이
- * 순수 함수 테스트보다 무겁다. 그래도 "필드가 실제로 화면에 나오는가"는 이 계층에서만
- * 확인 가능한 사실이라(순수 함수는 문자열을 만들 뿐 그 문자열이 실제로 JSX 트리에
- * 들어갔는지는 보장하지 않는다) 최소 하나는 만들어 볼 가치가 있다고 판단했다 — 이번
- * 사이클의 task 1(AnalysisBody 배선 누락)이 정확히 그 gap의 실례다.
+ * 데이터는 백엔드 대역 `fetch`(Spring 원천)로 받는다(migrate-data-and-cutover 8.2).
  */
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { closeDb, getRepository } from "@/lib/db";
 import type { AuctionItemInput } from "@/lib/domain";
 
-import { DATA_SOURCES_UNDER_TEST, useDataSource } from "@/lib/data-port/__tests__/data-sources";
+import { useFakeBackend } from "@/lib/data-port/__tests__/fake-backend";
 import ItemDetailPage from "../page";
-
-let workDir: string;
-let originalDbEnv: string | undefined;
-
-beforeEach(() => {
-  workDir = mkdtempSync(path.join(tmpdir(), "auctionboss-page-render-"));
-  originalDbEnv = process.env.AUCTIONBOSS_DB;
-  process.env.AUCTIONBOSS_DB = path.join(workDir, "test.db");
-  closeDb(); // 이전 테스트(다른 파일 포함, 같은 워커 프로세스)의 캐시된 연결을 버린다.
-});
-
-afterEach(() => {
-  closeDb();
-  if (originalDbEnv === undefined) delete process.env.AUCTIONBOSS_DB;
-  else process.env.AUCTIONBOSS_DB = originalDbEnv;
-  rmSync(workDir, { recursive: true, force: true });
-});
 
 function makeItem(overrides: Partial<AuctionItemInput> = {}): AuctionItemInput {
   return {
@@ -76,11 +40,11 @@ async function renderItemPage(id: string): Promise<string> {
   return renderToStaticMarkup(createElement(() => element));
 }
 
-describe.each(DATA_SOURCES_UNDER_TEST)("물건 상세 페이지 렌더링 (hardening-round1 task 3) [%s 원천]", (source) => {
-  useDataSource(source);
+describe("물건 상세 페이지 렌더링 (hardening-round1 task 3) [Spring 원천]", () => {
+  const backend = useFakeBackend();
+
   it("확장 필드와 분석 본문(굵게)이 실제 HTML에 나타난다", async () => {
-    const repo = getRepository();
-    repo.upsertItems([
+    const item = backend.addItem(
       makeItem({
         minArea: 84,
         maxArea: 85,
@@ -88,14 +52,8 @@ describe.each(DATA_SOURCES_UNDER_TEST)("물건 상세 페이지 렌더링 (harde
         sido: "서울특별시",
         sigungu: "관악구",
       }),
-    ]);
-    const item = repo.getItemById(1)!;
-    repo.insertAnalysis({
-      itemId: item.id,
-      body: "**요약 평가** — 정상 물건이다.",
-      model: "claude-sonnet-5",
-      promptVersion: "v3",
-    });
+    );
+    backend.addAnalysis(item.id, { body: "**요약 평가** — 정상 물건이다.", model: "claude-sonnet-5", promptVersion: "v3" });
 
     const html = await renderItemPage(String(item.id));
 
@@ -110,15 +68,8 @@ describe.each(DATA_SOURCES_UNDER_TEST)("물건 상세 페이지 렌더링 (harde
   });
 
   it("<script> 페이로드가 분석 본문에 있어도 실행 가능한 태그로 나오지 않는다", async () => {
-    const repo = getRepository();
-    repo.upsertItems([makeItem()]);
-    const item = repo.getItemById(1)!;
-    repo.insertAnalysis({
-      itemId: item.id,
-      body: "특이사항 — <script>alert(1)</script> 확인 필요.",
-      model: null,
-      promptVersion: "v3",
-    });
+    const item = backend.addItem(makeItem());
+    backend.addAnalysis(item.id, { body: "특이사항 — <script>alert(1)</script> 확인 필요.", promptVersion: "v3" });
 
     const html = await renderItemPage(String(item.id));
 
@@ -127,9 +78,8 @@ describe.each(DATA_SOURCES_UNDER_TEST)("물건 상세 페이지 렌더링 (harde
   });
 
   it("확장 필드·분석·이력이 전부 없는 물건(null 투성이)도 오류 없이 렌더되고 NaN/Infinity가 새지 않는다", async () => {
-    const repo = getRepository();
     // 확장 필드는 전부 생략(옵셔널) — 이 change 이전 수집분을 흉내낸다.
-    repo.upsertItems([
+    const item = backend.addItem(
       makeItem({
         appraisalPrice: null,
         minBidPrice: null,
@@ -137,8 +87,7 @@ describe.each(DATA_SOURCES_UNDER_TEST)("물건 상세 페이지 렌더링 (harde
         failedBidCount: null,
         status: null,
       }),
-    ]);
-    const item = repo.getItemById(1)!;
+    );
 
     const html = await renderItemPage(String(item.id));
 
@@ -149,33 +98,23 @@ describe.each(DATA_SOURCES_UNDER_TEST)("물건 상세 페이지 렌더링 (harde
   });
 
   it("존재하지 않는 id는 notFound()를 던진다(404)", async () => {
-    // 물건을 하나도 저장하지 않은 빈 DB.
-    getRepository();
-
+    // 물건을 하나도 저장하지 않은 빈 백엔드.
     await expect(ItemDetailPage({ params: Promise.resolve({ id: "999999" }) })).rejects.toThrow(
       /NEXT_HTTP_ERROR_FALLBACK|NEXT_NOT_FOUND/,
     );
   });
 
   it("숫자가 아닌 id도 notFound()로 처리된다(Number('12abc')=NaN에 의존하지 않음)", async () => {
-    getRepository();
-
     await expect(ItemDetailPage({ params: Promise.resolve({ id: "12abc" }) })).rejects.toThrow(
       /NEXT_HTTP_ERROR_FALLBACK|NEXT_NOT_FOUND/,
     );
   });
+
   it("이전 분석은 최근 10건만 본문으로 그리고 나머지는 건수로만 알린다(MAX_ANALYSES_FETCHED)", async () => {
-    const repo = getRepository();
-    repo.upsertItems([makeItem()]);
-    const item = repo.getItemById(1)!;
+    const item = backend.addItem(makeItem());
     const total = 13;
     for (let n = 1; n <= total; n += 1) {
-      repo.insertAnalysis({
-        itemId: item.id,
-        body: `[[BODY-${String(n).padStart(2, "0")}]]`,
-        model: null,
-        promptVersion: "v3",
-      });
+      backend.addAnalysis(item.id, { body: `[[BODY-${String(n).padStart(2, "0")}]]`, promptVersion: "v3" });
     }
 
     const html = await renderItemPage(String(item.id));
@@ -192,16 +131,9 @@ describe.each(DATA_SOURCES_UNDER_TEST)("물건 상세 페이지 렌더링 (harde
   });
 
   it("이전 분석이 10건 이하면 숨김 안내 없이 전부 본문으로 나온다", async () => {
-    const repo = getRepository();
-    repo.upsertItems([makeItem()]);
-    const item = repo.getItemById(1)!;
+    const item = backend.addItem(makeItem());
     for (let n = 1; n <= 11; n += 1) {
-      repo.insertAnalysis({
-        itemId: item.id,
-        body: `[[BODY-${String(n).padStart(2, "0")}]]`,
-        model: null,
-        promptVersion: "v3",
-      });
+      backend.addAnalysis(item.id, { body: `[[BODY-${String(n).padStart(2, "0")}]]`, promptVersion: "v3" });
     }
 
     const html = await renderItemPage(String(item.id));
@@ -212,11 +144,11 @@ describe.each(DATA_SOURCES_UNDER_TEST)("물건 상세 페이지 렌더링 (harde
   });
 });
 
-describe.each(DATA_SOURCES_UNDER_TEST)("물건 상세 페이지 — 사진 표시 상태 (fix-photo-worker-and-deploy-config 4.1, D6) [%s 원천]", (source) => {
-  useDataSource(source);
+describe("물건 상세 페이지 — 사진 표시 상태 (fix-photo-worker-and-deploy-config 4.1, D6) [Spring 원천]", () => {
+  const backend = useFakeBackend();
+
   it("상세 조회 식별자가 없는 물건은 '사진 정보 없음(조회 불가)'로 보이고 실패·대기 문구는 없다", async () => {
-    const repo = getRepository();
-    repo.upsertItems([makeItem()]);
+    backend.addItem(makeItem());
     const html = await renderItemPage("1");
     expect(html).toContain("사진 정보 없음(조회 불가)");
     expect(html).not.toContain("사진 수집 실패");
@@ -224,11 +156,37 @@ describe.each(DATA_SOURCES_UNDER_TEST)("물건 상세 페이지 — 사진 표�
   });
 
   it("식별자가 있고 아직 시도하지 않은 물건은 '수집 대기 중'으로 보인다", async () => {
-    const repo = getRepository();
-    repo.upsertItems([makeItem({ internalCaseNo: "20250130001234", courtCode: "B000210" })]);
+    backend.addItem(makeItem({ internalCaseNo: "20250130001234", courtCode: "B000210" }));
     const html = await renderItemPage("1");
     expect(html).toContain("사진 수집 대기 중입니다");
     expect(html).not.toContain("조회 불가");
   });
-});
 
+  it("사진이 수집된 물건은 사진 목록을 백엔드에서 받아 순번마다 <img>를 그린다(회귀 방어)", async () => {
+    const item = backend.addItem(
+      makeItem({ internalCaseNo: "20250130001234", courtCode: "B000210" }),
+      { photoStatus: "collected", photoCount: 2 },
+    );
+    backend.addPhoto(item.id, 1);
+    backend.addPhoto(item.id, 2);
+
+    const html = await renderItemPage(String(item.id));
+
+    expect(html).toContain(`src="/api/photos/${item.id}/1"`);
+    expect(html).toContain(`src="/api/photos/${item.id}/2"`);
+    expect(backend.requests.map((r) => `${r.method} ${r.path}`)).toContain("GET /api/items/{id}/photos");
+  });
+
+  it("사진이 없다고 확정된(empty) 물건은 사진 목록 요청을 보내지 않고 <img>도 없다", async () => {
+    const item = backend.addItem(
+      makeItem({ internalCaseNo: "20250130001234", courtCode: "B000210" }),
+      { photoStatus: "empty" },
+    );
+
+    const html = await renderItemPage(String(item.id));
+
+    expect(html).toContain("법원 공고에 첨부된 사진이 없는 물건입니다");
+    expect(html).not.toContain("<img");
+    expect(backend.requests.map((r) => `${r.method} ${r.path}`)).not.toContain("GET /api/items/{id}/photos");
+  });
+});

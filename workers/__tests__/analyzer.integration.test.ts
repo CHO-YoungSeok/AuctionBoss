@@ -1,173 +1,65 @@
 /**
- * 재분석 선정 회귀 테스트 (코드 리뷰 finding 2).
+ * 확장 필드가 API 라운드트립을 거쳐 프롬프트에 실제로 도달하는지 보는 회귀 테스트
+ * (live-data-and-reports 실측 task 3.1/3.4·6.4, migrate-data-and-cutover 8.2).
  *
- * `analyzer.test.ts`의 재분석 테스트는 전부 `makeTwoPassFetch`로 손수 만든, 서로 겹치지
- * 않는 배열을 fetchFn에 주입해 "신규/재분석 두 조회를 어떻게 합치는가"만 검증한다. 그
- * 방식으로는 실제 SQL 정렬·조건의 버그(재분석 후보 정렬에서 미분석 물건이 NULL로 ASC
- * 맨 앞을 차지해 진짜 재분석 대상을 밀어내는 문제)를 잡을 수 없다 — fetchFn이 이미
- * "정답"을 배열로 들고 있어서, 저장소 SQL이 실제로 무엇을 반환하는지는 전혀 거치지
- * 않기 때문이다. 239개 테스트가 통과하면서도 이 버그가 남아 있었던 이유가 이것이다.
+ * 실제 수집 데이터로 analyzer를 돌려 생성된 보고서를 읽어 보니 `minArea`·`minBidPriceRound1`·`note`("일괄매각")
+ * 등이 `GET /api/items` 응답에는 있는데도 모든 분석이 "면적 또는 최저매각가격 정보 없음"이라고 답했다 —
+ * `workers/lib/api.ts`의 zod 스키마가 확장 필드 32개를 몰라 조용히 strip하고 있었다. `derived.test.ts`/
+ * `analyzer.test.ts`는 손수 만든 `AuctionItem`을 프롬프트에 직접 넣어서만 검증해 이 경로
+ * (응답 JSON → zod 파싱 → 프롬프트)를 통과하지 못했다.
  *
- * 이 테스트는 실제 저장소(임시 파일 DB)와 실제 라우트 핸들러(`GET /api/items`,
- * `POST /api/analyses`)를 fetchFn 뒤에 그대로 연결해 `runAnalysisOnce`의 두 패스 선정을
- * 진짜로 구동한다 — 서버 프로세스는 띄우지 않지만(`route.test.ts`와 같은 패턴), SQL
- * 정렬·조건은 실제로 실행된다.
+ * 이전에는 Next 라우트 핸들러와 SQLite를 뒤에 붙였다. 그 둘이 은퇴해 이제 응답은 **동결된 계약 골든**
+ * (`backend/src/test/resources/contracts/scenarios/analyses.json`의 `GET /api/items` 응답 — Spring이 실제로 내는 모양)을
+ * 그대로 돌려주는 대역 `fetch`다. 재분석 선정 SQL(정렬·조건)은 백엔드(Java `ItemSearchRepositoryTest`의
+ * `needsAnalysis*`)가 증명하고, 워커의 두 패스 합산은 `analyzer.test.ts`가 본다.
  */
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { closeDb, getRepository } from "@/lib/db";
-import type { AuctionItemInput } from "@/lib/domain";
-
-import { POST as analysesPOST } from "../../src/app/api/analyses/route";
-import { GET as itemsGET } from "../../src/app/api/items/route";
 import { runAnalysisOnce } from "../analyzer";
 import type { FetchFn } from "../lib/api";
-import { DERIVED_FIGURES_TOKEN, ITEM_JSON_TOKEN, PROMPT_VERSION } from "../lib/prompt";
+import { DERIVED_FIGURES_TOKEN, ITEM_JSON_TOKEN } from "../lib/prompt";
 
-const TEMPLATE = `분석하라.\n\n\`\`\`json\n${ITEM_JSON_TOKEN}\n\`\`\`\n`;
 const TEMPLATE_WITH_DERIVED = `분석하라.\n\n${DERIVED_FIGURES_TOKEN}\n\n\`\`\`json\n${ITEM_JSON_TOKEN}\n\`\`\`\n`;
 
-const originalEnv = process.env.AUCTIONBOSS_DB;
-let workDir: string;
+const GOLDEN = path.resolve(__dirname, "../../backend/src/test/resources/contracts/scenarios/analyses.json");
 
-beforeEach(() => {
-  workDir = mkdtempSync(path.join(tmpdir(), "auctionboss-analyzer-integration-"));
-  process.env.AUCTIONBOSS_DB = path.join(workDir, "test.db");
-});
-
-afterEach(() => {
-  closeDb();
-  if (originalEnv === undefined) delete process.env.AUCTIONBOSS_DB;
-  else process.env.AUCTIONBOSS_DB = originalEnv;
-  rmSync(workDir, { recursive: true, force: true });
-});
-
-function makeItem(overrides: Partial<AuctionItemInput> = {}): AuctionItemInput {
-  return {
-    court: "서울중앙지방법원",
-    caseNo: "2025타경1",
-    itemNo: "1",
-    address: "서울특별시 관악구 신림동 1-1",
-    usageType: "아파트",
-    appraisalPrice: 500_000_000,
-    minBidPrice: 400_000_000,
-    auctionDate: "2026-10-01",
-    failedBidCount: 1,
-    status: "진행",
-    ...overrides,
-  };
+interface GoldenStep {
+  request: { method?: string; path: string; query?: string };
+  status: number;
+  body: unknown;
 }
 
-/** 실제 라우트 핸들러를 호출하는 fetchFn. 네트워크도, 별도 서버 프로세스도 쓰지 않는다. */
-const realRouteFetch: FetchFn = async (url, init) => {
-  const request = new Request(url, init);
-  if (request.method === "POST") return analysesPOST(request);
-  return itemsGET(request);
-};
+/** 골든에서 `GET /api/items` 응답(물건 1건: 확장 필드가 채워진 실데이터 모양)을 꺼낸다. */
+function goldenItemsBody(): { items: Record<string, unknown>[]; total: number; page: number; pageSize: number } {
+  const golden = JSON.parse(readFileSync(GOLDEN, "utf8")) as { steps: GoldenStep[] };
+  const step = golden.steps.find((s) => s.request.path === "/api/items" && s.status === 200)!;
+  return step.body as never;
+}
 
-describe("runAnalysisOnce — 실제 저장소·라우트로 구동하는 두 패스 선정(finding 2 회귀)", () => {
-  it("미분석 물건이 신규 한도보다 많아도, 이미 분석된 뒤 실제로 변경된 물건이 재분석 대상으로 선정된다", async () => {
-    const repo = getRepository();
-
-    // 미분석 8건 — 매각기일 내림차순으로 흩어 둔다(정렬 기준이 우연히 유리하게 맞지
-    // 않게). 신규 한도(5)보다 많아서 일부는 이번 회차에 처리되지 않는다.
-    const unanalyzed: AuctionItemInput[] = Array.from({ length: 8 }, (_, i) =>
-      makeItem({ itemNo: `u${i + 1}`, auctionDate: `2026-10-${20 - i}` }),
-    );
-    repo.upsertItems(unanalyzed, { now: "2026-01-01T00:00:00.000Z" });
-
-    // 재분석 대상 1건 — 분석 완료 후 실제 변경(최저가 하락)이 그 분석 이후에 생겼다.
-    // promptVersion을 워커의 현재 버전과 똑같이 둬서, 버전 불일치(조건 2)가 아니라
-    // 오직 "실제 변경"(조건 1)만으로 재분석 대상이 되게 한다 — finding 2가 고친 조건이다.
-    repo.upsertItems([makeItem({ itemNo: "target", auctionDate: "2026-09-01" })], {
-      now: "2026-01-01T00:00:00.000Z",
-    });
-    const target = repo
-      .listItems({ pageSize: 20 })
-      .items.find((item) => item.itemNo === "target")!;
-    repo.insertAnalysis(
-      { itemId: target.id, body: "old", model: null, promptVersion: PROMPT_VERSION },
-      { now: "2026-01-02T00:00:00.000Z" },
-    );
-    repo.upsertItems([makeItem({ itemNo: "target", minBidPrice: 1 })], {
-      now: "2026-01-03T00:00:00.000Z",
-    });
-
-    const summary = await runAnalysisOnce({
-      baseUrl: "http://localhost",
-      maxItemsPerRun: 5, // 미분석 8건 중 5건만 신규 한도 — 3건은 이번 회차에서 밀린다
-      maxReanalysisPerRun: 2,
-      template: TEMPLATE,
-      fetchFn: realRouteFetch,
-      runClaude: async () => ({ text: "요약", model: null }),
-    });
-
-    // target이 실제로 (재)분석돼 두 번째 분석이 저장됐는지 확인한다 — 이전 버그에서는
-    // 재분석 후보 정렬(analyzed_at ASC)이 미분석 물건을 NULL로 맨 앞에 두고, 워커의
-    // dedupe는 신규 패스가 이미 뽑은 물건만 제거하므로, 신규 패스에 뽑히지 않은
-    // 미분석 물건(u1~u3)이 재분석 페이지(pageSize=2)를 채워 target이 영원히 조회되지
-    // 않았다.
-    const analyses = repo.listAnalyses(target.id);
-    expect(analyses).toHaveLength(2);
-    expect(analyses.map((a) => a.body)).toContain("요약");
-    expect(summary.failed).toBe(0);
-  });
-
-  it("미분석 물건만 있고 재분석 대상이 없으면(finding 2 수정 후 회귀 방어) 재분석 조회는 0건을 반환한다", async () => {
-    const repo = getRepository();
-    repo.upsertItems(
-      Array.from({ length: 3 }, (_, i) => makeItem({ itemNo: `u${i + 1}` })),
-      { now: "2026-01-01T00:00:00.000Z" },
-    );
-
-    const summary = await runAnalysisOnce({
-      baseUrl: "http://localhost",
-      maxItemsPerRun: 10,
-      maxReanalysisPerRun: 5,
-      template: TEMPLATE,
-      fetchFn: realRouteFetch,
-      runClaude: async () => ({ text: "요약", model: null }),
-    });
-
-    // 신규 3건만 분석되고, 미분석 물건이 재분석 패스에 섞여 다시 처리되지 않는다.
-    expect(summary).toEqual({ attempted: 3, succeeded: 3, failed: 0 });
-  });
-});
-
-/**
- * live-data-and-reports 실측(task 3.1/3.4·6.4) 회귀 케이스.
- *
- * 실제 수집 데이터로 analyzer를 돌려 생성된 보고서를 전부 읽어 보니, `minArea`·
- * `minBidPriceRound1`·`note`("일괄매각") 등이 DB와 `GET /api/items` 응답에는
- * 실제로 있는데도 모든 분석이 "면적 또는 최저매각가격 정보 없음"/"차수별 최저가
- * 정보 없음"이라고 답했고, `note`에 "일괄매각"이 있는 물건에서도 그 사실이 전혀
- * 언급되지 않았다. `derived.test.ts`/`analyzer.test.ts`의 회귀 테스트는 손수 만든
- * `AuctionItem` 객체를 `renderItemPrompt`에 직접 넣어서만 검증했기 때문에, 실제
- * 경로(`GET /api/items` 응답 → `workers/lib/api.ts`의 zod 스키마 파싱 → 프롬프트)를
- * 통과하지 못했다 — 그 zod 스키마가 확장 필드 32개를 몰라 조용히 strip하고 있었다.
- * 이 테스트는 그 실제 경로 전체(진짜 라우트 핸들러 + 진짜 zod 파싱)를 구동해
- * 확장 필드가 프롬프트까지 살아서 도달하는지 확인한다.
- */
 describe("runAnalysisOnce — 확장 필드가 API 라운드트립을 거쳐 프롬프트에 실제로 도달한다 (실데이터 회귀)", () => {
-  it("minArea·minBidPriceRound1·note가 GET /api/items 응답에서 프롬프트까지 살아 있다", async () => {
-    const repo = getRepository();
-    repo.upsertItems(
-      [
-        makeItem({
-          appraisalPrice: 711_000_000,
-          minBidPrice: 711_000_000,
-          minArea: 84,
-          maxArea: 84,
-          minBidPriceRound1: 711_000_000,
-          minBidPriceRateRound1: 100,
-          note: "일괄매각. 제시외 건물 포함",
-        }),
-      ],
-      { now: "2026-01-01T00:00:00.000Z" },
-    );
+  it("minArea·minBidPriceRound1·note가 GET /api/items 응답(골든)에서 프롬프트까지 살아 있다", async () => {
+    const body = goldenItemsBody();
+    const item = body.items[0]!;
+    // 골든 물건은 확장 필드가 실제로 채워져 있다(이 전제가 깨지면 아래 단언이 무의미하다).
+    expect(item.minArea).toBe(858);
+    expect(item.minBidPriceRound1).toBe(26_114_690_622);
+    expect(item.note).toBe("일괄매각. 제시외 건물 포함");
+
+    const requests: string[] = [];
+    const fetchFn: FetchFn = async (url, init) => {
+      const request = new Request(url, init);
+      requests.push(`${request.method} ${new URL(request.url).pathname}`);
+      const pathname = new URL(request.url).pathname;
+      if (request.method === "POST" && pathname === "/api/worker-runs") return Response.json({ id: 1 }, { status: 201 });
+      if (request.method === "PATCH") return Response.json({ id: 1 });
+      if (request.method === "POST") return Response.json({ analysis: { id: 1 } }, { status: 201 });
+      // 신규 조회(analyzed=false)에는 이 물건 1건, 재분석 조회(needsAnalysis=true)에는 없음.
+      return Response.json(
+        new URL(request.url).searchParams.has("needsAnalysis") ? { ...body, items: [], total: 0 } : body,
+      );
+    };
 
     let capturedPrompt = "";
     const summary = await runAnalysisOnce({
@@ -175,7 +67,7 @@ describe("runAnalysisOnce — 확장 필드가 API 라운드트립을 거쳐 프
       maxItemsPerRun: 1,
       maxReanalysisPerRun: 0,
       template: TEMPLATE_WITH_DERIVED,
-      fetchFn: realRouteFetch,
+      fetchFn,
       runClaude: async ({ prompt }) => {
         capturedPrompt = prompt;
         return { text: "요약", model: null };
@@ -183,12 +75,12 @@ describe("runAnalysisOnce — 확장 필드가 API 라운드트립을 거쳐 프
     });
 
     expect(summary).toEqual({ attempted: 1, succeeded: 1, failed: 0 });
-    // derived.ts가 코드로 계산한 값이 프롬프트에 숫자로 박혀 있어야 한다 — "계산 불가"가
-    // 아니다. 이 값이 나오려면 fetchUnanalyzedItems가 돌려준 item에 minArea·
-    // minBidPriceRound1이 실제로 있어야 하므로, zod 스키마가 그 필드들을 strip하면
-    // 이 assertion이 실패한다(수정 전 실제로 실패했다).
-    expect(capturedPrompt).toContain("면적당 최저매각가격: 8,464,286원/㎡");
-    expect(capturedPrompt).toContain("1차: 711,000,000원 (감정가 대비 100%)");
+    expect(requests).toContain("POST /api/analyses");
+    // derived.ts가 코드로 계산한 값이 프롬프트에 숫자로 박혀 있어야 한다 — "계산 불가"가 아니다.
+    // 이 값이 나오려면 fetchUnanalyzedItems가 돌려준 item에 minArea·minBidPriceRound1이 실제로 있어야 하므로,
+    // zod 스키마가 그 필드들을 strip하면 이 단언이 실패한다(수정 전 실제로 실패했다).
+    expect(capturedPrompt).toContain("면적당 최저매각가격: 30,436,702원/㎡");
+    expect(capturedPrompt).toContain("1차: 26,114,690,622원 (감정가 대비 51.2%)");
     expect(capturedPrompt).not.toContain("면적 또는 최저매각가격 정보 없음");
     expect(capturedPrompt).not.toContain("차수별 최저가 정보 없음");
     // 물건 JSON 블록에도 note가 원문 그대로 있어야 한다(같은 zod 스키마가 담당).

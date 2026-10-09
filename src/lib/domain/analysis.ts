@@ -4,7 +4,7 @@
  * 원래 `workers/lib/prompt.ts`에만 있었다. improve-item-discovery-ux 3.1이 물건 상세
  * 화면에 분석 최신성 배지(대기 중/최신/갱신 예정)를 추가하면서, 화면도 "표시 중인 분석이
  * 최신 프롬프트 버전 기준인지"를 판정해야 하게 됐다 — 이 판정은 재분석 대상 선정
- * (`src/lib/db/repository.ts`의 `NEEDS_ANALYSIS_PREDICATE`)과 같은 규칙을 써야 한다
+ * (백엔드의 재분석 후보 조건(`ItemSearchRepositoryTest`의 `needsAnalysis*`))과 같은 규칙을 써야 한다
  * (design.md D3) — 화면이 프롬프트 버전을 직접 하드코딩하면 워커가 버전을 올릴 때
  * 화면이 갱신되지 않아 둘이 다른 답을 낼 수 있다.
  *

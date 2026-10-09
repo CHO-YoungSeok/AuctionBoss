@@ -9,47 +9,51 @@ const compat = new FlatCompat({
   baseDirectory: __dirname,
 });
 
-// design.md D8: 화면 코드는 데이터 포트만 쓰고, SQLite 접근은 포트의 SQLite 구현체에만 둔다.
-const restrictSqlite = {
-  paths: [
-    { name: "better-sqlite3", message: "화면 코드는 데이터 포트(@/lib/data-port)를 쓴다." },
-    { name: "@/lib/db", message: "화면 코드는 데이터 포트(@/lib/data-port)를 쓴다." },
-  ],
-  patterns: [
-    { group: ["@/lib/db/*", "**/lib/db", "**/lib/db/*"], message: "화면 코드는 데이터 포트(@/lib/data-port)를 쓴다." },
-    { group: ["@/lib/storage/*", "**/lib/storage/*"], message: "화면 코드는 데이터 포트(@/lib/data-port)를 쓴다." },
-  ],
-};
+// migrate-data-and-cutover D12(8.6) 린트 경계. 예외를 두지 않는다 — 테스트 파일도 같은 규칙을 받는다
+// (3번의 `src/app` 테스트 면제만 예외다. 아래 주석 참고).
+//
+// ESLint 평면 설정은 같은 규칙을 나중 블록이 통째로 덮어쓰므로, 영역별 규칙은 공통 금지(1)를 포함해 조합한다.
 
-// 화면용 라우트 3개: 설계상 규칙 대상이다.
-const screenRoutes = [
-  "src/app/api/bookmarks/toggle/**/*.{ts,tsx}",
-  "src/app/api/feed/mark-read/**/*.{ts,tsx}",
-  "src/app/api/photos/**/*.{ts,tsx}",
+// (1) 데이터베이스 드라이버·옛 저장소 모듈은 어디서도 가져오지 않는다(src·workers·scripts 전체, 테스트 포함).
+const DB_MESSAGE = "데이터베이스는 Spring 백엔드가 소유한다. 웹·워커·스크립트에서 드라이버나 옛 저장소(@/lib/db)를 가져오지 않는다.";
+const dbPaths = ["better-sqlite3", "mysql2", "mysql", "@/lib/db"].map((name) => ({ name, message: DB_MESSAGE }));
+const dbPatterns = [
+  { group: ["@/lib/db/*", "**/lib/db", "**/lib/db/*", "mysql2/*", "mysql/*", "better-sqlite3/*"], message: DB_MESSAGE },
 ];
-// 임시 예외 없음(6장에서 3개 라우트를 포트로 옮겨 비웠다).
-const pendingScreenRoutes = [];
-const enforcedScreenRoutes = screenRoutes.filter((r) => !pendingScreenRoutes.includes(r));
+
+// (2) 분석 워커는 서버 API(HTTP)로만 통신한다 — 데이터 포트·Next·웹 앱 모듈을 가져오지 않는다.
+const WORKER_MESSAGE = "분석 워커는 서버와 HTTP API로만 통신한다. 데이터 포트·Next·웹 앱 모듈을 가져오지 않는다.";
+const workerPaths = [
+  { name: "@/lib/data-port", message: WORKER_MESSAGE },
+  { name: "next", message: WORKER_MESSAGE },
+];
+const workerPatterns = [
+  { group: ["@/lib/data-port/*", "**/lib/data-port", "**/lib/data-port/*", "next/*", "@/app/*", "**/src/app/**"], message: WORKER_MESSAGE },
+];
+
+// (3) 웹 앱(src/app)은 Spring 구현체를 직접 가져오지 않고 포트 인터페이스(@/lib/data-port)만 쓴다.
+//     테스트는 구현체를 직접 만들 수 있다(예: 헬스체크 시간 초과 시험). 1·2번에는 면제가 없다.
+const PORT_MESSAGE = "화면·라우트는 포트 인터페이스(@/lib/data-port)만 쓴다. Spring 구현체를 직접 가져오지 않는다.";
+const appPatterns = [{ group: ["@/lib/data-port/spring/*", "**/data-port/spring/*"], message: PORT_MESSAGE }];
+
+const rule = (paths, patterns) => ({ "no-restricted-imports": ["error", { paths, patterns }] });
 
 const eslintConfig = [
   { ignores: [".next/**", "node_modules/**", "next-env.d.ts"] },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
-    // 화면(페이지·컴포넌트·_lib)과 Spring 구현체. 기존 JSON API 라우트(src/app/api/**)는 5단계까지 SQLite 직접 사용.
-    files: ["src/app/**/*.{ts,tsx}", "src/lib/data-port/spring/**/*.{ts,tsx}"],
-    ignores: ["src/app/api/**", "**/__tests__/**"],
-    rules: { "no-restricted-imports": ["error", restrictSqlite] },
+    files: ["src/**/*.{ts,tsx,mts}", "workers/**/*.{ts,mts}", "scripts/**/*.{ts,mts}"],
+    rules: rule(dbPaths, dbPatterns),
   },
-  ...(enforcedScreenRoutes.length > 0
-    ? [
-        {
-          // 화면용 라우트 재포함(테스트 제외).
-          files: enforcedScreenRoutes,
-          ignores: ["**/__tests__/**"],
-          rules: { "no-restricted-imports": ["error", restrictSqlite] },
-        },
-      ]
-    : []),
+  {
+    files: ["workers/**/*.{ts,mts}"],
+    rules: rule([...dbPaths, ...workerPaths], [...dbPatterns, ...workerPatterns]),
+  },
+  {
+    files: ["src/app/**/*.{ts,tsx}"],
+    ignores: ["**/__tests__/**"],
+    rules: rule(dbPaths, [...dbPatterns, ...appPatterns]),
+  },
 ];
 
 export default eslintConfig;

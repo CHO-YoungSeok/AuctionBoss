@@ -18,12 +18,52 @@
  * 준비되면 포트를 --port-file에 쓴다.
  */
 import { createHash } from "node:crypto";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import path from "node:path";
 
-import { buildFixtureSet } from "../collector-golden/fixtures";
-import { validBody, validDetailBody } from "../../src/lib/sources/courtauction/__tests__/fixtures";
+// 입력은 동결된 소스 어댑터 골든의 픽스처(이미 가림 처리됨)다. TS 어댑터는 은퇴했다(migrate-data-and-cutover 8.4).
+const FIXTURES_DIR = path.resolve(__dirname, "../../backend/src/test/resources/contracts/source/fixtures");
+type Json = Record<string, unknown>;
+const readFixture = <T>(name: string): T => JSON.parse(readFileSync(path.join(FIXTURES_DIR, name), "utf8")) as T;
+
+/** 검색 응답 봉투(소스가 HTTP 200으로 내는 모양). */
+function validBody(options: { rows: Json[] }): string {
+  const rows = options.rows;
+  return JSON.stringify({
+    status: 200,
+    message: "검색 결과가 조회되었습니다.",
+    timestamp: 1788675327824,
+    errors: null,
+    token: null,
+    data: {
+      dma_pageInfo: {
+        pageNo: 1,
+        pageSize: 100,
+        bfPageNo: 1,
+        startRowNo: 1,
+        totalCnt: String(rows.length),
+        totalYn: "Y",
+        groupTotalCount: rows.length,
+      },
+      ipcheck: true,
+      dlt_srchResult: rows,
+    },
+  });
+}
+
+/** 상세 응답 봉투. */
+function validDetailBody(options: { baseInfo: Json; pics: Json[] }): string {
+  return JSON.stringify({
+    status: 200,
+    message: "물건상세검색 정보가  조회되었습니다.",
+    timestamp: 1789087532321,
+    errors: null,
+    token: null,
+    data: { dma_result: { csBaseInfo: options.baseInfo, csPicLst: options.pics }, ipcheck: true },
+  });
+}
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -39,7 +79,10 @@ if (!portFile) {
   process.exit(2);
 }
 
-const fx = buildFixtureSet();
+const fx = {
+  searchRows: readFixture<{ realRow: Json; bundleRows: Json[]; roadOnlyRow: Json }>("search-rows.json"),
+  detailResponse: readFixture<{ baseInfo: Json; pics: Json[] }>("detail-response.json"),
+};
 const searchBody = validBody({ rows: [fx.searchRows.realRow, ...fx.searchRows.bundleRows, fx.searchRows.roadOnlyRow] });
 const detailBody = validDetailBody({ baseInfo: fx.detailResponse.baseInfo, pics: fx.detailResponse.pics });
 const COOKIES = ["JSESSIONID=fake-session; Path=/; HttpOnly", "WMONID=fake-wmon; Path=/"];

@@ -2,12 +2,9 @@
  * 실패 처리 렌더 테스트(switch-web-to-data-port 5.6, spec "백엔드 응답 검증과 실패 처리").
  *
  * Spring 모드에서 화면이 읽는 요청 중 하나만 500·형식이 다른 본문·연결 실패로 돌려주고 나머지는 정상
- * 응답을 줘도, 페이지는 던져야 한다(`DataSourceError`) — 일부만 그리거나 SQLite로 대신 읽지 않는다.
+ * 응답을 줘도, 페이지는 던져야 한다(`DataSourceError`) — 일부만 그리거나 다른 원천으로 대신 읽지 않는다.
  * 없는 물건 상세는 오류가 아니라 `notFound()`다.
  */
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import BookmarksPage from "@/app/bookmarks/page";
@@ -15,25 +12,18 @@ import FeedPage from "@/app/feed/page";
 import ItemDetailPage from "@/app/items/[id]/page";
 import ItemListPage from "@/app/page";
 import StatusPage from "@/app/status/page";
-import { addBookmark, closeDb, getRepository } from "@/lib/db";
-import type { AuctionItemInput } from "@/lib/domain";
 
 import { setDataPortForTesting } from "../index";
 import { DataSourceError } from "../port";
 import { createSpringPort } from "../spring/port";
-import { createNextStandIn } from "./next-stand-in";
+import { BASE_URL, FakeBackend } from "./fake-backend";
 
-let workDir: string;
-let originalDbEnv: string | undefined;
+let backend: FakeBackend;
 
 beforeEach(() => {
-  workDir = mkdtempSync(path.join(tmpdir(), "auctionboss-failure-render-"));
-  originalDbEnv = process.env.AUCTIONBOSS_DB;
-  process.env.AUCTIONBOSS_DB = path.join(workDir, "test.db");
-  closeDb();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
-  const repo = getRepository();
-  const item: AuctionItemInput = {
+  backend = new FakeBackend();
+  const item = backend.addItem({
     court: "서울중앙지방법원",
     caseNo: "2025타경1",
     itemNo: "1",
@@ -44,32 +34,26 @@ beforeEach(() => {
     auctionDate: "2026-10-01",
     failedBidCount: 1,
     status: "진행",
-  };
-  repo.upsertItems([item], { now: "2026-01-01T00:00:00.000Z" });
-  addBookmark(1, { now: "2026-01-02T00:00:00.000Z" });
+  });
+  backend.bookmark(item.id, "2026-01-02T00:00:00.000Z");
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   setDataPortForTesting(null);
-  closeDb();
-  if (originalDbEnv === undefined) delete process.env.AUCTIONBOSS_DB;
-  else process.env.AUCTIONBOSS_DB = originalDbEnv;
-  rmSync(workDir, { recursive: true, force: true });
 });
 
 type FailureMode = "500" | "형식이 다른 본문" | "연결 실패";
 
-/** `failPath`로 가는 요청만 실패시키고 나머지는 Next 대역이 정상 응답한다. */
+/** `failPath`로 가는 요청만 실패시키고 나머지는 백엔드 대역이 정상 응답한다. */
 function installFailing(failPath: string, mode: FailureMode): void {
-  const standIn = createNextStandIn();
   const failing = (async (input: URL, init?: RequestInit) => {
-    if (new URL(String(input)).pathname !== failPath) return standIn.fetch(input, init);
+    if (new URL(String(input)).pathname !== failPath) return backend.fetch(input, init);
     if (mode === "500") return Response.json({ error: "boom" }, { status: 500 });
     if (mode === "형식이 다른 본문") return Response.json({ unexpected: true });
     throw new TypeError("fetch failed");
   }) as typeof fetch;
-  setDataPortForTesting(createSpringPort({ baseUrl: "http://spring.test:8080", fetch: failing }));
+  setDataPortForTesting(createSpringPort({ baseUrl: BASE_URL, fetch: failing }));
 }
 
 const SCREENS: { name: string; failPath: string; render: () => Promise<unknown> }[] = [
@@ -82,9 +66,7 @@ const SCREENS: { name: string; failPath: string; render: () => Promise<unknown> 
 
 describe("spring 모드 실패 처리", () => {
   it("정상 응답이면 다섯 화면이 모두 그려진다(대조군)", async () => {
-    setDataPortForTesting(
-      createSpringPort({ baseUrl: "http://spring.test:8080", fetch: createNextStandIn().fetch }),
-    );
+    setDataPortForTesting(backend.port());
     for (const screen of SCREENS) await expect(screen.render(), screen.name).resolves.toBeDefined();
   });
 
@@ -98,9 +80,7 @@ describe("spring 모드 실패 처리", () => {
   });
 
   it("없는 물건 상세는 오류가 아니라 notFound()다", async () => {
-    setDataPortForTesting(
-      createSpringPort({ baseUrl: "http://spring.test:8080", fetch: createNextStandIn().fetch }),
-    );
+    setDataPortForTesting(backend.port());
     await expect(ItemDetailPage({ params: Promise.resolve({ id: "999999" }) })).rejects.toThrow(
       /NEXT_HTTP_ERROR_FALLBACK|NEXT_NOT_FOUND/,
     );

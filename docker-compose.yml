@@ -1,6 +1,5 @@
 # 운영 구성(migrate-data-and-cutover D9): mysql + backend(수집·사진·API) + web + analyzer.
-# 이 구성은 SQLite를 쓰지 않는다. 물건·사진 수집은 backend가 맡고(TS collector·photos 서비스 없음),
-# web은 데이터 원천을 backend로 둔다.
+# 물건·사진 수집은 backend가 맡고(collector·photos 서비스 없음), web은 데이터 원천을 backend로 둔다.
 #
 # 주의: prod 프로필의 backend는 "이전 완료 표식"(collector_state.migration.completed)이 MySQL에 없으면
 # 기동을 거부한다. 이전(docs/REFERENCE.md "운영 전환 런북") 전에 `docker compose up`을 하면 backend가
@@ -97,7 +96,5 @@ services:
       start_period: 40s
 
 volumes:
-  # 이전 전 TS 구성의 SQLite·사진 볼륨. 롤백 창 동안 남긴다(어느 서비스도 마운트하지 않는다). 은퇴 때 선언을 지운다.
-  auctionboss-data:
   mysql-data:
   photos-data:

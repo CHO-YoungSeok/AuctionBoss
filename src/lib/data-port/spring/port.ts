@@ -1,7 +1,7 @@
 /**
  * Spring 구현체(switch-web-to-data-port D1·D3, 4장). 서버에서만 `fetch`로 Spring API를 부른다.
  *
- * 메서드와 엔드포인트의 대응은 design.md D1 표를 따른다. 404는 SQLite 구현체와 같은 값으로 바꾼다:
+ * 메서드와 엔드포인트의 대응은 design.md D1 표를 따른다. 404는 의미에 맞는 값으로 바꾼다:
  * 물건 없음 → `null`, 이력·사진 목록 → 빈 결과, 관심 등록·해제 → `ItemNotFoundError`. 그 밖의
  * 실패(연결·시간 초과·기대하지 않은 상태·스키마 불일치)는 `DataSourceError`다.
  */

@@ -670,7 +670,7 @@ describe("runAnalysisOnce — 회차 기록(observability)", () => {
 
 /**
  * 재분석(design.md D4/D5, tasks 5.1-5.4). `runAnalysisOnce`가 두 단계로 대상을 조회하는
- * 규칙만 검증한다 — 실제 재분석 판정(SQL)은 `src/lib/db/__tests__/repository.test.ts`의
+ * 규칙만 검증한다 — 실제 재분석 판정(SQL)은 백엔드 `ItemSearchRepositoryTest`의
  * `listItems — needsAnalysis`가 고정한다.
  */
 describe("runAnalysisOnce — 재분석", () => {
@@ -777,7 +777,7 @@ describe("runAnalysisOnce — 재분석", () => {
     expect(ids).not.toContain(13);
   });
 
-  it("재분석은 새 POST로 추가될 뿐이다 — 삭제 요청을 보내지 않는다(이전 분석 보존은 저장소가 보장한다, repository.test.ts의 listAnalyses 참고)", async () => {
+  it("재분석은 새 POST로 추가될 뿐이다 — 삭제 요청을 보내지 않는다(이전 분석 보존은 백엔드가 보장한다, `AnalysisApiTest` 참고)", async () => {
     const reItem = makeItem({ id: 7 });
     const { fetchFn, calls, posts } = makeTwoPassFetch({ newItems: [], reanalysisItems: [reItem] });
 

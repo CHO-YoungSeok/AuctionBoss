@@ -10,11 +10,11 @@
   이전 완료 표식이 없으면 기동을 거부한다(`docs/REFERENCE.md`의 전환 런북 먼저). 서비스는 ClusterIP이고 Ingress가 없다.
   사진은 `auctionboss-photos-pvc`를 `/app/photos`에 마운트한다. 수집 설정은 `configmap-collector.yaml`(`config/collector.json`의 사본)이다.
 - **MySQL (`statefulset-mysql.yaml`)**: `mysql:8.4`, `volumeClaimTemplates`(영속 볼륨), 헤드리스 서비스 `auctionboss-mysql`.
-- **Web (`deployment.yaml`, `service.yaml`)**: 컨테이너 하나. 데이터 볼륨과 SQLite가 없고
+- **Web (`deployment.yaml`, `service.yaml`)**: 컨테이너 하나. 데이터 볼륨이 없고
   `AUCTIONBOSS_DATA_SOURCE=spring`, `AUCTIONBOSS_SPRING_BASE=http://auctionboss-backend:8080`으로 백엔드에서 읽는다.
 - **Analyzer (`deployment-analyzer.yaml`)**: DB를 직접 읽지 않고 `AUCTIONBOSS_API_BASE=http://auctionboss-backend:8080`로 백엔드와 HTTP로만 통신한다.
 - **Secret (`secret.yaml`)**: 키 이름만 있고 값은 없다. 값은 `kubectl create secret`으로 만든다(파일 주석 참고).
-- **Storage**: MySQL 볼륨, 사진 PVC. `auctionboss-data-pvc`(이전 전 SQLite)는 롤백 창 동안 선언만 남기며 아무도 마운트하지 않는다.
+- **Storage**: MySQL 볼륨(`volumeClaimTemplates`), 사진 PVC(`auctionboss-photos-pvc`). 그 밖의 볼륨·PVC는 없다.
 
 ## Deployment Guide
 1. 클러스터와 `kubectl`이 준비되어 있어야 한다.

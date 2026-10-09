@@ -1,43 +1,20 @@
 /**
  * 물건 목록 페이지(`page.tsx`)를 실제로 렌더링해 HTML을 검사하는 테스트
- * (hardening-round1 task 3, design.md D2). 상세 페이지 테스트(`items/[id]/__tests__/
- * page.render.test.ts`)와 같은 인프라(임시 DB 파일 + `closeDb()`)를 그대로 쓴다 — 두
- * 번째로 만들어 보니 비용이 선형으로만 늘어난다(새 인프라가 필요 없다), 그래서 이
- * 사이클의 판단은 "만들 가치가 있다"로 확정한다(design.md D2).
+ * (hardening-round1 task 3, design.md D2). 데이터는 백엔드 대역 `fetch`(Spring 원천)로 받는다
+ * (migrate-data-and-cutover 8.2).
  *
  * 목록 페이지 고유의 위험(design.md D3 "예외 경로")에 집중한다: 빈 DB와 "필터에 걸리는
  * 게 없음"을 구분하는 안내 문구, 역전된 면적이 오류 없이 나오는지, NaN/Infinity가
  * 새지 않는지.
  */
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { closeDb, getRepository } from "@/lib/db";
 import type { AuctionItemInput } from "@/lib/domain";
 
-import { DATA_SOURCES_UNDER_TEST, useDataSource } from "@/lib/data-port/__tests__/data-sources";
+import { useFakeBackend } from "@/lib/data-port/__tests__/fake-backend";
 import ItemListPage from "../page";
-
-let workDir: string;
-let originalDbEnv: string | undefined;
-
-beforeEach(() => {
-  workDir = mkdtempSync(path.join(tmpdir(), "auctionboss-list-render-"));
-  originalDbEnv = process.env.AUCTIONBOSS_DB;
-  process.env.AUCTIONBOSS_DB = path.join(workDir, "test.db");
-  closeDb();
-});
-
-afterEach(() => {
-  closeDb();
-  if (originalDbEnv === undefined) delete process.env.AUCTIONBOSS_DB;
-  else process.env.AUCTIONBOSS_DB = originalDbEnv;
-  rmSync(workDir, { recursive: true, force: true });
-});
 
 function makeItem(overrides: Partial<AuctionItemInput> = {}): AuctionItemInput {
   return {
@@ -62,11 +39,10 @@ async function renderListPage(
   return renderToStaticMarkup(createElement(() => element));
 }
 
-describe.each(DATA_SOURCES_UNDER_TEST)("물건 목록 페이지 렌더링 (hardening-round1 task 3) [%s 원천]", (source) => {
-  useDataSource(source);
-  it("DB가 완전히 비었으면 '아직 수집된 물건이 없습니다'를 보여준다(필터 안내와 구분)", async () => {
-    getRepository(); // 스키마만 생성, 물건 0건.
+describe("물건 목록 페이지 렌더링 (hardening-round1 task 3) [Spring 원천]", () => {
+  const backend = useFakeBackend();
 
+  it("DB가 완전히 비었으면 '아직 수집된 물건이 없습니다'를 보여준다(필터 안내와 구분)", async () => {
     const html = await renderListPage();
 
     expect(html).toContain("아직 수집된 물건이 없습니다");
@@ -74,8 +50,7 @@ describe.each(DATA_SOURCES_UNDER_TEST)("물건 목록 페이지 렌더링 (harde
   });
 
   it("물건은 있지만 필터에 맞는 게 없으면 '조건에 맞는 물건이 없습니다'와 초기화 링크를 보여준다", async () => {
-    const repo = getRepository();
-    repo.upsertItems([makeItem({ usageType: "아파트" })]);
+    backend.addItem(makeItem({ usageType: "아파트" }));
 
     const html = await renderListPage({ usage: "존재하지않는용도" });
 
@@ -85,15 +60,14 @@ describe.each(DATA_SOURCES_UNDER_TEST)("물건 목록 페이지 렌더링 (harde
   });
 
   it("역전된 면적(min > max)도 오류 없이 렌더되고 NaN/Infinity/undefined가 새지 않는다", async () => {
-    const repo = getRepository();
-    repo.upsertItems([
+    backend.addItem(
       makeItem({
         minArea: 100,
         maxArea: 10, // 역전 — 실데이터에도 존재(open-questions 대상).
         appraisalPrice: 0, // 저감률 계산이 나눗셈을 만나는 경계.
         minBidPrice: null,
       }),
-    ]);
+    );
 
     const html = await renderListPage();
 
@@ -107,8 +81,7 @@ describe.each(DATA_SOURCES_UNDER_TEST)("물건 목록 페이지 렌더링 (harde
   });
 
   it("확장 필드(면적당 가격)가 목록 행에 실제로 나타난다", async () => {
-    const repo = getRepository();
-    repo.upsertItems([makeItem({ minArea: 84, maxArea: 84 })]);
+    backend.addItem(makeItem({ minArea: 84, maxArea: 84 }));
 
     const html = await renderListPage();
 

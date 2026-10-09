@@ -2,33 +2,8 @@
  * Spring 구현체 단위 테스트(switch-web-to-data-port 4.3, 4.4). 가짜 `fetch`로 메서드마다 요청의
  * 경로·쿼리·메서드·본문이 design.md D1 표와 같은지, 404가 메서드별 값으로 바뀌는지, 사진 파일의
  * 상태·바이트·헤더가 그대로 넘어가는지 본다.
- *
- * 4.4: 이 파일은 `@/lib/db`의 모든 접근과 `better-sqlite3`를 던지게 한 채로 돈다. Spring 구현체가
- * SQLite를 열면 어느 테스트든 실패한다.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-// 모듈 로드(import 바인딩)는 허용하되, 어떤 export든 호출하면 던진다.
-vi.mock(
-  "@/lib/db",
-  () =>
-    new Proxy(
-      {},
-      {
-        get: (_target, name) =>
-          typeof name === "symbol" || name === "then"
-            ? undefined
-            : () => {
-                throw new Error(`spring 모드에서 @/lib/db를 썼습니다: ${name}`);
-              },
-      },
-    ),
-);
-vi.mock("better-sqlite3", () => ({
-  default: function Database() {
-    throw new Error("spring 모드에서 SQLite를 열었습니다");
-  },
-}));
 
 import { ItemNotFoundError } from "@/lib/domain";
 
@@ -264,7 +239,7 @@ describe("Spring 구현체: 실패는 실패로", () => {
   });
 });
 
-describe("spring 모드는 SQLite를 열지 않는다(4.4)", () => {
+describe("spring 모드는 전역 fetch만 쓴다(4.4)", () => {
   const savedEnv = { source: process.env.AUCTIONBOSS_DATA_SOURCE, base: process.env.AUCTIONBOSS_SPRING_BASE };
 
   afterEach(async () => {
@@ -287,10 +262,5 @@ describe("spring 모드는 SQLite를 열지 않는다(4.4)", () => {
 
     expect(await getDataPort().getRotationNextCourtCode()).toBe("X1");
     expect(calls).toHaveLength(1);
-  });
-
-  it("@/lib/db를 건드리면 실제로 던진다(이 파일의 보호 장치가 살아 있다)", async () => {
-    const db = await import("@/lib/db");
-    expect(() => db.getDb()).toThrow(/@\/lib\/db/);
   });
 });

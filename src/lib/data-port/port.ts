@@ -2,9 +2,8 @@
  * 데이터 포트(switch-web-to-data-port design.md D1) — 화면이 쓰는 데이터 접근의 전부.
  *
  * 화면(페이지·컴포넌트)과 화면용 라우트(관심 토글, 읽음 처리, 사진 파일)는 이 인터페이스만
- * 안다. 구현체는 둘이다: SQLite(`sqlite.ts`, 지금의 저장소 함수를 감쌈)와 Spring(`spring/port.ts`,
- * 서버에서만 HTTP). 이 파일은 `@/lib/db`를 가져오지 않는다(타입도 마찬가지) — 포트의 계약이
- * 저장소 구현에 기대지 않게 하려는 것이다.
+ * 안다. 구현체는 Spring(`spring/port.ts`, 서버에서만 HTTP) 하나다(SQLite 구현체는 migrate-data-and-cutover
+ * 8장에서 은퇴했다). 포트의 계약이 구현에 기대지 않게 이 파일은 구현체를 가져오지 않는다.
  *
  * ## 계약 요약
  * - 모든 메서드는 `Promise`를 돌려준다. 반환 타입은 화면이 받던 `@/lib/domain` 타입 그대로다.
@@ -90,7 +89,7 @@ export interface DataPort {
   // ---- 상태 ----
   /**
    * 원천이 응답하는지 묻는다(`/api/health`용). 정상이면 값 없이 끝나고, 아니면 던진다.
-   * Spring 원천은 백엔드 `/api/health`를 부르며(SQLite 파일을 열지 않는다), SQLite 원천은 `SELECT 1`이다.
+   * Spring 원천은 백엔드 `/api/health`를 부른다.
    * 던지는 오류에는 원인 문자열을 담지 않는다(주소·쿼리 같은 값이 응답으로 새지 않게).
    */
   health(): Promise<void>;
