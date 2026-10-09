@@ -44,6 +44,17 @@ class SchedulingDefaultOffTest extends AbstractMySqlTest {
 	}
 
 	@Test
+	void 사진_스케줄러도_기본_꺼짐이라_틱_빈이_없고_주기보다_오래_기다려도_사진_회차가_0건이다() throws Exception {
+		assertThat(context.containsBean("photosSchedule")).isFalse();
+		assertThat(context.getBeansOfType(WorkerSchedule.class).values())
+			.noneMatch(schedule -> schedule.ticker().worker().equals("photos"));
+		// 사진 주기도 100ms인 설정 파일이다: 켜져 있었다면 짧은 대기 안에 회차가 쌓인다.
+		Thread.sleep(600);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM worker_runs WHERE worker = 'photos'", Integer.class))
+			.isZero();
+	}
+
+	@Test
 	void 테스트_프로필의_소스_주소는_루프백이고_외부_요청_허용과_주기_실행은_꺼져_있다() throws Exception {
 		String baseUrl = env.getProperty("auctionboss.source.base-url");
 		assertThat(baseUrl).isNotNull();

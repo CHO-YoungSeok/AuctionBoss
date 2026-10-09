@@ -27,14 +27,25 @@ public class PhotoFileStore {
 	/** 읽을 수 없거나 사진 디렉터리 밖이면 비어 있다. */
 	public Optional<byte[]> read(String filePath) {
 		try {
-			Path recorded = Path.of(filePath);
-			Path resolved = (recorded.isAbsolute() ? recorded : root.resolve(recorded)).toAbsolutePath().normalize();
-			if (!resolved.startsWith(root)) {
-				return Optional.empty();
-			}
-			return Optional.of(Files.readAllBytes(resolved));
+			Optional<Path> resolved = locate(filePath);
+			return resolved.isPresent() ? Optional.of(Files.readAllBytes(resolved.get())) : Optional.empty();
 		}
 		catch (java.io.IOException | RuntimeException e) {
+			return Optional.empty();
+		}
+	}
+
+	/**
+	 * 기록된 경로를 사진 디렉터리 안의 실제 경로로 바꾼다(읽기와 쓰기가 같은 경계 검사를 쓴다). 디렉터리 밖이거나 경로로 해석할 수 없으면
+	 * 비어 있다.
+	 */
+	public Optional<Path> locate(String filePath) {
+		try {
+			Path recorded = Path.of(filePath);
+			Path resolved = (recorded.isAbsolute() ? recorded : root.resolve(recorded)).toAbsolutePath().normalize();
+			return resolved.startsWith(root) ? Optional.of(resolved) : Optional.empty();
+		}
+		catch (RuntimeException e) {
 			return Optional.empty();
 		}
 	}
