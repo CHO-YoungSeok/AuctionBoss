@@ -1,0 +1,20 @@
+# 롤백 리허설의 "전환 직전 구성"(옛 compose, TS 경로) 덮어쓰기(migrate-data-and-cutover D13). 옛 파일과 함께 쓴다:
+#   git show <전환 직전 커밋>:docker-compose.yml | docker compose -p auctionboss-rehearsal-old --project-directory . -f - -f scripts/dev/rehearsal-rollback.override.yml ...
+# 옛 TS 수집기·사진 워커에는 소스 주소를 바꾸는 설정이 없어 실제 법원 사이트로 향한다. 그래서 리허설에서는 두 컨테이너의
+# 네트워크를 끊는다(network_mode: none). 롤백 직후 첫 틱이 백오프를 건너뛰는지(= 요청을 시도하지 않는지)는 SQLite 회차 기록으로 확인하고,
+# 백오프가 실패하더라도 네트워크가 없으므로 사이트에는 요청이 나가지 않는다. 분석 워커의 claude는 가짜 CLI, API 키는 비운다.
+# 호스트 포트·프로젝트 이름·볼륨은 운영(auctionboss)·리허설 전환 구성(auctionboss-rehearsal)과 겹치지 않는다.
+services:
+  web:
+    ports: !override
+      - "127.0.0.1:13001:3000"
+  collector:
+    network_mode: none
+  photos:
+    network_mode: none
+  analyzer:
+    environment:
+      ANTHROPIC_API_KEY: ""
+      AUCTIONBOSS_CLAUDE_BIN: /app/scripts/dev/fake-claude
+    volumes:
+      - ./scripts:/app/scripts:ro

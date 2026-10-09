@@ -8,9 +8,11 @@
  *   POST /pgj/pgjsearch/searchControllerMain.on  검색(픽스처 행 전부, 1페이지)
  *   POST /pgj/pgj15B/selectAuctnCsSrchRslt.on    상세(사진 2장)
  *   GET  /__stats                                { requests, maxConcurrent, hosts, remotes, byPath }  (검증용)
+ *   GET  /__block?n=K                            다음 검색 요청 K건(기본 1)에 WAF 차단 페이지(HTTP 200, JSON 아님)로 답한다(롤백 리허설의 차단 백오프용)
  *   GET  /__pics                                 응답에 쓴 사진의 { seq, sha256, bytes } (파일 API 바이트 비교용)
  *
- * 실행: npx tsx scripts/dev/fake-source-server.ts --port-file <경로> [--slow-ms N] [--log <jsonl 경로>]
+ * 실행: npx tsx scripts/dev/fake-source-server.ts --port-file <경로> [--port N] [--slow-ms N] [--log <jsonl 경로>]
+ *   --port: 고정 포트(기본 0 = 임의). 리허설 사이드카처럼 소비자가 주소를 미리 알아야 할 때만 쓴다. 바인딩은 항상 127.0.0.1.
  *   --slow-ms: 검색 응답을 N ms 늦춘다(회차를 주기보다 길게 만들어 overlap을 일으키는 용도).
  *   --log: 요청마다 { t, method, path, host, remote } 한 줄을 이어 쓴다(본문·쿠키는 쓰지 않는다).
  * 준비되면 포트를 --port-file에 쓴다.
@@ -31,6 +33,7 @@ function arg(name: string): string | undefined {
 const portFile = arg("port-file");
 const slowMs = Number(arg("slow-ms") ?? "0");
 const logFile = arg("log");
+const fixedPort = Number(arg("port") ?? "0");
 if (!portFile) {
   console.error("--port-file이 필요합니다");
   process.exit(2);
@@ -46,6 +49,7 @@ const pics = fx.detailResponse.pics.map((p, i) => {
   return { seq: Number(p.cortAuctnPicSeq ?? i + 1), sha256: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length };
 });
 
+let blockNext = 0;
 let inFlight = 0;
 let maxConcurrent = 0;
 let requests = 0;
@@ -58,6 +62,12 @@ const server = http.createServer((req, res) => {
   if (path === "/__stats") {
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify({ requests, maxConcurrent, hosts, remotes, byPath }));
+    return;
+  }
+  if (path.startsWith("/__block")) {
+    blockNext = Math.max(0, Math.trunc(Number(new URL(path, "http://x").searchParams.get("n") ?? "1")) || 1);
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ blockNext }));
     return;
   }
   if (path === "/__pics") {
@@ -87,13 +97,18 @@ const server = http.createServer((req, res) => {
     };
     if (req.method === "GET" && path === "/pgj/index.on") finish(200, "<html><body>index</body></html>", COOKIES);
     else if (req.method === "POST" && path === "/pgj/pgjsearch/searchControllerMain.on") {
+      if (blockNext > 0) {
+        blockNext -= 1;
+        finish(200, "<html><body>blocked by fake WAF</body></html>");
+        return;
+      }
       setTimeout(() => finish(200, searchBody), slowMs);
     } else if (req.method === "POST" && path === "/pgj/pgj15B/selectAuctnCsSrchRslt.on") finish(200, detailBody);
     else finish(404, "not found");
   });
 });
 
-server.listen(0, "127.0.0.1", () => {
+server.listen(fixedPort, "127.0.0.1", () => {
   writeFileSync(portFile, String((server.address() as AddressInfo).port));
 });
 for (const sig of ["SIGTERM", "SIGINT"] as const) {

@@ -359,7 +359,7 @@ SQLite(TS 구성)에서 MySQL·Spring 백엔드로 옮기는 절차입니다. �
 | 수집 공백(백엔드 첫 수집 회차 시작 − TS 마지막 수집 회차 종료) | `____` |
 | TS 마지막 수집 회차 종료 | `____` |
 
-1. **사전 확인**: 4단계 아카이브, 게이트 5종(`npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint`, `cd backend && ./gradlew check`), `docker compose config -q`가 오류 없이 해석되는지, `.env`에 `DB_NAME`·`DB_USER`·`DB_PASSWORD`·`MYSQL_ROOT_PASSWORD`가 있는지(값은 보지 않음), SQLite `collector_state`의 `backoff_until`이 과거이거나 없는지, TS 마지막 수집 회차 종료 시각을 적습니다.
+1. **사전 확인**: 4단계 아카이브, 게이트 5종(`npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint`, `cd backend && ./gradlew check`), `docker compose config -q`가 오류 없이 해석되는지, `.env`에 `DB_NAME`·`DB_USER`·`DB_PASSWORD`·`MYSQL_ROOT_PASSWORD`가 있는지(값은 보지 않음), SQLite `collector_state`의 `backoff_until`이 과거이거나 없는지, TS 마지막 수집 회차 종료 시각을 적습니다. **이미지는 T0 전에 미리 빌드합니다**(`docker compose build`, 리허설에서 약 35초(캐시 포함). 빌드가 다운타임에 들어가지 않게).
 2. **쓰기 정지(T0, 다운타임 시작)**: 전환 직전 구성(옛 compose)으로 TS 서비스를 멈춥니다. 현재 파일에는 `collector`·`photos` 서비스가 없으므로 옛 파일을 표준 입력으로 줍니다. 진행 중인 회차가 없는지 확인합니다.
    ```bash
    git show 8cd214b:docker-compose.yml | docker compose -p auctionboss --project-directory . -f - stop collector photos analyzer web
@@ -392,6 +392,7 @@ SQLite(TS 구성)에서 MySQL·Spring 백엔드로 옮기는 절차입니다. �
    ```bash
    docker compose up -d --remove-orphans backend web analyzer
    ```
+   **분석 워커 주의**: `analyzer`를 함께 올리면 켜지는 즉시 한 회차를 돌아 신규·재분석 건을 실제 Claude로 호출합니다(비용 발생). 확인이 끝나기 전에 비용을 만들고 싶지 않으면 `analyzer`를 빼고 `docker compose up -d --remove-orphans backend web`으로 올린 뒤, 8의 확인이 끝나고 `docker compose up -d analyzer`로 따로 올립니다. 이 경우 8의 "분석 워커 첫 회차 성공"은 분리해 올린 뒤에 확인합니다.
 8. **확인(T2, 다운타임 끝)**: `curl -fsS http://localhost:3000/api/health`, 화면 5개(`/`, `/items/<id>`, `/bookmarks`, `/feed`, `/status`) 200, 백엔드 첫 수집·사진 회차 결과(결과 종류, 요청 페이지 수, 신규·갱신·변경 건수), 분석 워커 첫 회차 성공, `git diff --stat <시작 커밋> -- workers/analyzer.ts workers/lib workers/prompts`가 0줄인지 확인합니다. 다운타임 = T2 − T0, 수집 공백은 이전된 `worker_runs`로 MySQL 쿼리 하나로 잽니다.
 
 전환 뒤 운영 스택을 계속 켜 둘지는 확인이 끝난 뒤 사람이 정합니다(켜 두면 실제 사이트로 주기 요청이 나갑니다).
@@ -418,12 +419,22 @@ MySQL → SQLite 역이전 도구는 없습니다. 롤백 창(전환 뒤, 회차
    ```bash
    npx tsx scripts/migrate/rollback-state.ts --sqlite data/auctionboss.db --state state.json
    ```
-5. **TS 구성 기동**: 전환 직전 커밋(`8cd214b`)의 compose로 `web`·`collector`·`photos`·`analyzer`를 올립니다. 먼저 백엔드가 멈춰 있는지 확인합니다(TS 수집기와 동시에 돌면 안 됩니다). 옛 compose는 볼륨 `auctionboss_auctionboss-data`를 쓰는데 이 볼륨의 DB는 비어 있으므로(1.2), 원본 파일과 사진을 볼륨에 복사한 뒤 올립니다. 원본 `data/`는 그대로 남습니다.
+5. **TS 구성 기동**: 전환 직전 커밋(`8cd214b`)의 compose로 `web`·`collector`·`photos`·`analyzer`를 올립니다. 먼저 백엔드가 멈춰 있는지 확인합니다(TS 수집기와 동시에 돌면 안 됩니다). 옛 compose는 볼륨 `auctionboss_auctionboss-data`를 쓰는데 이 볼륨의 DB는 비어 있으므로(1.2), 원본 파일과 사진을 볼륨에 복사한 뒤 올립니다. 원본 `data/`는 그대로 남습니다. 복사 명령에는 리허설에서 확인한 두 가지가 들어 있습니다. (a) 볼륨에 남은 빈 DB의 `auctionboss.db-wal`·`-shm`을 먼저 지웁니다(남기면 새 DB 파일 위에 옛 WAL이 적용되어 되쓴 상태가 보이지 않고 로테이션이 처음으로 돌아갑니다). (b) 파일 소유자를 web 컨테이너의 `node`(uid 1000)로 맞춥니다(`cp -a`는 호스트 소유자를 물려받아 root·다른 uid가 되고, 그러면 web·수집기·사진 워커가 `SQLITE_READONLY`로 쓰기에 실패합니다).
    ```bash
    docker compose ps backend   # 실행 중이 아니어야 함
-   docker run --rm -v auctionboss_auctionboss-data:/dest -v "$PWD/data":/src:ro alpine \
-     sh -c 'cp -a /src/auctionboss.db /dest/ && cp -a /src/photos /dest/ 2>/dev/null; true'
+   docker run --rm -v auctionboss_auctionboss-data:/dest -v "$PWD/data":/src:ro alpine sh -c '
+     set -e
+     rm -f /dest/auctionboss.db /dest/auctionboss.db-wal /dest/auctionboss.db-shm
+     cp /src/auctionboss.db /dest/auctionboss.db
+     [ -f /src/auctionboss.db-wal ] && cp /src/auctionboss.db-wal /dest/auctionboss.db-wal
+     [ -d /src/photos ] && cp -R /src/photos /dest/
+     chown -R 1000:1000 /dest'
    git show 8cd214b:docker-compose.yml | docker compose -p auctionboss --project-directory . -f - up -d web collector photos analyzer
    ```
-   (`mysql`·`backend`는 올리지 않습니다. 볼륨이 손상됐거나 되돌린 상태를 의심할 때는 `$EXP/source.db`를 같은 방식으로 복사합니다.)
+   (분석 워커는 올라오자마자 한 회차를 돌아 신규 5건·재분석 2건까지 실제 Claude를 호출합니다. 비용을 피하려면 `analyzer`를 빼고 올립니다.) (`mysql`·`backend`는 올리지 않습니다. 볼륨이 손상됐거나 되돌린 상태를 의심할 때는 `$EXP/source.db`를 같은 방식으로 복사합니다. 롤백 4에서 상태를 되쓴 파일이 `data/auctionboss.db`여야 합니다.)
+   기동 뒤 확인: web `/api/health` 200, 옛 수집기 로그에 `소스 차단 백오프 중이라 건너뜁니다`(차단 백오프가 있었을 때), `SQLITE_READONLY` 없음. 첫 틱이 백오프를 건너뛰지 않으면 즉시 `docker compose -p auctionboss … stop collector photos`로 멈추고 상태 되쓰기를 다시 봅니다(실제 사이트로 요청이 나갑니다).
 6. 롤백 소요 시간과 델타 건수, 원인을 기록합니다. 롤백 창이 끝난 뒤의 롤백은 git 되돌리기와 6단계 백업 체계의 몫입니다.
+
+### 리허설 도구
+
+`scripts/dev/rehearse-cutover.sh`가 위 두 런북을 운영 복사본·루프백 가짜 소스로 돌립니다(`build`, `guard`, `cutover`, `status`, `replay`, `rollback`, `backoff-check`, `clean`). compose 프로젝트 `auctionboss-rehearsal`(옛 구성은 `auctionboss-rehearsal-old`), 별도 볼륨, 호스트 포트 13000·18080·13307·13001(루프백)을 쓰고 운영 프로젝트·볼륨·개발 DB 컨테이너는 건드리지 않습니다. 소스는 backend 사이드카의 가짜 서버(`scripts/dev/rehearsal.override.yml`, 외부 요청 허용 꺼짐), 분석 워커는 가짜 Claude CLI, 옛 TS 수집기·사진 워커는 네트워크를 끊고 띄웁니다(`rehearsal-rollback.override.yml`). 비밀번호는 `docs/untracked/rehearsal/env.sh`(git 무시)에만 두며 `clean`이 산출물까지 지웁니다.
