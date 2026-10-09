@@ -40,6 +40,8 @@ dependencies {
 	testImplementation("org.testcontainers:testcontainers-mysql")
 	// 소스 어댑터 테스트: 루프백 가짜 서버(외부 요청 없음). 헤더 순서·대소문자를 그대로 기록한다.
 	testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+	// 아키텍처 규칙(collect 패키지 경계): 소스 어댑터 격리, 패키지 순환 금지 등.
+	testImplementation("com.tngtech.archunit:archunit-junit5:1.4.1")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
