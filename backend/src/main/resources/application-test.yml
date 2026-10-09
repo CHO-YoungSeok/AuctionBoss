@@ -2,3 +2,8 @@
 spring:
   jpa:
     open-in-view: false
+  datasource:
+    hikari:
+      # 테스트는 설정이 다른 스프링 컨텍스트를 여러 개 캐시하고 모두 같은 MySQL 컨테이너(max_connections 151)를 쓴다.
+      # 풀 기본값 10으로는 컨텍스트 15개쯤에서 "Too many connections"가 난다. 동시 연결이 더 필요한 테스트는 자기 설정으로 올린다.
+      maximum-pool-size: 5

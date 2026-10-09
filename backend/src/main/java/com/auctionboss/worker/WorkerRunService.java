@@ -3,6 +3,7 @@ package com.auctionboss.worker;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Map;
 
 import com.auctionboss.common.json.JsNumbers;
 import com.auctionboss.common.time.ServerClock;
@@ -52,24 +53,50 @@ public class WorkerRunService {
 	/** 회차를 종료로 갱신한다. 영향 0행이면 404다. */
 	@Transactional
 	public WorkerRunResponse finish(String rawId, WorkerRunBodies.FinishRequest req) {
-		Instant now = clock.now();
 		double asNumber = Double.parseDouble(rawId);
 		String label = JsNumbers.format(asNumber);
 		if (asNumber >= 9.2e18) {
 			throw new WorkerRunNotFoundException(label);
 		}
 		long id = (long) asNumber;
-		String detail = req.detail() == null ? null : JSON.writeValueAsString(req.detail());
+		updateFinished(id, label, req.outcome(), req.errorKind(), req.errorMessage(), req.detail());
+		return WorkerRunResponse.of(runs.findById(id).orElseThrow(() -> new WorkerRunNotFoundException(label)));
+	}
+
+	/**
+	 * 워커가 자기 회차를 종료로 갱신한다(API {@link #finish}와 같은 갱신 문장). 집계용 {@code items_changed}는 {@code detail}의
+	 * {@code changed}에서만 정해진다. 행이 없으면 {@link WorkerRunNotFoundException}이다.
+	 */
+	@Transactional
+	public void finishRun(long id, String outcome, String errorKind, String errorMessage, Map<String, Object> detail) {
+		updateFinished(id, Long.toString(id), outcome, errorKind, errorMessage, detail);
+	}
+
+	/**
+	 * 건너뛴 회차를 한 번에 기록한다: 시작과 종료가 지금이고 {@code error_kind}가 사유({@code overlap}·{@code backoff})다. 시작 기록과
+	 * 같이 그 워커의 보관 상한을 넘는 오래된 회차를 지운다.
+	 */
+	@Transactional
+	public void recordSkipped(String worker, String reason) {
+		Instant now = clock.now();
+		runs.saveAndFlush(new WorkerRun(worker, now, now, RunOutcome.SKIPPED, reason, null, null, null, now));
+		pruner.prune(worker, settings.maxRunsPerWorker());
+	}
+
+	private void updateFinished(long id, String label, String outcome, String errorKind, String errorMessage,
+			Map<String, Object> detail) {
+		Instant now = clock.now();
+		String json = detail == null ? null : JSON.writeValueAsString(detail);
+		Number itemsChanged = detail != null && detail.get("changed") instanceof Number n ? n : null;
 		int updated = jdbc.update("""
 				UPDATE worker_runs
 				SET finished_at = ?, outcome = ?, error_kind = ?, error_message = ?, detail = CAST(? AS JSON),
 				    items_changed = ?
-				WHERE id = ?""", LocalDateTime.ofInstant(now, ZoneOffset.UTC), req.outcome(), req.errorKind(),
-				req.errorMessage(), detail, req.itemsChanged(), id);
+				WHERE id = ?""", LocalDateTime.ofInstant(now, ZoneOffset.UTC), outcome, errorKind, errorMessage, json,
+				itemsChanged, id);
 		if (updated == 0) {
 			throw new WorkerRunNotFoundException(label);
 		}
-		return WorkerRunResponse.of(runs.findById(id).orElseThrow(() -> new WorkerRunNotFoundException(label)));
 	}
 
 	@Transactional(readOnly = true)
