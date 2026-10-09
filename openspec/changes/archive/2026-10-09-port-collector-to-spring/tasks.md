@@ -69,7 +69,7 @@
 - [x] 9.4 `docs/ROADMAP.md` 4단계를 갱신한다: 완료 기준 해석(design.md D14: 저장 골든 전 시나리오 일치, 두 인스턴스 잠금 테스트), 운영 전환과 TS 수집기·사진 워커 은퇴를 5단계 할 일에 적고, 상태·수치·기록 위치를 채운다
 - [x] 9.5 `regression-verifier` 서브에이전트로 회귀 검증을 받고 지적 사항을 반영한다(특히 "외부 요청이 테스트에서 나갈 수 있는 경로"와 "TS·Java 동작이 다시 갈라졌을 때 잡는 테스트")
 - [x] 9.6 커밋하고 푸시한 뒤 GitHub Actions의 TS 잡과 Java 잡이 통과하는지 확인한다
-- [ ] 9.7 `openspec validate port-collector-to-spring --strict`를 통과시킨 뒤 change를 아카이브하고(`switch-web-to-data-port` 아카이브 뒤), 메인 스펙 `spring-backend`에 요구사항이 반영됐는지 확인한다
+- [x] 9.7 `openspec validate port-collector-to-spring --strict`를 통과시킨 뒤 change를 아카이브하고(`switch-web-to-data-port` 아카이브 뒤), 메인 스펙 `spring-backend`에 요구사항이 반영됐는지 확인한다
 
 ---
 
