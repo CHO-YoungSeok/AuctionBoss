@@ -2,76 +2,69 @@
 
 > 개발 기간(2026.09) 동안 사이클마다 이어서 적은 작업 기록이다. 당시의 실측 수치, 미해결 질문, 설계 판단이 시간 순서대로 쌓여 있어 일부 내용은 현재 코드와 다를 수 있다.
 > 프로젝트 소개는 [README](../README.md)를, 현재 기준의 설정과 API는 [레퍼런스](REFERENCE.md)를 볼 것.
+>
+> **5단계(2026-10-09)에서 SQLite·TS 수집기·Next JSON API가 은퇴했다(태그 `pre-retire-sqlite`).** 1~12절과 13~17절 중 `src/lib/db`, `src/lib/sources`(코드), `workers/collector.ts`, `AUCTIONBOSS_DB`, `scripts/collector-golden`, `seed-to-sqlite` 같은 지워진 대상을 가리키는 서술은 은퇴 전 기록이다. 은퇴 전 코드는 `git show pre-retire-sqlite:<경로>`로 볼 수 있다. 현재 구조는 1·3·10절과 18절이 설명한다.
 
-대한민국 법원경매 물건을 주기적으로 수집해 SQLite에 저장하고, 웹에서 목록·상세로 열람하며,
-물건마다 Claude Code CLI로 생성한 AI 요약 분석을 함께 보여주는 개인/내부용 서비스다.
+대한민국 법원경매 물건을 주기적으로 수집해 MySQL에 저장하고, 웹에서 목록·상세로 열람하며,
+물건마다 Claude로 생성한 AI 요약 분석을 함께 보여주는 개인/내부용 서비스다.
 
-- 스택: TypeScript + Next.js 15 (App Router) + SQLite(better-sqlite3) + zod
+- 스택: 웹은 TypeScript + Next.js 15 (App Router) + zod, 백엔드는 Spring Boot 4 (Java 21) + MySQL 8.4 (5단계 이후. 그 전에는 SQLite(better-sqlite3)였다)
 - 수집 소스: [대한민국 법원경매정보](https://www.courtauction.go.kr) 내부 JSON 엔드포인트 (공식 Open API 없음)
-- 분석: 서버 로컬에 설치·인증된 `claude` CLI를 headless(`claude --print`)로 호출
+- 분석: `ANTHROPIC_API_KEY`가 있으면 Claude Messages API, 없으면 서버 로컬에 설치·인증된 `claude` CLI를 headless(`claude --print`)로 호출
 
 ## 1. 개요
 
-세 개의 **독립 프로세스**로 구성된다. 셋 다 같은 저장소·같은 `package.json`을 쓰지만
-각각 따로 띄워야 하고, 하나가 죽어도 나머지는 계속 돈다.
+> 이 절은 5단계 이후(현재) 구조다. 은퇴 전(SQLite·TS 수집기) 구조는 `git show pre-retire-sqlite:docs/DEVELOPMENT_NOTES.md`의 1절에 있다.
 
-| 프로세스 | 실행 명령 | 하는 일 |
+네 개의 **독립 프로세스**(compose 서비스)로 구성된다. 하나가 죽어도 나머지는 계속 돈다.
+
+| 프로세스 | 실행 | 하는 일 |
 | --- | --- | --- |
-| Next.js 앱 | `npm start` | 물건 목록/상세 페이지 + `/api/*` 라우트. SQLite를 직접 읽고 쓴다. |
-| collector 워커 | `npm run collector` | 주기적으로 법원경매정보 사이트를 긁어 `items` 테이블에 upsert 한다. |
-| analyzer 워커 | `npm run analyzer` | 미분석 물건을 **HTTP API로** 가져와 `claude`를 돌리고 결과를 API로 되돌려 저장한다. |
+| Spring 백엔드 | `backend/` (compose `backend`, 포트 8080) | MySQL의 유일한 주인. REST API, 수집·사진 스케줄러(소스 어댑터), 이전 완료 표식 검사 |
+| MySQL | compose `mysql` | 테이블 8개(Flyway `V1`~`V3`) |
+| Next.js 웹 | `npm start` (compose `web`) | 화면 5개와 폼·사진 라우트 4개. 데이터는 `src/lib/data-port`(Spring 구현체) 한 곳으로 HTTP로 읽고 쓴다 |
+| analyzer 워커 | `npm run analyzer` (compose `analyzer`) | 미분석 물건을 **HTTP API로** 가져와 Claude로 분석하고 결과를 API로 되돌려 저장한다 |
 
 데이터 흐름:
 
 ```
   [ courtauction.go.kr ]
-            |
-            |  POST /pgj/pgjsearch/searchControllerMain.on  (페이지 순회, 수 초 간격)
+            |  (수 초 간격 요청, 법원 1곳씩)
             v
-  +---------------------+
-  |  collector 워커      |   workers/collector.ts
-  |  (setInterval 상주)  |   -> CourtAuctionAdapter 가 소스 JSON을 도메인 모델로 정규화
-  +---------------------+
-            |  upsertItems()  (better-sqlite3 직접 쓰기)
+  +----------------------------+
+  |  Spring 백엔드              |  collect.source.courtauction.CourtAuctionAdapter
+  |  수집·사진 스케줄러          |  (GET_LOCK 단일 실행, 공유 백오프)
+  +----------------------------+
+            |  JPA 저장 (물건 upsert + 변경 이력은 한 트랜잭션)
             v
-      +--------------+            +------------------------+
-      |   SQLite     | <--------- |  Next.js 앱 (npm start)|
-      | items /      |  읽기/쓰기  |  /  , /items/[id]      | --> 웹 UI (브라우저)
-      | analyses     |            |  /api/items, /api/...  |
-      +--------------+            +------------------------+
-            ^                            ^        |
-            |                            |        | GET /api/items?analyzed=false
-            | insertAnalysis()           |        v
-            |                            |   +----------------------+
-            +----------------------------+   |   analyzer 워커       |  workers/analyzer.ts
-              POST /api/analyses              |  (setInterval 상주)   |
-                                              +----------------------+
-                                                       |  프롬프트 + 물건 JSON (stdin)
-                                                       v
-                                              +----------------------+
-                                              |  claude CLI          |
-                                              |  --print --output-   |
-                                              |  format json         |
-                                              +----------------------+
+      +--------------+  REST (/api/...)   +------------------------+
+      |   MySQL 8.4  | <----------------> |  Next.js 웹 (spring)   | --> 브라우저
+      +--------------+                    |  data-port/spring      |
+            ^                             +------------------------+
+            | POST /api/analyses
+            | GET  /api/items?analyzed=false
+      +----------------------+   프롬프트 + 물건 JSON   +------------+
+      |  analyzer 워커        | ----------------------> | claude     |
+      |  workers/analyzer.ts |                          | (API/CLI)  |
+      +----------------------+                          +------------+
 ```
 
-핵심 경계 두 가지 (`openspec/changes/archive/2026-09-07-auction-pipeline-mvp/design.md` D3/D5 —
-이 change는 완료되어 archive로 이동했다, §9 참고):
+핵심 경계 두 가지(`openspec/changes/archive/2026-09-07-auction-pipeline-mvp/design.md` D3/D5, §9 참고):
 
 - **수집 소스는 어댑터 뒤로 격리한다.** 사이트 고유 필드명(`jiwonNm`, `srnSaNo` 등)은
-  `src/lib/sources/courtauction/` 밖으로 나가지 않는다. 소스를 갈아끼워도 나머지 코드는 그대로다.
-- **analyzer는 DB를 직접 열지 않는다.** 서버와는 HTTP로만 통신하므로, 분석기를 다른 머신으로
-  옮기거나 여러 대로 늘려도 서버 코드는 바뀌지 않는다. 대신 **서버가 떠 있어야만 분석이 돈다.**
+  `backend/.../collect/source/courtauction/` 밖으로 나가지 않는다(ArchUnit 규칙과 필드명 누출 검사가 강제, §17.6).
+  은퇴 전에는 TS 어댑터(`src/lib/sources/courtauction/`)가 같은 역할이었고, 사이트 조사 노트 `src/lib/sources/courtauction/NOTES.md`만 남겼다.
+- **analyzer는 DB를 직접 열지 않는다.** 서버와는 HTTP로만 통신한다. 5단계 전환 때 `workers/analyzer.ts`·`workers/lib/`·`workers/prompts/`는 한 줄도 바뀌지 않았고 `AUCTIONBOSS_API_BASE`만 백엔드로 돌렸다.
+  대신 **백엔드가 떠 있어야만 분석이 돈다.**
 
 analyzer는 한 회차에 서버를 **두 번** 조회한다: 먼저 `GET /api/items?analyzed=false`로 신규
 미분석 물건을, 그다음 `GET /api/items?needsAnalysis=true&promptVersion=<현재 버전>`로 재분석
 대상을 가져온다(§6 "변경 이력과 재분석" 참고). 신규 조회가 항상 먼저이고 전량 처리되므로,
 재분석 대상이 아무리 쌓여도 신규 분석 물건이 뒤로 밀리지 않는다.
 
-두 워커 모두 회차(실행 1회분)마다 자신의 실행 기록을 남긴다 — collector는 저장소 함수
-(`startRun`/`finishRun`)를 직접 호출하고, analyzer는 DB를 열지 않으므로 `POST /api/worker-runs`
-/ `PATCH /api/worker-runs/[id]`로 같은 기록을 남긴다. 이 기록이 `/status` 화면과 회차 조회
-API의 근거다(§7 참고).
+세 워커 모두 회차(실행 1회분)마다 `worker_runs`에 실행 기록을 남긴다. 백엔드의 수집·사진 워커는 서비스를 직접 호출하고,
+analyzer는 DB를 열지 않으므로 `POST /api/worker-runs` / `PATCH /api/worker-runs/{id}`로 같은 기록을 남긴다.
+이 기록이 `/status` 화면과 회차 조회 API의 근거다(§7 참고).
 
 ## 2. 사전 요건
 
@@ -84,57 +77,44 @@ API의 근거다(§7 참고).
 - `claude`는 `PATH`에서 찾는다. 다른 경로에 있으면 `AUCTIONBOSS_CLAUDE_BIN`으로 지정한다.
   `claude --version`이 정상 출력되고, `claude` 계정 인증이 끝나 있어야 한다. 인증이 안 되어 있으면
   analyzer는 물건마다 `ClaudeInvocationError`를 로그로 남기고 다음 물건으로 넘어간다(워커는 죽지 않는다).
-- collector/앱만 쓸 거라면 `claude` CLI는 없어도 된다.
-- **`better-sqlite3`는 네이티브(C++) 모듈이다.** 다행히 13.x는 npm 패키지 안에 플랫폼별 prebuilt
-  바이너리를 함께 배포한다(`node_modules/better-sqlite3/prebuilds/`: darwin-arm64/x64, linux-x64/arm64,
-  linuxmusl, win32-x64/arm64). 이 목록에 있는 플랫폼이면 컴파일 없이 그대로 동작한다.
-  - npm 11에서는 설치 스크립트 승인 게이트 때문에 다음 경고가 뜬다:
-    `npm warn install-scripts better-sqlite3@13.0.3 (install: node-gyp rebuild)`.
-    **위 prebuild가 있는 플랫폼에서는 이 경고를 무시해도 된다** — 실제로 `node-gyp rebuild`가 돌지 않고
-    `build/Release/`가 없는 상태로도 정상 동작하는 것을 확인했다.
-  - prebuild가 없는 플랫폼이거나 직접 컴파일해야 한다면 `npm install-scripts approve better-sqlite3` 후
-    재설치하고, Xcode Command Line Tools(macOS) 또는 `build-essential`+`python3`(Linux)를 갖춰야 한다.
-  - Next.js 설정(`next.config.ts`)의 `serverExternalPackages: ["better-sqlite3"]`가 이 모듈을 서버 번들에서 제외한다.
+- 웹·analyzer만 로컬에서 돌린다면 `claude` CLI는 없어도 된다(분석을 돌릴 때만 필요).
+- 백엔드와 MySQL은 Docker Compose로 띄운다. 백엔드를 직접 빌드·테스트하려면 JDK 21과 Docker(Testcontainers)가 필요하다.
+- 은퇴한 `better-sqlite3`(네이티브 모듈)는 5단계에서 의존성·Dockerfile 빌드 도구·CI 설치 단계에서 모두 빠졌다. 이제 이 저장소에 네이티브 빌드가 필요한 모듈은 없다.
 
 ## 3. 설치 및 실행
+
+> 5단계 이후 기준. 운영 구성의 실행·환경 변수·런북은 [레퍼런스](REFERENCE.md)가 기준이다. 은퇴 전의 "터미널 3개(웹·`npm run collector`·analyzer)" 절차와 `AUCTIONBOSS_DB` 공유 방식은 `pre-retire-sqlite` 태그의 이 절에 있다.
 
 ```bash
 npm install
 npm run build      # Next.js 프로덕션 빌드 (타입 체크 + 린트 포함)
+cp .env.example .env   # DB_NAME·DB_USER·DB_PASSWORD·MYSQL_ROOT_PASSWORD를 채운다
 ```
 
-그다음 **터미널 3개를 열어 세 프로세스를 동시에** 띄운다. 순서가 중요하다.
+운영 구성(`docker compose up`)은 `mysql` · `backend` · `web` · `analyzer`를 띄운다. **이전 완료 표식이 없으면 백엔드가 기동을 거부한다**(§18, 레퍼런스 9절).
+시드(실명을 가린 809건)로 가볍게 띄워 보려면 스모크 구성을 쓴다.
 
 ```bash
-# 터미널 1 — 웹 서버 (가장 먼저. analyzer가 이 서버에 의존한다)
-npm start                      # 기본 http://localhost:3000
-# 개발 중이라면 대신: npm run dev
-
-# 터미널 2 — 수집 워커 (시작 즉시 1회 실행 후 config의 intervalMs 주기로 반복)
-npm run collector
-
-# 터미널 3 — 분석 워커 (서버가 뜬 뒤에 실행)
-npm run analyzer
-# 1회만 돌리고 끝내려면:
-npm run analyzer -- --once
+docker compose -p auctionboss-smoke -f docker-compose.smoke.yml up -d --wait   # http://localhost:18080/api/items
 ```
 
-- 순서 이유: analyzer는 `GET /api/items?analyzed=false` → `POST /api/analyses`로만 동작한다.
-  서버가 없으면 매 회차 `[analyzer] 회차 실행 실패 — AnalyzerApiError: ...`를 남기고 다음 주기를 기다린다(죽지는 않는다).
-  collector는 DB에 직접 쓰므로 서버 없이도 동작하지만, 수집 결과를 보려면 결국 서버가 필요하다.
-- 기본 포트 3000이 아닌 곳에 띄웠다면 analyzer에 `AUCTIONBOSS_API_BASE`를 반드시 넘겨야 한다.
-  예: `PORT=3333 npm start` → `AUCTIONBOSS_API_BASE=http://localhost:3333 npm run analyzer`
-- DB 파일은 첫 실행 때 자동 생성된다(기본 `<repo>/data/auctionboss.db`, WAL 모드). 별도 마이그레이션 명령이 없다 —
-  연결할 때마다 `CREATE TABLE IF NOT EXISTS`가 돈다.
-- 워커는 `Ctrl+C`(SIGINT)로 멈춘다. collector는 진행 중인 회차를 마치고 종료한다.
-
-세 프로세스가 **같은 DB 파일**을 봐야 한다. 환경변수로 경로를 바꿀 때는 셋 다 같은 값을 줘야 한다.
+로컬에서 웹과 분석 워커만 따로 띄울 때(백엔드가 이미 떠 있다고 가정):
 
 ```bash
-export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
+AUCTIONBOSS_DATA_SOURCE=spring AUCTIONBOSS_SPRING_BASE=http://localhost:8080 npm run dev   # 웹
+AUCTIONBOSS_API_BASE=http://localhost:8080 npm run analyzer                                # 분석 워커
+AUCTIONBOSS_API_BASE=http://localhost:8080 npm run analyzer -- --once                      # 1회만
 ```
+
+- analyzer는 `GET /api/items?analyzed=false` → `POST /api/analyses`로만 동작한다. 백엔드가 없으면
+  매 회차 `[analyzer] 회차 실행 실패 — AnalyzerApiError: ...`를 남기고 다음 주기를 기다린다(죽지는 않는다).
+- 웹은 `AUCTIONBOSS_SPRING_BASE`가 없으면 시작하지 못하고(주소 필요 오류), `sqlite`나 알 수 없는 값도 오류로 끝난다. 다른 원천으로 대신 동작하지 않는다.
+- 스키마는 Flyway가 백엔드 기동 때 적용한다(`V1__baseline`, `V2__item_photo_attempt`, `V3__widen_write_columns`).
+- 워커(analyzer)는 `Ctrl+C`(SIGINT)로 멈춘다.
 
 ## 4. 설정
+
+> `config/collector.json`은 5단계 이후 백엔드(`AUCTIONBOSS_CONFIG_PATH`)와 analyzer가 읽는다. 아래 `AUCTIONBOSS_COLLECT_*`·`AUCTIONBOSS_DB` 등 TS 수집기 변수는 은퇴했고 백엔드 속성(`AUCTIONBOSS_SOURCE_*`, `AUCTIONBOSS_COLLECTOR_*`)으로 대체됐다(레퍼런스 3·8절). 표의 설명은 은퇴 전 기록이다.
 
 ### 4.1 `config/collector.json`
 
@@ -165,7 +145,7 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 | --- | --- | --- |
 | `scope.courts[]` | 서울중앙지방법원 1곳 | 수집 대상 법원 목록. 최소 1곳 필요(빈 배열이면 시작 시 `CollectorConfigError`). **법원 수 자체는 요청량과 직결되지 않는다** — 회차당 실제로 도는 법원 수는 아래 `maxCourtsPerRun`이 정한다(로테이션, §4.1a). 법원이 늘면 대신 한 바퀴(전체 법원을 한 번씩 도는 데 걸리는 시간)가 길어진다. |
 | `scope.courts[].name` | `"서울중앙지방법원"` | 법원 이름. DB `items.court`에 그대로 저장되는 값이다. |
-| `scope.courts[].courtCode` | `"B000210"` | 사이트의 `cortOfcCd`. 빈 문자열이면 어댑터가 `name`으로 `src/lib/sources/courtauction/courts.ts`의 60개 코드표에서 찾는다. 다른 법원 코드는 그 파일 참조. |
+| `scope.courts[].courtCode` | `"B000210"` | 사이트의 `cortOfcCd`. 빈 문자열이면 어댑터가 `name`으로 백엔드 `CourtCodes.java`의 60개 코드표에서 찾는다(은퇴 전에는 `courts.ts`). 다른 법원 코드는 그 파일 참조. |
 | `scope.maxCourtsPerRun` | `1` | 회차당 처리할 법원 수 상한(§4.1a). 법원이 이 값보다 많으면 회차마다 일부만 돌고 다음 회차가 이어서 처리한다(원형 로테이션). 법원 1곳이면 이 값과 무관하게 매 회차 그 법원만 돈다(이 설정 도입 전과 동일, 회귀 보장). |
 | `scope.maxRequestsPerRun` | `13` | 회차당 요청 수 **안전장치**(§4.1a, §8). `maxCourtsPerRun`을 대신하는 값이 아니라 보조 장치다 — 이미 시작한 법원의 수집은 절대 끊지 않되, 이 값을 넘으면 그 회차에서 **다음** 법원을 새로 시작하지 않는다(법원을 중간에 끊으면 "물건이 줄었다"로 오해될 수 있어서다). 기본값 13은 서울중앙지방법원 1곳·매각기일 60일 범위 기준 실측 요청 수(§7.3, §8)에 맞춘 것이지, 여러 법원에서 안전하다고 검증된 값이 아니다. |
 | `intervalMs` | `600000` (10분) | collector 수집 주기. **늘리는 것이 안전한 방향이다** — §8 참고. 이전 회차가 아직 안 끝났으면 이번 tick은 건너뛴다(중첩 실행 없음). |
@@ -173,7 +153,7 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 | `analysis.maxReanalysisPerRun` | `2` | analyzer 한 회차에 재분석할 최대 물건 수(§6 참고). `maxItemsPerRun`과는 **독립된 별도 한도**다 — 회차당 총 Claude 호출 수 상한은 두 값의 **합**(`maxItemsPerRun + maxReanalysisPerRun`, 기본 5+2=7)이지, 하나의 한도를 나눠 쓰는 게 아니다. |
 | `analysis.reanalysisCooldownHours` | `24` | 재분석 쿨다운(시간). 물건의 최신 분석이 이 시간 이내면 감시 필드가 다시 바뀌어도 재분석 대상에서 제외한다. 정수(0 이상), 소수·음수·누락은 다른 `analysis` 필드와 똑같이 시작 시 `CollectorConfigError`로 죽는다. 0을 주면 쿨다운이 완전히 꺼진다(이전 동작과 동일) — **왜 이 필드가 필요한지는 §6.2의 "왜 쿨다운이 필요한가" 문단을 반드시 읽을 것.** |
 | `analysis.intervalMs` | `600000` (10분) | analyzer 주기. 신규 미분석 물건도 재분석 대상도 없으면 `[analyzer] 미분석 물건도 재분석 대상도 없음`만 찍고 아무것도 호출하지 않는다. |
-| `observability.maxRunsPerWorker` | `1000` | 워커별(`collector`/`analyzer` 각각) `worker_runs` 보관 상한(건수). 새 회차를 기록할 때마다 이 값을 넘는 오래된 행을 지운다(`src/lib/db/worker-runs.ts`의 `prune`). 10분 주기면 하루 144행이 쌓이므로 상한이 없으면 기록이 무한정 불어난다 — 기본값 1000은 약 7일치다. 올리면 `/status`·`GET /api/worker-runs`에서 더 긴 이력을 볼 수 있지만 DB 파일이 그만큼 커진다. |
+| `observability.maxRunsPerWorker` | `1000` | 워커별(`collector`/`analyzer` 각각) `worker_runs` 보관 상한(건수). 새 회차를 기록할 때마다 이 값을 넘는 오래된 행을 지운다(백엔드 `WorkerRunPruner`. 은퇴 전에는 `src/lib/db/worker-runs.ts`의 `prune`). 10분 주기면 하루 144행이 쌓이므로 상한이 없으면 기록이 무한정 불어난다 — 기본값 1000은 약 7일치다. 올리면 `/status`·`GET /api/worker-runs`에서 더 긴 이력을 볼 수 있지만 DB 파일이 그만큼 커진다. |
 | `observability.staleAfterIntervals` | `3` | 워커 상태를 `stale`(미실행)로 판정하는 배수. 마지막 성공(또는 마지막 기록)이 `기대 주기 × 이 값`보다 오래되면 `stale`이 된다(기대 주기는 collector면 `intervalMs`, analyzer면 `analysis.intervalMs`). 값을 낮추면 워커가 죽었을 때 더 빨리 `stale`로 잡히지만, 회차 소요 시간이 주기에 가까운 상황에서는 정상 실행 중에도 오탐할 수 있다(design.md Open Questions — 이 배수가 적절한지는 아직 실측으로 검증되지 않았다). |
 
 설정이 없거나 JSON이 깨졌거나 스키마에 안 맞으면 **기본값으로 조용히 넘어가지 않고 즉시 종료한다**
@@ -182,13 +162,13 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 
 ### 4.1a 법원 추가하기 · 로테이션 · 신선도 트레이드오프
 
-(`openspec/changes/scale-collection-scheduling/design.md`)
+(`openspec/changes/archive/2026-09-08-scale-collection-scheduling/design.md`)
 
 **법원을 추가하는 법:**
 
 1. `config/collector.json`의 `scope.courts` 배열에 `{ "name": "...", "courtCode": "..." }`
    항목을 추가한다. `courtCode`(사이트의 `cortOfcCd`)는
-   `src/lib/sources/courtauction/courts.ts`의 60개 코드표에서 찾는다 — 빈 문자열로 둬도
+   백엔드 `CourtCodes.java`의 60개 코드표에서 찾는다 — 빈 문자열로 둬도
    되지만(어댑터가 `name`으로 그 표를 찾아준다), 코드표에 없는 이름이면 수집이 그 법원에서
    실패한다.
 2. `scope.maxCourtsPerRun`은 보통 그대로(기본 1) 둔다 — 법원이 늘어도 회차당 상한은 자동으로
@@ -227,8 +207,8 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 
 | 변수 | 적용 프로세스 | 기본값 | 용도 |
 | --- | --- | --- | --- |
-| `AUCTIONBOSS_DB` | 앱, collector | `<cwd>/data/auctionboss.db` | SQLite 파일 경로. 상대 경로면 cwd 기준으로 절대화된다. `:memory:`도 받는다(테스트용). |
-| `AUCTIONBOSS_CONFIG` | collector, analyzer | `<cwd>/config/collector.json` | 설정 파일 경로. `loadCollectorConfig()`를 호출하는 두 워커만 읽는다 — Next.js 앱은 `config/collector.json`을 아예 import하지 않는다(`src/lib/domain/config.ts` 사용처는 `workers/collector.ts`, `workers/analyzer.ts`뿐). |
+| `AUCTIONBOSS_DB` | (은퇴) | — | SQLite 파일 경로였다. 5단계에서 은퇴했다. 웹은 `AUCTIONBOSS_DATA_SOURCE=sqlite`를 은퇴 오류로 거부하고 이 경로에 파일을 만들지 않는다. |
+| `AUCTIONBOSS_CONFIG` | analyzer (백엔드는 `AUCTIONBOSS_CONFIG_PATH`) | `<cwd>/config/collector.json` | 설정 파일 경로. `loadCollectorConfig()`를 호출하는 analyzer만 읽는다 — Next.js 앱은 `config/collector.json`을 아예 import하지 않는다(`src/lib/domain/config.ts` 사용처는 `workers/analyzer.ts`뿐). |
 | `AUCTIONBOSS_COLLECT_INTERVAL_MS` | collector | `config.intervalMs` | 수집 주기(ms). 양의 정수. |
 | `AUCTIONBOSS_COLLECT_BACKOFF_MS` | collector | `3600000` (1시간) | 로봇탐지 차단 감지 시 tick을 건너뛸 시간(ms). |
 | `AUCTIONBOSS_COLLECT_PAGE_SIZE` | collector | `40` | 한 요청으로 가져올 **행** 수. **40이 서버 상한이고, 넘기면 경고 후 40으로 클램프된다**(§8). |
@@ -253,6 +233,8 @@ export AUCTIONBOSS_DB=/path/to/auctionboss.db   # 세 터미널 모두에서
 (`workers/lib/claude.ts`). 분석 결과가 환경에 따라 달라지거나 CLI가 파일을 건드리는 일을 막기 위함이다.
 
 ## 5. API
+
+> 이 절의 JSON API는 은퇴 전에 Next 라우트가 제공했다. 5단계에서 Next JSON 라우트 17개가 은퇴했고, 같은 경로·응답을 **Spring 백엔드**가 제공한다(계약 골든이 같음을 고정). Next에는 폼·사진·헬스 라우트 4개(`/api/health`, `/api/bookmarks/toggle`, `/api/feed/mark-read`, `/api/photos/[itemId]/[seq]`)만 남았다. 현재 기준 API 표는 레퍼런스 4절이다.
 
 여덟 개다(`find src/app/api -name route.ts` 기준: `/api/items`, `/api/items/[id]`,
 `/api/items/[id]/changes`, `/api/items/usage-types`, `/api/analyses`, `/api/worker-runs`,
@@ -714,6 +696,8 @@ collector는 이 API를 쓰지 않고 저장소 함수(`startRun`)를 직접 호
 
 ## 6. 변경 이력과 재분석
 
+> 이 절의 구현 경로(`src/lib/db/…`, `workers/collector.ts`)는 5단계에서 은퇴함(태그 `pre-retire-sqlite`). 같은 규칙을 Spring 백엔드가 같은 동작으로 구현하고 골든이 고정한다(§17).
+
 ### 6.1 변경 이력
 
 `items`는 물건당 1행만 upsert하므로, 원래는 최저매각가격이 저감돼도 현재 값만 남고 과거
@@ -1114,6 +1098,8 @@ Phase 1이 **틀린 표시**를 고쳤다면, 이 change는 **찾을 수 없는 
 
 ## 7. 워커 상태 관측 (observability)
 
+> 이 절의 `src/lib/db/worker-runs.ts` 등 저장소 경로는 5단계에서 은퇴함(태그 `pre-retire-sqlite`). 같은 규칙은 백엔드 `WorkerRunService`·`WorkerStatusService`가 구현한다.
+
 수집·분석 워커가 실제로 돌고 있는지, 무엇을 했는지, 왜 멈췄는지를 로그가 아니라 조회
 가능한 기록으로 남기는 기능이다(`openspec/changes/add-collection-observability/`, 아직
 archive로 이동하지 않은 진행 중 change). 워커는 회차(run, 실행 1회분)마다 `worker_runs`
@@ -1227,6 +1213,8 @@ collector 회차 기록의 `detail.pagesRequested`는 그 회차가 소스에 �
 
 ## 8. ⚠️ 수집 관련 주의사항
 
+> 수집 구현은 5단계에서 TS(`workers/collector.ts`, `src/lib/sources`)에서 Spring 어댑터로 바뀌었지만 이 절의 사이트 실측과 주의사항은 그대로 유효하다.
+
 **이 섹션은 읽고 넘어가지 말 것.** 근거는 전부 실측이며
 `src/lib/sources/courtauction/NOTES.md` §6.1 / §9와
 `openspec/changes/archive/2026-09-07-auction-pipeline-mvp/design.md` D6에 원본 기록이 있다.
@@ -1268,22 +1256,22 @@ collector 회차 기록의 `detail.pagesRequested`는 그 회차가 소스에 �
 ## 9. 개발
 
 ```bash
-npm test        # vitest run — 실행 시점마다 정확한 개수는 다를 수 있다. 이 문서 작성 시점(scale-
-                 # collection-scheduling 반영 후) 실측: 498 tests / 29 files. 최신 수치는 직접 돌려 확인할 것.
+npm test        # vitest run. 5단계 은퇴 후 57파일 683개(실측 2026-10-09). 최신 수치는 직접 돌려 확인할 것
 npm run typecheck   # tsc --noEmit
 npm run lint        # eslint (설정: eslint.config.mjs, next/core-web-vitals + next/typescript)
+(cd backend && ./gradlew check)   # Java 789개 (Docker 필요, Testcontainers)
 ```
 
-- 테스트 위치 (`vitest.config.mts`가 `src/**/*.test.ts`, `src/**/__tests__/**/*.test.ts`, `workers/**/*.test.ts`를 수집. 개수는 위 참고 — 아래는 대표 파일 목록이며 전체 목록은 아님):
-  - `src/lib/db/__tests__/client.test.ts`, `repository.test.ts`, `worker-runs.test.ts`, `collector-state.test.ts`(§4.1a 로테이션 위치 저장소)
-  - `src/lib/domain/__tests__/config.test.ts`, `item-query.test.ts`, `types.test.ts`(`WATCHED_FIELDS`가 4개에서 늘지 않는 것을 고정하는 회귀 테스트 — design.md D2), `rotation.test.ts`(§4.1a 원형 로테이션 선택·한 바퀴 소요 시간 순수 함수)
-  - `src/lib/sources/courtauction/__tests__/adapter.test.ts` (+ `fixtures.ts`)
-  - `src/app/_lib/__tests__/change-history.test.ts`, `analysis-history.test.ts`, `item-extensions.test.ts`(확장 필드 표시·포맷 순수 함수), `item-query-url.test.ts`, `status-display.test.ts`
-  - `src/app/api/items/__tests__/route.test.ts`, `src/app/api/items/[id]/changes/__tests__/route.test.ts`, `src/app/api/items/usage-types/__tests__/route.test.ts`
-  - `src/app/api/worker-runs/__tests__/route.test.ts`, `src/app/api/worker-runs/[id]/__tests__/route.test.ts`, `src/app/api/worker-runs/summary/__tests__/route.test.ts`
-  - `workers/__tests__/analyzer.test.ts`, `analyzer.integration.test.ts`(재분석 두 단계 선정을 실제 저장소·API 라우트로 구동하는 회귀 테스트), `collector.test.ts`(§4.1a 로테이션 연동 포함)
-- 테스트는 **네트워크를 타지 않고 실제 DB 파일도 만들지 않는다.** `fetch`, `claude` 실행 함수,
-  DB 경로가 전부 주입 지점으로 열려 있어 인메모리 DB와 가짜 fetch로 돈다.
+- TS 테스트 위치 (`vitest.config.mts`가 `src/**/*.test.ts`, `src/**/__tests__/**/*.test.ts`, `workers/**/*.test.ts`, `scripts/**/*.test.ts`를 수집. 대표 목록이며 전체가 아님):
+  - `src/lib/data-port/__tests__/` — Spring 구현체(`spring-port`, `spring-client`), 원천 선택(`index.test`), 요청이 성공 골든에 있는지(`spring-requests-golden`), 대역 응답이 zod와 맞는지(`golden-schemas`). 대역은 `fake-backend.ts`
+  - `src/lib/domain/__tests__/` — `config`, `item-query`, `types`, `rotation`, `backoff` 순수 함수
+  - `src/app/_lib/__tests__/` — 화면 표시 판단 순수 함수(`change-history`, `analysis-history`, `item-extensions`, `status-display` 등)
+  - `src/app/**/page.render.test.ts` 등 — 화면 5개 렌더(Spring 구현체 + 대역 `fetch`), 폼·사진·헬스 라우트
+  - `src/__tests__/deploy-config.test.ts`(compose·K8s·Dockerfile 배포 구성 단언), `lint-boundary.test.ts`(린트 경계 규칙 3개)
+  - `workers/__tests__/analyzer.test.ts`, `analyzer.integration.test.ts`
+  - `scripts/seed/__tests__/`(가림·SQL 순수 함수), `scripts/dev/__tests__/`(가짜 CLI·가짜 소스 서버)
+- Java 테스트는 `backend/src/test/java/` 아래다: 계약 골든(`ContractTest` 90, `ScenarioContractTest` 10, `SourceContractTest` 34, `StoreContractTest` 11, `MigrationGoldenDigestTest` 2), 통합 테스트(Testcontainers MySQL), ArchUnit 규칙.
+- 테스트는 **외부 네트워크를 타지 않는다.** `fetch`, `claude` 실행 함수가 주입 지점으로 열려 있어 가짜로 돈다. 실제 사이트로 나가는 확인은 사람이 한 번씩 돌린 수동 절차뿐이다.
 - `npm run build`는 타입 체크와 린트를 함께 수행하므로, 커밋 전 최소 확인은 `npm test && npm run build`다.
 
 ### OpenSpec 워크플로
@@ -1316,84 +1304,59 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 
 ## 10. 프로젝트 구조
 
-중요한 경로만 추렸다.
+중요한 경로만 추렸다(5단계 은퇴 후 현재 구조. 은퇴한 경로는 18.6에 있다).
 
 ```
 .
 +- config/
-|   +- collector.json              # 수집 범위/주기/분석 건수/관측 설정 (§4.1)
+|   +- collector.json              # 수집 범위/주기/분석 건수/사진/관측 설정 (§4.1). 백엔드와 analyzer가 읽는다
++- backend/                        # Spring Boot 4 (Java 21) + MySQL 8.4
+|   +- src/main/java/com/auctionboss/
+|   |   +- item/ analysis/ bookmark/ history/ health/   # 읽기·쓰기 API (컨트롤러·서비스·저장소)
+|   |   +- worker/                 # worker_runs, collector_state, 상태 판정, 보관 상한 정리
+|   |   +- photo/                  # 사진 파일 API
+|   |   +- collect/
+|   |   |   +- source/             # AuctionSource 인터페이스, courtauction 어댑터(격리 경계)
+|   |   |   +- collector/ photos/ run/   # 수집·사진 회차, 스케줄러, 단일 실행 잠금
+|   |   |   +- runonce/            # 1회 실행 모드(collector, photos)
+|   |   +- migration/              # 데이터 이전 가져오기·해시 검증·이전 완료 표식 (5단계)
+|   |   +- common/                 # 시드, 시각·JSON·질의·오류 공통
+|   +- src/main/resources/db/migration/   # Flyway V1~V3
+|   +- src/test/                   # 단위·통합(Testcontainers)·골든 계약 테스트, resources/ 아래 동결 골든
 +- src/
 |   +- app/                        # Next.js App Router
-|   |   +- page.tsx                # 물건 목록 (/) — 관심 토글 열 포함 (§6.3)
-|   |   +- items/[id]/page.tsx     # 물건 상세 + AI 분석(최신/이전) + 변경 이력 + 관심 토글 (/items/:id)
-|   |   +- status/page.tsx         # 워커 상태 화면 (/status, §7.1)
-|   |   +- bookmarks/page.tsx      # 관심 물건 목록 (/bookmarks, §6.3)
+|   |   +- page.tsx                # 물건 목록 (/)
+|   |   +- items/[id]/page.tsx     # 물건 상세 + AI 분석 + 변경 이력 + 사진
+|   |   +- status/page.tsx         # 워커 상태 (/status, §7.1)
+|   |   +- bookmarks/page.tsx      # 관심 물건 (/bookmarks, §6.3)
 |   |   +- feed/page.tsx           # 변동 피드 (/feed, §6.3)
-|   |   +- api/items/route.ts      # GET /api/items (page, pageSize, analyzed, needsAnalysis,
-|   |   |                          #   promptVersion, usage, sido, sigungu, minPrice, maxPrice,
-|   |   |                          #   minEok/minMan/maxEok/maxMan, minFailed, q, dateFrom, dateTo,
-|   |   |                          #   excludePast, bookmarked, sort, dir — ux-overhaul-phase2)
-|   |   +- api/items/[id]/route.ts # GET /api/items/:id
-|   |   +- api/items/[id]/changes/route.ts  # GET /api/items/:id/changes
-|   |   +- api/items/usage-types/route.ts   # GET /api/items/usage-types
-|   |   +- api/analyses/route.ts   # POST /api/analyses
-|   |   +- api/worker-runs/route.ts          # GET/POST /api/worker-runs
-|   |   +- api/worker-runs/[id]/route.ts     # PATCH /api/worker-runs/:id
-|   |   +- api/worker-runs/summary/route.ts  # GET /api/worker-runs/summary
-|   |   +- api/bookmarks/route.ts            # GET/POST /api/bookmarks (§5, §6.3)
-|   |   +- api/bookmarks/[itemId]/route.ts   # DELETE /api/bookmarks/:itemId
-|   |   +- api/bookmarks/toggle/route.ts     # POST /api/bookmarks/toggle (화면 전용 폼, §5)
-|   |   +- api/feed/route.ts                 # GET /api/feed
-|   |   +- api/feed/read/route.ts            # POST /api/feed/read
-|   |   +- api/feed/mark-read/route.ts       # POST /api/feed/mark-read (화면 전용 폼, §5)
-|   |   +- _components/item-filter-form.tsx  # 목록 필터·정렬 폼(순수 <form method="get">)
-|   |   +- _components/bookmark-toggle-form.tsx # 관심 토글 폼(목록 행·상세 공용, §6.3)
-|   |   +- _lib/format.ts          # 금액/날짜 표시 포맷터
-|   |   +- _lib/change-history.ts  # 변경 이력 표시 판단(기준점 구별, 가격 변화폭 등) — formatFieldChange를 feed-display.ts와 공유
-|   |   +- _lib/feed-display.ts    # /feed 표시 판단(미확인 여부, 변동 요약 문구, §6.3)
-|   |   +- _lib/analysis-history.ts # 분석 이력 표시 판단(최신/이전 분리)
-|   |   +- _lib/item-query-url.ts  # ItemQuery -> 목록 페이지 URL 직렬화
-|   |   +- _lib/filter-chips.ts    # 적용 중인 필터 칩 표시 판단(ux-overhaul-phase2)
-|   |   +- _lib/price-input.ts     # 가격 폼(억/만원) 프리셋·입력 초기값 변환(ux-overhaul-phase2)
-|   |   +- _lib/safe-redirect.ts   # 관심/피드 폼의 returnTo 검증(오픈 리다이렉트 방지, §6.3)
-|   |   +- _lib/feed-query.ts      # GET /api/bookmarks, /api/feed 쿼리 파라미터 검증
-|   |   +- _lib/status-display.ts  # /status 표시 판단(상태->라벨/심각도, 소요시간 포맷 등, §7.1)
-|   |   +- _lib/worker-run-query.ts # GET /api/worker-runs(/summary) 쿼리 파라미터 검증
+|   |   +- api/health/route.ts               # GET /api/health (Spring 헬스를 대신 확인)
+|   |   +- api/bookmarks/toggle/route.ts     # POST 폼 제출용 (303 리다이렉트)
+|   |   +- api/feed/mark-read/route.ts       # POST 폼 제출용
+|   |   +- api/photos/[itemId]/[seq]/route.ts # 사진 파일을 백엔드에서 받아 전달
+|   |   +- _components/            # 필터 폼, 관심 토글 폼, 분석 본문
+|   |   +- _lib/                   # 화면 표시 판단 순수 함수(포맷, 변경 이력, 피드, 필터 칩 등)
 |   +- lib/
-|       +- domain/                 # 정규화 도메인 모델 + config 로더
-|       |   +- types.ts            # AuctionItem, Analysis, ItemChange, FeedEntry, CollectorConfig, WorkerRun ...
-|       |   +- config.ts           # config/collector.json 로딩 + zod 검증
-|       |   +- rotation.ts         # 법원 로테이션 순수 함수(selectRotationCourts) + computeLapDurationMs (§4.1a)
-|       |   +- item-query.ts       # GET /api/items 쿼리 파라미터 파싱(ItemQuery, strict/lenient)
-|       +- db/                     # SQLite 접근 (여기 밖으로 snake_case 컬럼명이 안 나간다)
-|       |   +- client.ts           # 연결/WAL/싱글턴, AUCTIONBOSS_DB 해석
-|       |   +- schema.ts           # items / analyses / item_changes / worker_runs / collector_state / bookmarks / feed_reads 테이블 DDL
-|       |   +- repository.ts       # upsertItems, listItems, listUsageTypes, listSidoValues,
-|       |   |                      #   listSigunguValues, insertAnalysis, listItemChanges ...
-|       |   +- worker-runs.ts      # startRun, finishRun, listWorkerRuns, summarizeRuns, getWorkerStatus (§7)
-|       |   +- collector-state.ts  # 로테이션 다음 위치 등 소규모 운영 상태 키-값 저장소 (§4.1a)
-|       |   +- bookmarks.ts        # addBookmark, removeBookmark, listBookmarkedItems, listFeed, getUnreadCount, markFeedRead (§6.3, 단일 사용자 전제)
-|       +- sources/                # 수집 소스 어댑터 경계
-|           +- types.ts            # AuctionSource 인터페이스
-|           +- errors.ts           # RobotDetectedError, WafBlockedError ...
-|           +- courtauction/
-|               +- adapter.ts      # 실제 수집 구현 (페이지 순회 + 3단 검사 + 행 접기)
-|               +- schema.ts       # 응답 zod 스키마
-|               +- courts.ts       # 법원 코드표 60개
-|               +- NOTES.md        # ★ 사이트 내부 API 조사 노트 (수집을 건드리기 전에 읽을 것)
+|       +- data-port/              # 화면의 데이터 접근 유일 경로: port.ts(인터페이스), index.ts(원천 선택), spring/(구현체·zod 스키마)
+|       +- domain/                 # 정규화 도메인 모델 + config 로더 + 순수 함수(types, rotation, backoff, item-query ...)
+|       +- sources/courtauction/NOTES.md   # ★ 사이트 내부 API 조사 노트 (수집을 건드리기 전에 읽을 것). 코드는 은퇴
 +- workers/
-|   +- collector.ts                # 수집 워커 엔트리포인트
-|   +- analyzer.ts                 # 분석 워커 엔트리포인트
-|   +- lib/
-|   |   +- api.ts                  # 서버 HTTP 클라이언트 (DB를 import 하지 않는다)
-|   |   +- claude.ts               # claude CLI headless 호출 + 출력 파싱
-|   |   +- prompt.ts               # 프롬프트 템플릿 로딩/렌더링, PROMPT_VERSION
+|   +- analyzer.ts                 # 분석 워커 엔트리포인트 (은퇴 전후 무변경)
+|   +- lib/                        # api.ts(서버 HTTP 클라이언트, DB 미import), claude.ts, prompt.ts, derived.ts
 |   +- prompts/analyze-item.md     # 분석 프롬프트 템플릿 ({{ITEM_JSON}} 토큰)
++- scripts/
+|   +- seed/{masking,sql}.ts       # 실명 가림·SQL 변환 순수 함수
+|   +- dev/                        # 가짜 Claude CLI, 가짜 소스 서버, Spring 대상 개발 검증 스크립트
+|   +- docker-smoke.sh, dev-db.sh  # 스모크·개발 DB
++- docker-compose.yml              # 운영 구성: mysql · backend · web · analyzer
++- docker-compose.smoke.yml        # 스모크 구성(시드, 별도 프로젝트)
++- k8s/                            # Kustomize 매니페스트(정적 검증만)
 +- openspec/                       # 계획/스펙 (§9)
-+- data/auctionboss.db             # 기본 DB 파일 (git ignore, 첫 실행 때 생성)
 ```
 
 ## 11. 알려진 한계 / 다음 단계
+
+> 은퇴 전(9월) 시점의 목록이다. 현재 후속 과제는 18.9와 ROADMAP.
 
 1. **"진행 중" 필터의 의미가 검증되지 않았다.** 사이트에 진행상태 전용 파라미터를 찾지 못해
    매각기일 범위(`오늘 ~ 오늘+60일`)로 대신하고 있다. 이것이 사이트가 말하는 "진행중"과 같은 개념인지는
@@ -1497,6 +1460,8 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 
 ## 12. Open Questions 최종 정산 (hardening-round2, 11회차, 2026-09-09)
 
+> 은퇴 전(9월) 시점의 정산이다. 이 절이 가리키는 SQLite·TS 수집기 경로는 5단계에서 은퇴함(태그 `pre-retire-sqlite`).
+
 아카이브된 모든 change(`openspec/changes/archive/*/design.md`)의 Open Questions를
 전부 다시 훑어 최종 상태를 매겼다. 총 20개(각 change의 미해결 항목 합, hardening-round1
 자신의 1개 포함) 중 **답함/결정됨 11개, 여전히 열림 9개**다. "여전히 열림"은 전부
@@ -1542,6 +1507,8 @@ Claude Code 슬래시 커맨드가 `.claude/commands/opsx/`에 들어 있다:
 ---
 
 ## 13. 1단계: Spring Boot + MySQL 읽기 API (add-spring-mysql-backend, 2026-10-08)
+
+> 이 절이 가리키는 `src/lib/db`, Next JSON 라우트, `scripts/seed/` 생성기는 5단계에서 은퇴함(태그 `pre-retire-sqlite`). 기록은 당시 그대로 둔다.
 
 이 절은 1단계(읽기 API 5종을 Spring Boot + MySQL로 옮기는 작업)가 끝난 시점의 실측값과 남은 공백을 적는다. 모든 수치는 이 절을 쓰는 날 직접 다시 센 값이다.
 
@@ -1647,6 +1614,8 @@ Spring이 Next보다 p50 기준 약 6배(표의 p50 비율 5.9~6.4배) 길지만
 
 ## 14. 1-B: 사진 워커와 배포 설정 결함 수정 (2026-10-08)
 
+> 이 절의 TS 사진 워커(`workers/photos.ts`)·`src/lib/storage`는 5단계에서 은퇴함(태그 `pre-retire-sqlite`).
+
 ### 14.1 결함
 
 - 완료로 체크되어 있었지만 구현되지 않았던 add-item-photos 항목: C.4(실패 물건이 매번 재시도되어 대기열을 막지 않는 조회), D.3(회차 기록), D.4(차단 백오프 공유), D.5(양방향 테스트). 사진 워커는 실패 물건을 매 회차 다시 요청했고, 회차 기록과 공유 백오프가 없었다.
@@ -1677,6 +1646,8 @@ Spring이 Next보다 p50 기준 약 6배(표의 p50 비율 5.9~6.4배) 길지만
 - 한쪽 워커의 차단이 다른 쪽에 전파되는 것을 확인하는 통합 테스트가 없다(실측으로만 확인).
 
 ## 15. 2단계: Spring 쓰기 API와 분석 워커 연결 (add-spring-write-api, 2026-10-09)
+
+> 이 절이 비교 대상으로 쓴 Next JSON 라우트와 `src/lib/db`는 5단계에서 은퇴함(태그 `pre-retire-sqlite`).
 
 이 절은 2단계(쓰기·나머지 API 이식과 분석 워커 무수정 연결 검증)가 끝난 시점의 실측값과 남은 공백을 적는다. 수치는 이 절을 쓰는 날 직접 다시 센 값이다.
 
@@ -1751,6 +1722,8 @@ Spring이 Next보다 p50 기준 약 6배(표의 p50 비율 5.9~6.4배) 길지만
 4. 운영은 여전히 Next + SQLite다. MySQL에는 시드만 있다. 운영 전환은 5단계에서 데이터 이전과 함께 한다.
 
 ## 16. 3단계: 화면 데이터 포트와 spring 모드 (switch-web-to-data-port, 2026-10-09)
+
+> 이 절의 SQLite 구현체, `AUCTIONBOSS_DB`, `compare-screens.sh`, `seed-to-sqlite`, 두 원천 동등성 테스트는 5단계에서 은퇴함(태그 `pre-retire-sqlite`). 지금 화면 원천은 `spring` 하나다.
 
 이 절은 3단계(화면의 데이터 접근을 데이터 포트 한 곳으로 모으고, 같은 화면이 SQLite와 Spring 양쪽에서 나오는 것을 증명하는 작업)가 끝난 시점의 실측값과 남은 공백을 적는다. 수치는 이 절을 쓰는 날 직접 다시 센 값이다. 운영 기본값은 그대로 `sqlite`이고, 운영 화면 전환은 5단계다.
 
@@ -1863,6 +1836,8 @@ spring 모드는 sqlite 모드의 약 2~4배(중앙값 +7~14ms, 두 모드가 �
 4. 운영 화면은 여전히 `sqlite`다. `spring` 전환과 기존 JSON API·SQLite 구현체 은퇴는 5단계(데이터 이전)에서 한다. 새 읽기 API 5개의 Next 라우트도 그때 함께 은퇴한다.
 
 ## 17. 4단계: 수집·사진 워커 Spring 이식 (port-collector-to-spring, 2026-10-09)
+
+> 이 절이 정답으로 쓴 TS 수집기·사진 워커·TS 어댑터(`workers/collector.ts`, `src/lib/sources`)와 `scripts/collector-golden`은 5단계에서 은퇴함(태그 `pre-retire-sqlite`). 골든 파일은 동결되어 Java `SourceContractTest`·`StoreContractTest`가 계속 검증한다.
 
 이 절은 4단계(TypeScript 수집 워커·사진 워커·소스 어댑터를 Spring으로 옮기고, 같은 입력에서 같은 요청과 같은 저장 결과가 나오는 것을 증명하는 작업)가 끝난 시점의 실측값과 남은 공백을 적는다. 운영의 수집·사진은 여전히 TS 워커이고, Spring의 수집·사진 스케줄러는 기본 꺼짐이다. 운영 전환은 5단계다. 수치는 tasks.md 하단 메모와 이 절을 쓰는 날 다시 돌린 게이트에서 가져왔다.
 
@@ -2013,3 +1988,145 @@ TS +50: 픽스처 추출 4, 어댑터 골든 9, 저장 골든 13, 실제 사이�
 5. **어댑터의 매각기일 창은 프로세스 로컬 날짜다.** UTC 컨테이너에서는 한국 00~09시에 하루 전 날짜가 나간다. TS 동작 그대로이며 안전 결함은 아니다(골든은 UTC 정오로 시간대 무관하게 고정).
 6. **백오프 저장값 파싱 한계.** 달력상 불가능한 날과 소수점 6자리 이상·`+09:00` 표기는 "읽을 수 없는 값"으로 보고 덮어쓴다. TS가 쓰는 형식에서는 어긋나지 않는다.
 7. **저장 시간은 개발 맥 1대, 500건 기준이다.** 운영 규모·MySQL 서버 설정에서는 다시 재야 한다.
+
+## 18. 5단계: 데이터 이전·전환·은퇴 (migrate-data-and-cutover, 2026-10-09)
+
+운영 데이터를 SQLite에서 MySQL로 옮기고, 화면·수집·사진·분석 워커를 한 번에 Spring 백엔드 쪽으로 돌린 뒤, SQLite·TS 수집기·Next JSON API를 은퇴시켰다. 이 절의 수치는 모두 change의 `tasks.md` 메모(1~8장)에 기록된 실측이다. 값·실명은 적지 않는다. 계획은 `openspec/changes/migrate-data-and-cutover/`(proposal·design·결정 기록)에 있다. 시작 커밋 `defd02e`, 은퇴 직전 태그 `pre-retire-sqlite`.
+
+### 18.1 운영 데이터 실측 (1장)
+
+이전 원본은 `data/auctionboss.db`다(백업 API 스냅숏으로 확인). 같은 이름의 compose 볼륨 안 DB는 이전의 연기 시험이 남긴 빈 DB(물건 0건)였다.
+
+| 테이블 | 행 수 |
+| --- | --- |
+| items | 809 (최대 id 1393, `sqlite_sequence` 1393) |
+| item_changes | 4,008 |
+| analyses | 12 |
+| worker_runs | 10 |
+| bookmarks · feed_reads | 0 · 0 |
+| collector_state | 1 |
+| item_photos | 16 |
+
+- 컬럼 집합은 SQLite와 MySQL이 8개 테이블 모두 같다. VARCHAR 48개 컬럼에서 길이 초과 0건(가장 빡빡한 것: `items.building_unit` 167/500), INT 범위 초과·정수 컬럼의 비정수 값 0건. **스키마 변경(Flyway V4)은 필요 없었다.**
+- 시각 컬럼은 비NULL 값이 전부 `YYYY-MM-DDTHH:mm:ss.SSSZ`, 날짜 2개 컬럼은 전부 `YYYY-MM-DD`(변환 실패 0). `worker_runs.detail`은 10행 중 NULL 2, 유효 JSON 8, 깨진 JSON 0.
+- 자연 키를 `utf8mb4_0900_ai_ci` UNIQUE로 넣었을 때 충돌 0건(items 809 → 고유 809). 임시 MySQL 8.4에 V1~V3을 적용한 빈 스키마로 내보내기 SQL을 실제 적재해 행 수 8개 모두 일치를 확인했다.
+- **발견**: 시드 시절 시각 컬럼 목록에 `items.photo_attempted_at`(V2에서 추가)이 빠져 있어, 값이 있는 행이 문자열 리터럴로 나갈 뻔했다. 공용 컬럼 판정 모듈에 추가했다.
+- 사진: 기록 16, 파일 17(고아 1), 기록된 파일 누락 0, 총 2,584,125바이트.
+- 회차 결과: collector 성공 3·건너뜀(백오프) 1, photos 성공 1·건너뜀 1, analyzer 성공 4. 차단·실패 0. 수집 회차가 약 723시간에 흩어져 있어(중앙 간격 약 6.8일) 롤백 창을 "72시간 동안 N회"로 정할 수 없었다. 그래서 결정 기록 2는 창을 시간이 아니라 **회차 기준**(Spring 수집·사진 성공 회차 1회 이상, 차단·실패 0, 화면 5개·API 동등성 차이 0, 분석은 가짜 CLI 1회 성공)으로 정했다.
+
+### 18.2 이전 도구와 해시 규칙
+
+도구는 둘로 나눴다. **TS 내보내기**(`scripts/migrate/export.ts`)는 쓰기 주체를 멈춘 SQLite를 백업 API로 복사한 스냅숏에서 8개 테이블을 id째 INSERT SQL로 쓰고 매니페스트(테이블별 행 수·SHA-256·최대 id·시퀀스, 사진 파일 해시)를 남긴다. **Spring 가져오기**(`auctionboss.run-once=import`)는 컬럼 집합 비교·대상 비어 있음 확인 뒤 **한 트랜잭션**으로 적재하고, MySQL에서 해시를 다시 계산해 매니페스트와 대조해 어긋나면 롤백한다. 드라이런은 끝까지 돌린 뒤 롤백한다. 가져오기가 성공하면 같은 트랜잭션에서 `collector_state`에 이전 완료 표식(`migration.completed`)을 쓰고, 운영 프로필에서 수집·사진 스케줄러가 켜져 있는데 표식이 없으면 백엔드는 기동을 거부한다.
+
+정규화 해시 규칙(두 언어가 코드를 공유하지 않는다):
+
+- 행 직렬화는 MySQL 컬럼 순서의 값 배열을 JSON 한 줄로 쓴다(설계 문구의 "SQLite 컬럼 순서"에서 바꿨다. SQLite 물리 순서는 `ALTER TABLE ADD COLUMN` 이력에 따라 달라지므로 Java가 `information_schema`로 따를 수 있는 쪽이 안전하다). NULL은 `null`, 정수는 10진 문자열, 시각은 `YYYY-MM-DDTHH:mm:ss.SSSZ`, 날짜는 `YYYY-MM-DD`, JSON 컬럼은 키를 재귀 정렬한 문자열(숫자는 정수만, 16자리 이상은 거부), 그 밖 문자열은 그대로(공백 제거·NFC 정규화 없음).
+- 줄은 기본 키 오름차순(정수는 숫자로, `collector_state.key`는 UTF-8 바이트 순)으로 정렬하고, 테이블 해시는 줄들을 `\n`으로 이은 UTF-8 바이트의 SHA-256이다. 이전 완료 표식 키는 대상 쪽에서 제외한다.
+- 두 구현의 일치는 합성값 픽스처로 TS가 만든 매니페스트·SQL(`backend/src/test/resources/migration/`)을 Java 테스트가 Testcontainers MySQL에 적재해 같은 해시를 내는지로 고정한다. 3장 첫 실행에서 8/8이 바로 일치했다(비 BMP·NFD·제어 문자·빈 문자열 대 NULL·UTF-16 순과 UTF-8 바이트 순이 다른 키·`+09:00`·밀리초 없는 시각·큰 정수·JSON 키 순서 포함).
+- 변이 확인(하고 되돌림): 시각 초 단위 절삭 → 골든 해시 테스트 2개와 정규화 단위 1개 실패. `DELETE`를 `TRUNCATE`로 → SQL 제약 위반 뒤 이전 전 상태·멱등·교체 드라이런 3개 실패. `AUTO_INCREMENT` 설정 제거 → 새 물건 id 1개 실패. `@Profile("prod")` 제거 → 프로필 기동 2개 실패. TS 쪽은 JSON 키 정렬 제거·문자열 `trim` 추가·SQL에서 id 컬럼 제거 등으로 각각 해당 사례가 실패함을 확인했다.
+- `AUTO_INCREMENT`는 `max(원본 시퀀스, 최대 id) + 1`로 맞춘다(SQLite `AUTOINCREMENT`는 삭제된 최대 id도 다시 쓰지 않으므로). 리허설에서 1394/4009/13/11/17.
+
+### 18.3 가져오기 시간
+
+| 구분 | 내보내기 | 드라이런 | 본 가져오기 | Spring 보고 시간(본) |
+| --- | --- | --- | --- | --- |
+| 리허설 1회차 | 0.8s(도구 보고 0.12s) | 4.5s | 4.1s | 348ms |
+| 실제 전환 | 0.12s(도구 보고) | 약 4s(432ms) | 약 4s | 377ms |
+
+가져오기 시간은 컨테이너 기동을 포함한 벽시계 값이고, 보고 시간은 적재·해시 검증 트랜잭션만이다. 행 수는 합계 4,856행, 사진 파일은 16개(약 2.5MB)다.
+
+### 18.4 리허설 (6장, 운영 복사본 + 루프백 가짜 소스)
+
+운영 복사본을 별도 compose 프로젝트·볼륨·포트에 올리고, 소스는 백엔드 옆 사이드카 가짜 서버(외부 요청 허용 꺼짐), 분석은 가짜 CLI, 옛 TS 수집기는 `network_mode: none`으로 띄웠다. 가짜 서버가 본 요청은 전부 루프백이었고 실제 사이트 요청은 0이었다. 리허설 전후 원본 DB+사진 해시와 운영 볼륨 생성 시각은 같았다.
+
+- **1회차**: 다운타임(T2−T0) 64.2s(T0→T1 51.3s는 비교 36.3s 포함, T1→T2 12.9s). 해시 8/8, 행 수 809/4008/12/10/0/0/1/16, 사진 16개 복사·고아 1 제외. compare-api 요청 3,326건·**불일치 0**, compare-screens 18건·차이 0·폼 코드 불일치 0·SQLite 미개방 통과.
+- **2회차(replace 재실행)**: 4.3s(이후 4.6s·7.5s), 해시·행 수가 1회차와 8/8 동일(멱등), 표식 값 동일하고 `updated_at`만 갱신.
+- **기동 거부**: 이전 전 빈 MySQL에서 `docker compose up -d --wait backend web analyzer` → 종료 코드 1, 백엔드 로그에 표식 없음 사유, web·analyzer는 실행되지 않음.
+- **백오프 이어짐**: 백오프가 들어 있는 복사본을 가져온 뒤 2분(주기 1분 틱 2번) 동안 가짜 서버 요청 0, 수집·사진 회차 모두 `skipped`.
+- 리허설 중 첫 수집 회차(`pagesRequested 1`, 3건 처리)·사진 회차·분석 회차(가짜 CLI)가 모두 성공으로 기록됐다.
+- **발견**: 처음엔 사이드카를 `npx tsx`로 띄워 npm 레지스트리로 나가는 연결 1개가 같은 네트워크 네임스페이스에 보였다(법원 사이트 아님). 설치된 `tsx`를 직접 부르도록 고쳐 외부 연결 0을 확인했다.
+
+### 18.5 실제 전환 (7장, 2026-10-09)
+
+사용자가 승인했고, 분석 워커는 올리지 않기로 했다(분석 확인은 보류). T0 `08:14:33Z`, T1 `08:18:37Z`.
+
+| 항목 | 값 |
+| --- | --- |
+| 가져오기 해시 | **8/8 일치**(드라이런·본 실행 모두), 행 수 809/4008/12/10/0/0/1/16, 사진 16개 복사·고아 1 제외 |
+| 이전 후 비교 | compare-api 요청 3,326건·**불일치 0**, compare-screens 18건·차이 0·폼 코드 불일치 0 |
+| 다운타임 | T0→T1 4m04s(검증 약 2분 포함), T1→첫 수집·사진 회차 기록까지 약 2m16s. 화면 확인은 서비스를 내린 뒤에 별도로 해서 T2를 엄밀히 닫지 못했다 |
+| 수집 공백 | TS 마지막 수집 종료 2026-10-08 14:27:21Z → Spring 첫 수집 시작 08:18:41Z, 약 17h51m |
+| 첫 수집 회차 | `success`, 법원 1곳, `pagesRequested` 15, **신규 466건**(갱신 0·변경 0), 약 74s. 이전된 809건에 더해 MySQL items 1,275건 |
+| 첫 사진 회차 | `success`, 대기 5·시도 5·**저장 3**·실패 2·요청 6, 약 122s. 백오프 기록 없음 |
+| 화면·헬스 | `/api/health` 200, `/` `/items/1` `/bookmarks` `/feed` `/status` 모두 200(spring 모드) |
+| 분석 워커 | `git diff --stat 8cd214b -- workers/analyzer.ts workers/lib workers/prompts` 0줄. 운영 구성에는 올리지 않음 |
+
+첫 회차 뒤 `docker compose stop backend web`으로 내렸다(두 번째 회차 없음, `worker_runs` 12행, 백오프 키 없음). 원본 `data/auctionboss.db`는 변경되지 않았다.
+
+### 18.6 이상 항목 판단
+
+1. **수집 요청 15 > 상한 13: 의도된 동작이다.** 스펙 "요청 수 상한 도달 시 다음 법원 미시작"과 TS 수집기는 이미 시작한 법원을 끊지 않고 다음 법원만 시작하지 않는다. 회차 대상이 법원 1곳(`maxCourtsPerRun=1`)이라 그 법원의 전 페이지(15)를 받았다.
+2. **사진 2건 스키마 불일치: 후속 조사.** 실패 2건은 상세 응답에 `dma_result.csBaseInfo`·`csPicLst`가 없었다(사이트 오류 응답 또는 구조 변경 의심). 어댑터 규칙은 TS와 골든이 일치하므로 해당 물건만 실패로 적고 다음 물건으로 넘어갔고 백오프는 없었다. 원인(사이트 응답 형태)은 조사하지 못했다.
+3. **첫 compare-screens 종료 코드 1: 원인 미확정.** 첫 실행은 종료 코드 1이었으나 출력 꼬리에 차이 표시가 없었고 전체 출력은 보존하지 못했다. 같은 데이터로 3회 더 돌린 결과는 모두 종료 0·차이 0이었다(기동 직후 일시 요인으로 추정). 기록만 한다.
+
+### 18.7 롤백 설계와 리허설에서 찾은 결함 2건
+
+- **설계**: MySQL → SQLite 역이전 도구는 만들지 않는다. 롤백 창 안에서는 전환 직전 백업과 손대지 않은 SQLite 볼륨으로 되돌리고 그 사이 MySQL에 생긴 데이터는 버린다(되살릴 수 없는 것은 분석 호출 비용과 회차 기록뿐이고, 롤백 창 동안 실제 분석은 없게 했다). 잃으면 안 되는 것은 **차단 백오프**라서 백엔드 1회 실행 모드 `export-state`가 MySQL의 `backoff_until`·로테이션 위치를 내보내고 `rollback-state.ts`가 SQLite 값보다 늦을 때만 되쓴다. `delta-report`가 전환 시각 이후 테이블별 생긴 건수를 값 없이 보고한다.
+- **롤백 리허설**: 가짜 서버가 차단 응답을 1회 내게 해 Spring에 `backoff_until`(+1시간)을 만든 뒤 롤백했다. 롤백 소요 **16.5s**(1회차 16.8s: 정지 → 옛 구성 healthy). 델타 보고 `items 0, item_changes 4, analyses 0, worker_runs 4, bookmarks 0, item_photos 8`. 되쓴 뒤 옛 수집기 첫 틱이 "소스 차단 백오프 중이라 건너뜁니다"로 `skipped`(요청 시도 0), 옛 사진 워커도 `skipped`, 읽기 전용 오류 0.
+- **런북 결함 2건(첫 회에서 발견, 수정)**: (a) `cp -a`로 옛 볼륨에 복사하면 DB 파일 소유자가 root·호스트 uid가 되어 web·수집기·사진 워커가 `SQLITE_READONLY`로 쓰지 못했다 → 복사 뒤 `chown -R 1000:1000`. (b) 옛 볼륨의 빈 DB가 남긴 `-wal`·`-shm`이 새 DB 파일 위에 적용되어 되쓴 상태(백오프·로테이션)가 보이지 않았다(수집기가 로테이션을 처음으로 돌리고 백오프를 건너뛰지 않아 요청을 시도) → 복사 전 `auctionboss.db*`를 지우고 원본의 `-wal`이 있으면 함께 복사. 둘 다 고친 뒤 위 확인이 통과했다.
+- 옛 분석 워커는 올라오자마자 한 회차를 돌아 분석 7건을 추가했다(리허설은 가짜 CLI. 실제 롤백이면 실제 Claude 호출). 런북은 `analyzer`를 빼고 올리라고 적었다.
+- 롤백 창은 8.1 관문(결정 기록 2의 회차 기준 충족)을 확인한 뒤 닫고 은퇴했다. 창이 끝난 뒤의 롤백은 **태그 `pre-retire-sqlite` + `backups/auctionboss-pre-cutover-20261009.db`(git 무시)로 되돌리기**이며 REFERENCE 10절이 그 절차다. 회차 수는 72시간 기준에 못 미쳤다. 장기 관찰은 6단계(상시 환경) 몫이다.
+
+### 18.8 은퇴 범위와 테스트 수 변화 (8장)
+
+**지운 것**: SQLite 포트 구현과 `src/lib/db/**`·`src/lib/storage/**`, TS 어댑터·수집기·사진 워커, Next JSON 라우트 17개, 라우트 전용 쿼리 파서, `better-sqlite3`와 Dockerfile의 네이티브 빌드 도구·`/app/data` 볼륨, CI `build-essential` 단계, compose·K8s의 SQLite 볼륨·PVC 선언, SQLite 의존 생성기·이전 도구(`scripts/migrate`, `scripts/collector-golden`, `scripts/seed`의 생성기와 SQLite 적재, 리허설·비교 스크립트). **남긴 것**: 화면 5개, 라우트 4개(`health`, `bookmarks/toggle`, `feed/mark-read`, `photos/[itemId]/[seq]`), 데이터 포트 인터페이스와 Spring 구현체, `src/lib/domain/**`, 분석 워커 일체(은퇴 전후 무변경), 동결 골든 전부, 사이트 조사 노트 `src/lib/sources/courtauction/NOTES.md`.
+
+**원천 선택**은 `spring` 고정이다. `AUCTIONBOSS_DATA_SOURCE`를 비우면 `spring`(주소 `AUCTIONBOSS_SPRING_BASE` 필수), `sqlite`는 "은퇴했습니다" 오류, 알 수 없는 값은 허용 값 `spring`을 알리는 오류이며 어느 경우도 `AUCTIONBOSS_DB` 경로에 파일을 만들지 않는다(vitest로 확인).
+
+**테스트 대역**: SQLite를 대신해 Spring API 모양 JSON을 내는 대역 `fetch`(`fake-backend.ts`)를 만들어 화면·폼·사진 라우트 테스트가 Spring 구현체를 그대로 태운다. 설계의 "메모리 DataPort"와 다르게, 직렬화·zod·변환까지 함께 방어하려고 했다. 렌더 테스트는 31개가 그대로 31개 통과했다.
+
+**린트 경계** 규칙 3개: (1) `src/**`·`workers/**`·`scripts/**` 전체(테스트 포함, 예외 없음)에서 `better-sqlite3`·`mysql2`·`@/lib/db` 금지, (2) `workers/**`에서 `@/lib/data-port`·`next`·`@/app/*` 금지, (3) `src/app/**`에서 `@/lib/data-port/spring/*` 금지(테스트 파일만 면제). `lint-boundary.test.ts` 35개가 가상 파일로 검사하고, 규칙 하나를 지우면 해당 사례가 실패함을 변이로 확인했다.
+
+**테스트 수**:
+
+- TS(이 작업 시작 시점 기준): 1257(시작) → 1350(은퇴 직전, 2~7장 도구·배포 구성·리허설 +93) → 679(은퇴, −671) → **683**(회귀 검증이 +4). 파일 99 → 56 → 57.
+- Java: 723 → **789**(+66). 3장 이전 도구 +62(3장 메모의 +59는 커밋 시점 실측 785보다 3 낮게 적은 값이다), 5장이 환경 변수 바인딩 +4. 은퇴 작업에서는 Java 소스·골든이 무변경이다(`git diff --stat -- backend/src/test/resources/` 빈 출력). 골든 수(`ContractTest` 90, `ScenarioContractTest` 10, `SourceContractTest` 34, `StoreContractTest` 11, `MigrationGoldenDigestTest` 2)는 은퇴 전후 같다.
+
+은퇴로 줄어든 TS 테스트(−671)의 범주별 증감과 대응하는 Java 테스트:
+
+| 범주 | 전 → 후 | 이유와 Java 짝 |
+| --- | --- | --- |
+| `src/lib/db/**` 저장소 | 224 → 0 | SQLite 저장소 은퇴. `ContractTest`·`ItemSearchRepositoryTest`·`ItemQueryRepositoryTest`·`BookmarkApiTest`·`FeedApiTest`·`WorkerRunServiceTest`·`BackoffStoreTest`·`SchemaMigrationTest` 등 |
+| SQLite 포트 | 14 → 0 | 구현체 은퇴. Spring 구현체는 `spring-port.test`·`spring-client.test` |
+| 포트 계약(sqlite≡spring 비교) | 49 → 0 | 비교할 두 번째 원천이 없다. 동등성은 3단계·이전 뒤 API·화면 비교(불일치 0)와 계약·시나리오 골든이 맡는다 |
+| `data-port` 나머지 | 63 → 65 | `index.test` +2(은퇴 오류 우선순위, 파일 미생성), 골든 요청 포함 검사 +1, `spring-port` −1 |
+| `src/lib/storage` | 4 → 0 | 사진 파일 읽기는 백엔드가 한다. `PhotoFileStoreTest`·`PhotoApiTest` |
+| TS 어댑터 | 66 → 0 | `CourtAuctionAdapterTest`·`ResponseParserTest`·`SourceContractTest`(34, 동결 골든) 등 |
+| 수집기·사진 워커 | 41 → 0 | `CollectorRunTest`·`ItemUpsertServiceTest`·`PhotoRunTest`·`StoreContractTest`(11) 등 |
+| 분석 워커 | 59 → 57 | `analyzer.integration` 3 → 1. Next 라우트+SQLite 위에서 재분석 선정 SQL을 보던 2개는 `ItemSearchRepositoryTest`의 `needsAnalysis*`가 증명. 남은 1개는 골든 응답 대역으로 재작성 |
+| JSON 라우트 17개 + 폼·사진 라우트의 SQLite 쪽 절반 | 144 → 29 | `ItemApiTest`·`WorkerRun*ApiTest`·`PhotoApiTest`·`HealthApiTest`·`ScenarioContractTest` 등. 남는 4개 라우트는 Spring 원천으로 계속 검증 |
+| 화면 렌더 | 63 → 32 | sqlite 절반(31개)만 제거 |
+| 화면 `_lib` | 294 → 273 | 라우트 쿼리 파서 11(→ Java 파서 테스트), 화면 판정↔SQLite 조건 비교 10(→ `ItemSearchRepositoryTest`) |
+| `deploy-config` | 41 → 34 | 리허설 구성 9 제거, SQLite 볼륨·PVC·빌드 도구·드라이버 없음 단언 3 추가 |
+| 린트 경계 | 11 → 35 | 규칙 3개 × 대표 파일 |
+| `scripts/collector-golden` | 39 → 0 | 골든은 동결, Java 계약 테스트가 검증 |
+| `scripts/migrate` | 49 → 0 | Java 가져오기·해시 테스트가 덮는다. **짝 없음**: `compare-api`(전환 때 1회 사용 완료)와 `rollback-state`(은퇴로 롤백 길이 닫힘) |
+| `scripts/seed` · `scripts/dev` | 48 → 25 · 17 → 5 | 생성기·SQLite 적재·비교 도구 은퇴. `masking`·`sql`·가짜 CLI·가짜 소스 서버 테스트는 유지 |
+
+**회귀 검증이 찾은 구멍(+4)**: 상세 화면의 사진 목록 호출을 지워도 679개가 모두 통과했다(은퇴 전에도 `<img>` 렌더를 보는 테스트가 없었다). 수집된 물건의 `<img>`·사진 목록 요청 확인 2개를 더했다. 대역 JSON이 손으로 쓴 것이라 zod와 함께 틀어질 수 있어, 동결 골든의 성공 GET 본문 전체를 Spring zod 스키마에 먹이는 `golden-schemas.test.ts` 2개를 더했다.
+
+**웹 이미지 크기**: 은퇴 전 `auctionboss-web` 1,490,157,310바이트(1.49GB) → 은퇴 후 같은 Dockerfile로 다시 빌드한 이미지 1,067,498,769바이트(1.07GB). **−422,658,541바이트(−28.4%)**. 빌드 도구(apt `python3 make g++ gcc`)와 `better-sqlite3` 네이티브 모듈이 빠진 결과로 보이며, 어느 쪽이 얼마나 차지했는지는 나눠 재지 않았다. 백엔드 이미지는 596MB(은퇴와 무관, 참고).
+
+**게이트(은퇴 후)**: `npx tsc --noEmit`, `npm test`(683), `npm run build`, `npm run lint`(오류 0·경고 1), `cd backend && ./gradlew check`(789) 통과.
+
+### 18.9 남은 공백
+
+1. **사진 상세 응답 스키마 불일치 2건의 원인을 모른다.** 사이트 오류 응답인지 구조 변경인지 조사하지 않았다(18.6).
+2. **분석 워커 ↔ 실제 Spring 자동 E2E가 없다.** 분석 워커는 개발 환경 수동 스크립트(`verify-analyzer-on-spring.sh`)와 가짜 CLI 회차로만 확인했고, 운영 구성에서는 한 번도 올리지 않았다. 실제 Claude 호출은 운영 전환 뒤 아직 없다.
+3. **화면 ↔ Spring E2E가 없다.** 화면은 대역 `fetch`로 렌더를 검증하고, 실제 Spring과의 연결은 전환 때 수동 확인(화면 5개 200)과 이전 뒤 비교 도구(은퇴)로만 봤다.
+4. **롤백 창은 회차 기준으로만 닫았다.** 수집 성공 1회·사진 성공 1회로 72시간 관찰에 못 미친다. 상시 운영에서의 차단률·장기 안정성은 6단계 몫이다.
+5. **은퇴 후 이미지 크기 분해를 하지 않았다.** 총량 −28.4%만 쟀다. 백엔드·분석 워커 이미지의 크기 최적화는 하지 않았다.
+6. **`.env`의 DB 비밀번호가 개발용 수준이다.** 운영 구성은 `${VAR:?}`로 필수화했지만 값의 강도는 강제하지 않는다. 강화는 후속이다.
+7. **첫 compare-screens 종료 코드 1의 원인이 미확정이다**(18.6). 그 도구는 은퇴했다.
+8. **수집 공백 약 17h51m와 다운타임 T2를 엄밀히 닫지 못했다**(18.5). 상시 환경이 없어 TS 마지막 회차와 전환 시각이 떨어져 있었다.
+9. **백업은 `backups/`에 SQLite 파일 1개뿐이다.** MySQL `mysqldump` 백업과 실제 복구는 6단계에서 한다.

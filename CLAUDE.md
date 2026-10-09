@@ -2,7 +2,7 @@
 
 법원경매 물건을 수집하고, 웹에서 열람하며, Claude Code 기반 AI 분석 결과를 함께 보여주는 서비스.
 
-- 스택: TypeScript + Next.js(App Router) + SQLite(better-sqlite3) + zod
+- 스택: 웹은 TypeScript + Next.js(App Router) + zod, 백엔드는 Spring Boot(Java 21) + MySQL(`backend/`). 수집·저장은 백엔드가 맡고 웹은 HTTP로만 읽는다
 - 계획/스펙은 OpenSpec으로 관리한다 (`openspec/changes/`). 구현 전 해당 change의 proposal/design/specs/tasks를 먼저 읽을 것.
 - 수집 소스 접근은 반드시 `AuctionSource` 어댑터 뒤로 격리한다. 소스 고유 형식이 어댑터 밖으로 새어 나가면 안 된다.
 - 분석 워커(analyzer)는 DB를 직접 읽지 않는다. 서버와는 HTTP API로만 통신한다.

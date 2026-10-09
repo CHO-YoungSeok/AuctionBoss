@@ -5,13 +5,12 @@
 [![CI](https://github.com/CHO-YoungSeok/AuctionBoss/actions/workflows/ci.yml/badge.svg)](https://github.com/CHO-YoungSeok/AuctionBoss/actions/workflows/ci.yml)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs)
-![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4-6DB33F?logo=springboot&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)
 ![Claude](https://img.shields.io/badge/Claude-API-D97757)
-![Tests](https://img.shields.io/badge/tests-1262%20TS%20%2B%20723%20Java-success)
+![Tests](https://img.shields.io/badge/tests-683%20TS%20%2B%20789%20Java-success)
 
-> 개인 프로젝트 · 1인 개발 · 2026.09 ~ · 지금은 백엔드를 Spring Boot + MySQL로 옮기는 중입니다 ([로드맵](docs/ROADMAP.md))
+> 개인 프로젝트 · 1인 개발 · 2026.09 ~ · 백엔드를 SQLite 기반 Next.js에서 Spring Boot + MySQL로 옮기는 5단계를 마쳤습니다 ([로드맵](docs/ROADMAP.md))
 
 <p align="center">
   <img src="docs/images/list.png" alt="물건 목록 화면" width="900">
@@ -32,12 +31,12 @@ AuctionBoss는 물건을 주기적으로 수집해 변화를 기록합니다.
 
 | 기능 | 설명 |
 | --- | --- |
-| **자동 수집** | 법원의 진행 물건을 10분마다 수집해 저장. 법원은 한 번에 한 곳씩 돌아가며 수집하며, 지금 쌓인 데이터는 서울중앙지방법원 809건 |
+| **자동 수집** | 법원의 진행 물건을 10분마다 수집해 저장. 법원은 한 번에 한 곳씩 돌아가며 수집. 운영 전환 직후 기준 물건 1,275건(서울중앙 809건 + 서울동부 첫 수집 466건) |
 | **변동 추적** | 최저가 · 유찰횟수 · 매각기일 · 진행상태가 바뀌면 이력으로 기록 |
 | **관심 물건 피드** | 관심 등록한 물건의 변동만 모아서 보기 |
 | **검색 · 필터** | 지역 · 용도 · 가격대 · 저감률 · 매각기일 등 조건 검색, 조건이 URL에 남아 공유 가능 |
 | **AI 분석** | 감정가 대비 가격, 면적당 가격, 유찰 추이를 해석한 요약 리포트 |
-| **운영 대시보드** | 수집 · 분석 워커의 실행 기록과 상태를 화면에서 확인 |
+| **운영 대시보드** | 수집 · 사진 · 분석 워커의 실행 기록과 상태를 화면에서 확인 |
 
 ## 화면
 
@@ -57,49 +56,48 @@ AuctionBoss는 물건을 주기적으로 수집해 변화를 기록합니다.
 
 ## 아키텍처
 
-### 지금 운영 구조
-
-웹 서버와 수집 · 분석 워커가 각각 **독립 프로세스**로 동작합니다. 하나가 멈춰도 나머지는 영향을 받지 않습니다.
+Spring Boot 백엔드가 MySQL의 **유일한 주인**입니다. 수집 · 사진 워커는 백엔드 안의 스케줄러이고, 웹과 분석 워커는 HTTP로만 백엔드와 통신합니다. 서비스 4개(`mysql`, `backend`, `web`, `analyzer`)가 각각 독립된 컨테이너입니다.
 
 ```mermaid
 flowchart LR
-    SRC[(법원경매정보)] -->|수집| COL[Collector<br/>10분 주기]
-    COL -->|저장| DB[(SQLite)]
-    DB <--> WEB[Next.js<br/>웹 + REST API]
-    WEB <-->|HTTP API| ANA[Analyzer<br/>10분 주기]
+    SRC[(법원경매정보)] -->|수집 · 사진| BE
+    subgraph BE[Spring Boot 백엔드]
+        direction TB
+        API[REST API]
+        SCH[수집 · 사진 스케줄러<br/>소스 어댑터]
+    end
+    BE --> DB[(MySQL 8.4)]
+    WEB[Next.js 웹] -->|HTTP| API
+    ANA[분석 워커<br/>TypeScript] -->|HTTP| API
     ANA -->|프롬프트| LLM[Claude]
     USER((사용자)) --> WEB
 ```
 
 | 구성 요소 | 역할 |
 | --- | --- |
-| **Collector** | 외부 소스에서 물건을 가져와 도메인 모델로 바꾼 뒤 저장. 바뀐 값은 변경 이력으로 기록 |
-| **Next.js 앱** | 목록 · 상세 · 피드 · 상태 화면과 REST API 제공 |
-| **Analyzer** | 분석이 필요한 물건을 API로 받아 Claude로 분석하고 결과를 API로 저장 |
+| **Spring Boot 백엔드** | REST API, 수집 · 사진 회차(로테이션, 요청 상한, 차단 감지와 공유 백오프), 변경 이력 기록. 두 인스턴스가 떠도 MySQL `GET_LOCK`으로 회차가 겹치지 않음 |
+| **Next.js 웹** | 목록 · 상세 · 관심 · 피드 · 상태 화면. 데이터 접근은 `src/lib/data-port` 한 곳을 거쳐 백엔드 HTTP로만 함 |
+| **분석 워커** | 분석이 필요한 물건을 API로 받아 Claude로 분석하고 결과를 API로 저장 |
 
-### 이전 중인 구조: Spring Boot + MySQL
+**설계에서 지킨 원칙**
 
-SQLite 파일 하나를 웹 앱과 수집 워커가 함께 여는 구조는 서버를 늘리거나 워커를 따로 배포할 수 없습니다. 그래서 백엔드를 Spring Boot + MySQL로 옮기고 있습니다. 4단계까지 끝났고 운영 전환(데이터 이전 포함)이 5단계입니다. 단계와 완료 기준은 [로드맵](docs/ROADMAP.md)에 있습니다.
+- **외부 소스는 어댑터 뒤에 격리했습니다.** 수집 대상 사이트의 응답 형식은 `AuctionSource` 어댑터 안에서만 다룹니다. 소스가 바뀌거나 다른 데이터 제공처를 붙여도 서비스 본체는 수정하지 않습니다. 어댑터 밖으로 소스 형식이 새지 않는 것은 ArchUnit 규칙과 필드명 누출 검사로 강제합니다.
+- **분석 워커는 DB에 직접 접근하지 않습니다.** 서버와 HTTP API로만 통신합니다. 5단계 전환 때 분석 워커 코드는 한 줄도 바뀌지 않았고 접속 주소 환경 변수만 백엔드로 돌렸습니다.
+- **운영 구성이 빈 DB로 실제 사이트에 요청하지 않게 막았습니다.** 데이터 이전 완료 표식이 없으면 백엔드가 기동을 거부합니다.
 
-```mermaid
-flowchart LR
-    WEB[Next.js<br/>화면] -->|HTTP| API[Spring Boot<br/>REST API]
-    ANA[Analyzer] -->|HTTP| API
-    API --> MY[(MySQL 8.4)]
-```
+## Spring 이전 여정
 
-**1단계 완료 (읽기 API)**: `backend/`에 Spring Boot 4 백엔드를 세우고, SQLite 테이블 8개를 Flyway로 MySQL에 옮겼습니다. 읽기 API 5개를 JPA + QueryDSL로 구현했고, **기존 API와 응답이 같은지 계약 테스트 90개로 비교해 모두 일치**합니다. 실명을 가린 실제 데이터 809건을 시드로 씁니다. 화면과 수집 워커는 아직 기존 구조를 씁니다.
+처음에는 Next.js 앱, 수집 워커, SQLite 파일 하나로 시작했습니다. 서버를 늘리거나 워커를 따로 배포할 수 없는 구조여서 백엔드를 5단계로 나눠 옮겼습니다. 단계마다 "같은 동작인가"를 어떻게 증명했는지가 핵심입니다. 단계와 완료 기준은 [로드맵](docs/ROADMAP.md), 수치는 [개발 기록](docs/DEVELOPMENT_NOTES.md)에 있습니다.
 
-**2단계 완료 (쓰기 API)**: 분석 저장, 워커 회차, 관심 물건, 변동 피드, 사진 파일 API를 옮겼고(`POST /api/analyses`, `/api/worker-runs`, `/api/bookmarks`, `/api/feed/read`, `GET /api/photos/...` 등), 시나리오 계약 테스트 7개·115단계가 모두 일치합니다. 개발 환경(시드 MySQL + Spring)에서 **분석 워커 코드 변경 0줄**, 환경 변수만 바꿔 분석 결과가 Spring에 저장되는 것을 확인했습니다. 쓰기 API에는 인증이 없어 Spring 포트는 루프백에만 엽니다.
+| 단계 | 한 일 | 증명 방법 |
+| --- | --- | --- |
+| **1. 계약 골든** | `backend/`에 Spring Boot 4 + MySQL을 세우고 테이블 8개를 Flyway로 옮겨 읽기 API 5개를 JPA + QueryDSL로 구현. 실명을 가린 실제 데이터 809건을 시드로 사용 | 기존 API가 낸 응답을 정답으로 저장해 두고 같은 요청에 같은 JSON이 나오는지 비교하는 계약 테스트 90개 일치 |
+| **2. 쓰기 API** | 분석 저장, 워커 회차, 관심 물건, 변동 피드, 사진 파일 API 이전 | 시나리오 계약 테스트 7개 · 115단계 일치. 개발 환경에서 분석 워커 코드 변경 0줄, 환경 변수만 바꿔 분석 결과가 Spring에 저장됨 |
+| **3. 화면 데이터 포트** | 화면의 데이터 접근을 `src/lib/data-port` 한 곳으로 모으고 SQLite 구현체와 Spring 구현체를 환경 변수로 선택 | 화면 5개와 변형 35건의 HTML이 두 모드에서 차이 0건(개발 환경, 스트리밍 조각 번호만 정규화). 화면당 백엔드 요청 수 상한(최대 11개)을 테스트로 고정. 시나리오 계약 10개 · 171단계 일치 |
+| **4. 수집기 이식** | 소스 어댑터, 수집 회차, 사진 워커를 Java로 이식. 물건 저장과 변경 이력은 한 트랜잭션, `GET_LOCK`으로 단일 실행 | TS가 하는 일을 정답으로 뽑아 비교: 어댑터 골든 34사례(요청 헤더 · 본문 · 대기 시간 포함), 저장 골든 10시나리오 · 44단계 일치. 실제 사이트에는 요청 4개만 보내 TS가 저장한 같은 물건 37건과 불일치 0건 |
+| **5. 데이터 이전 · 전환 · 은퇴** | 운영 데이터를 SQLite에서 MySQL로 이전하고, 화면 · 수집 · 사진을 한 번에 Spring으로 전환한 뒤 SQLite · TS 수집기 · Next JSON API를 은퇴 | 두 언어가 코드를 공유하지 않고 같은 규칙으로 계산한 테이블별 SHA-256 8/8 일치, 이전 뒤 API 3,326건 · 화면 18건 불일치 0. 운영 복사본과 가짜 소스로 전환 · 재실행 · 롤백을 리허설(롤백 16.5초, 런북 결함 2건 발견·수정) |
 
-**3단계 완료 (화면 데이터 포트)**: 화면 5개와 폼·사진 라우트 3개의 데이터 접근을 `src/lib/data-port` 한 곳으로 모았습니다. 구현체는 SQLite와 Spring 둘이고 `AUCTIONBOSS_DATA_SOURCE`(기본 `sqlite`)로 고릅니다. 화면용 읽기 API 5개를 Spring에 더했고(필터 선택지, 분석 이력, 사진 목록, 워커 상태, 수집 로테이션), 시나리오 계약 테스트는 10개·171단계가 모두 일치합니다. 개발 환경에서 `spring` 모드로 띄운 화면 35건을 SQLite 모드와 비교해 **HTML 차이 0건**이었고(스트리밍 조각 번호만 정규화), Spring을 멈추면 SQLite로 대신 보여주지 않고 500으로 끝납니다. 화면 하나가 Spring으로 보내는 요청 수는 상한(최대 11개)을 테스트로 고정했고, 화면 코드가 SQLite를 직접 가져오면 린트가 실패합니다. **운영 화면은 아직 `sqlite`**이고, Spring 전환은 5단계 데이터 이전과 함께 합니다.
-
-**4단계 완료 (수집·사진 워커 이식)**: 소스 어댑터, 수집 회차(로테이션·요청 상한·공유 백오프·차단 감지), 사진 워커를 Java로 옮겼습니다. 물건 저장과 변경 이력 기록은 한 트랜잭션이고, 스케줄러는 MySQL `GET_LOCK` 단일 실행 잠금으로 서버가 둘이어도 회차가 겹치지 않습니다. 같은 동작인지는 TS가 하는 일을 정답으로 뽑아 비교했습니다. 어댑터 골든 34사례(요청 헤더·본문·대기 시간까지)와 저장 골든 10시나리오·44단계가 모두 일치하고(`items`·`item_changes`·`worker_runs`·사진 파일 비교), `workers/`·`src/lib/sources/`는 한 줄도 고치지 않았습니다. 소스 형식이 어댑터 밖으로 새지 않는 것은 ArchUnit 규칙 5개와 필드명 누출 검사로 강제합니다. 실제 사이트에는 요청 4개만 보내 확인했고 차단은 없었으며, TS가 저장한 같은 물건 37건과 불일치 0건이었습니다. **운영 수집·사진은 아직 TS 워커**입니다. Spring 쪽은 스케줄러 기본 꺼짐과 외부 요청 기본 차단의 두 겹으로 막혀 있고(배포 파일이 켜지 않음을 테스트로 고정), 두 수집기를 동시에 돌리면 안 되므로 전환은 5단계 데이터 이전과 함께 합니다.
-
-**설계에서 지킨 두 가지 원칙**
-
-- **외부 소스는 어댑터 뒤에 격리했습니다.** 수집 대상 사이트의 응답 형식은 `AuctionSource` 어댑터 안에서만 다룹니다. 소스가 바뀌거나 다른 데이터 제공처를 붙여도 서비스 본체는 수정하지 않습니다.
-- **분석 워커는 DB에 직접 접근하지 않습니다.** 서버와 HTTP API로만 통신합니다. 그래서 분석 워커를 다른 서버나 컨테이너로 옮겨도 코드가 바뀌지 않습니다.
+**5단계 실제 전환(2026-10-09)** 에서 잰 값: 가져오기 약 4초(행 4,856개), 쓰기 정지에서 서비스 재개까지 4분 4초, 수집 공백 약 17시간 51분. 첫 Spring 수집은 신규 466건에 성공했고, 첫 사진 회차는 5건 중 3건을 저장했습니다(2건은 사이트 응답 구조가 달라 실패, 원인은 조사 전). 은퇴 뒤 웹 이미지는 1.49GB에서 1.07GB로, TS 테스트는 1,350개에서 683개로 줄었습니다. 줄어든 테스트마다 같은 동작을 덮는 Java 테스트를 짝지었고, 동결한 계약 골든은 은퇴 전후 바뀌지 않았습니다. 은퇴 직전 코드는 git 태그 `pre-retire-sqlite`에 있어 되돌릴 수 있습니다.
 
 ---
 
@@ -108,7 +106,7 @@ flowchart LR
 ### 1. 공식 API가 없는 외부 소스를 안정적으로 수집하기
 
 - **문제** 공식 Open API가 없어 사이트 내부 JSON 응답을 사용해야 했습니다. 이 사이트는 접속을 막을 때도 HTTP 200을 돌려줘서, 상태 코드만으로는 실패를 알 수 없었습니다.
-- **해결** 모든 응답을 세 단계로 검사합니다. 본문이 JSON인지, 접속 허용 플래그가 정상인지, zod 스키마를 통과하는지 확인합니다. 오류는 네트워크 오류 · 형식 변경 · 접속 차단으로 나눠 다르게 대응합니다.
+- **해결** 모든 응답을 세 단계로 검사합니다. 본문이 JSON인지, 접속 허용 플래그가 정상인지, 정의한 응답 스키마를 통과하는지 확인합니다. 오류는 네트워크 오류 · 형식 변경 · 접속 차단으로 나눠 다르게 대응합니다.
 - **결과** 접속이 막히면 즉시 수집을 멈추고 1시간 쉽니다. 형식이 바뀌면 잘못된 데이터를 저장하지 않고 실패로 기록합니다.
 
 ### 2. 대상 서버에 부담을 주지 않는 수집 정책
@@ -142,101 +140,92 @@ flowchart LR
 
 | 분류 | 기술 | 선택 이유 |
 | --- | --- | --- |
-| 언어 | TypeScript (strict) | 외부 응답을 도메인 모델로 바꾸는 과정을 타입으로 검증 |
-| 웹 | Next.js 15 (App Router), React 19 | 서버 컴포넌트에서 DB를 바로 조회하고, 같은 앱에서 REST API 제공 |
-| DB | SQLite (better-sqlite3) → MySQL 8.4 | 처음에는 단일 서버에 맞는 가장 단순한 선택. 서버 분리를 위해 MySQL로 옮기는 중 |
-| 백엔드 | Spring Boot 4, Java 21, JPA + QueryDSL, Flyway | 동적 검색은 QueryDSL, 스키마는 버전 관리되는 마이그레이션으로 |
-| 검증 | zod | 외부 응답, API 입력, 설정 파일을 런타임에 검증 |
+| 백엔드 | Spring Boot 4, Java 21, JPA + QueryDSL, Flyway | 동적 검색은 QueryDSL, 스키마는 버전 관리되는 마이그레이션으로. 수집 스케줄러와 단일 실행 잠금도 여기서 |
+| DB | MySQL 8.4 | 서버 분리와 여러 인스턴스를 위해 SQLite에서 이전(5단계). 이전 도구는 한 트랜잭션 가져오기와 전수 해시 검증 |
+| 웹 | Next.js 15 (App Router), React 19, TypeScript (strict) | 서버 컴포넌트에서 데이터 포트를 거쳐 백엔드를 조회 |
+| 검증 | zod (웹 · 분석 워커) | 백엔드 API 응답과 설정 파일을 런타임에 검증 |
 | AI | Claude | API 키가 있으면 Messages API, 없으면 Claude Code CLI로 자동 전환 |
-| 테스트 | Vitest, JUnit 5, Testcontainers | TS 1262개, Java 723개(실제 MySQL 컨테이너, 기존 API와의 계약 테스트 읽기 90개 + 시나리오 10개·171단계, 수집 동등성 골든 어댑터 34사례 + 저장 10시나리오·44단계 포함) |
-| 인프라 | Docker Compose, GitHub Actions | 멀티 스테이지 빌드, 헬스체크, TS와 Java 검사를 CI에서 병렬 실행. Kubernetes 매니페스트는 있지만 클러스터에 배포한 적은 없음 |
+| 테스트 | Vitest 683개, JUnit 5 + Testcontainers 789개 | Java는 실제 MySQL 컨테이너 위에서 기존 API와의 계약 골든(읽기 90 + 시나리오 10), 수집 동등성 골든(어댑터 34사례 + 저장 10시나리오 · 44단계), 이전 해시 골든을 포함 |
+| 인프라 | Docker Compose, GitHub Actions | 멀티 스테이지 빌드, 헬스체크, TS와 Java 검사를 CI에서 병렬 실행. Kubernetes 매니페스트는 정적 검증만 했고 클러스터에 배포한 적은 없음 |
 
 ## 개발 방식
 
-- **스펙 먼저 쓰고 구현했습니다.** 기능마다 제안서 · 설계 · 요구사항 · 작업 목록을 [OpenSpec](openspec/)으로 먼저 작성했습니다. 완료된 기능 18개의 기록이 `openspec/changes/archive/`에 남아 있습니다.
-- **모든 변경은 4단계 검사를 통과해야 합니다.** 타입 검사, 테스트, 빌드, 린트를 로컬과 CI에서 똑같이 실행합니다.
-- **테스트로 회귀를 막습니다.** 외부 응답은 실제 응답 샘플로, API는 임시 DB로, AI 호출은 가짜 구현을 주입해 테스트합니다.
+- **스펙 먼저 쓰고 구현했습니다.** 기능마다 제안서 · 설계 · 요구사항 · 작업 목록을 [OpenSpec](openspec/)으로 먼저 작성했습니다. 완료된 change 23개의 기록이 `openspec/changes/archive/`에 남아 있습니다.
+- **모든 변경은 게이트를 통과해야 합니다.** 웹은 타입 검사 · 테스트 · 빌드 · 린트, 백엔드는 `./gradlew check`를 로컬과 CI에서 똑같이 실행합니다.
+- **테스트로 회귀를 막습니다.** 외부 응답은 실제 응답 샘플로, 백엔드는 실제 MySQL 컨테이너(Testcontainers)로, AI 호출은 가짜 구현을 주입해 테스트합니다.
 - **AI 코딩 에이전트를 역할별로 나눠 썼습니다.** Claude Code에서 구현 · 리뷰 · 회귀 검증을 서로 다른 에이전트에 맡기고, 결과를 직접 검토하고 통합했습니다.
 
 ---
 
 ## 실행 방법
 
-Node.js 22 이상이 필요합니다.
+Docker가 필요합니다. 웹을 로컬에서 개발하려면 Node.js 22 이상, 백엔드를 빌드하려면 JDK 21이 필요합니다.
 
 ```bash
 git clone https://github.com/CHO-YoungSeok/AuctionBoss.git
 cd AuctionBoss
-npm install
-
-npm run build && npm start   # 터미널 1: 웹 서버 (http://localhost:3000)
-npm run collector            # 터미널 2: 수집 워커
-npm run analyzer             # 터미널 3: 분석 워커
-npm run photos               # 터미널 4: 사진 워커 (상주. 1회만 돌리려면 npm run photos -- --once)
+cp .env.example .env     # DB 접속 정보(DB_NAME, DB_USER, DB_PASSWORD, MYSQL_ROOT_PASSWORD)를 채웁니다
 ```
 
-분석 워커는 `ANTHROPIC_API_KEY` 환경 변수가 있으면 Claude API를 사용합니다. 없으면 로컬에 로그인된 Claude Code CLI를 사용합니다.
+**시드로 가볍게 둘러보기** (실명을 가린 809건이 자동으로 들어갑니다. 수집은 꺼져 있고 외부 요청이 나가지 않습니다):
+
+```bash
+docker compose -p auctionboss-smoke -f docker-compose.smoke.yml up -d --wait
+curl http://localhost:18080/api/items
+```
+
+**웹까지 띄워 화면 보기** (위 스모크 백엔드를 쓰는 개발 모드):
+
+```bash
+npm install
+AUCTIONBOSS_DATA_SOURCE=spring AUCTIONBOSS_SPRING_BASE=http://localhost:18080 npm run dev   # http://localhost:3000
+```
+
+**운영 구성**은 저장소 루트의 `docker compose up`입니다(`mysql` · `backend` · `web` · `analyzer`). 백엔드가 수집 · 사진 스케줄러를 켜고 실제 사이트에 요청하므로, **이전 완료 표식이 없으면 백엔드가 뜨지 않습니다**(그에 묶인 웹 · 분석 워커도 뜨지 않습니다). 설정과 환경 변수는 [레퍼런스](docs/REFERENCE.md), 전환 기록과 롤백 절차는 [레퍼런스 9절](docs/REFERENCE.md#9-운영-전환-기록)과 [10절](docs/REFERENCE.md#10-롤백-태그--백업으로-되돌리기)입니다.
+
+분석 워커는 `ANTHROPIC_API_KEY` 환경 변수가 있으면 Claude API를 사용합니다. 없으면 로컬에 로그인된 Claude Code CLI를 사용합니다(`AUCTIONBOSS_API_BASE`를 백엔드 주소로 지정하고 `npm run analyzer`).
 
 - API 모드 기본 모델은 `claude-opus-5-5`입니다. 비용을 낮추려면 `AUCTIONBOSS_ANALYZE_MODEL=claude-sonnet-5-5`로 바꿉니다(단가 절반).
 - 컨테이너로 띄우는 analyzer에는 Claude Code CLI가 없으므로 `ANTHROPIC_API_KEY`가 반드시 필요합니다.
 - API 모드는 서버 측 대체가 켜져 있어, 안전 분류기가 거절하면 같은 호출 안에서 다른 모델이 이어받습니다. 실제로 답한 모델이 `analyses.model`에 저장됩니다. 출력이 잘렸거나 끝내 거절되면 분석을 저장하지 않고 실패로 기록합니다.
-사진 워커는 30분마다 사진이 없는 물건 최대 5건을 받고, 요청 사이에 30초를 쉽니다. 사진을 받지 못한 물건은 24시간 뒤에 다시 시도합니다. 수집 워커가 접속 차단을 감지하면 사진 워커도 같은 백오프 동안 쉽니다. 이 값들은 `config/collector.json`의 `photos` 절에서 바꿀 수 있습니다.
 
-수집 대상 법원, 실행 주기, 분석 건수 한도도 `config/collector.json`에서 바꿀 수 있습니다.
-
-### Spring 백엔드 (이전 중)
-
-Docker만 있으면 됩니다. 실명을 가린 시드 809건이 자동으로 들어갑니다.
-
-```bash
-cp .env.example .env
-docker compose -p auctionboss-smoke -f docker-compose.smoke.yml up -d --wait   # http://localhost:18080/api/items
-```
-
-이 명령은 시드로 뜨는 스모크 구성(별도 프로젝트)입니다. 저장소 루트의 `docker compose up`은 운영 구성(MySQL + 백엔드 + 웹 + 분석 워커)이고, **이전 완료 표식이 없으면 백엔드가 뜨지 않습니다**(그에 묶인 웹·분석 워커도 뜨지 않습니다). 이전 절차는 [레퍼런스 9절](docs/REFERENCE.md#9-운영-전환-런북)입니다. 운영 구성에는 TS 수집·사진 서비스가 없고 백엔드가 수집·사진을 맡습니다.
-
-수집·사진 워커는 Spring에서도 돌 수 있고 코드 기본값은 꺼짐입니다(운영 배포 구성의 백엔드만 켭니다)(`auctionboss.collector.enabled`, `auctionboss.photos.enabled`). 외부 요청도 `auctionboss.source.external-requests-allowed`를 켜기 전에는 루프백으로만 나갑니다. 루프백 가짜 소스로 전체 경로를 확인하는 `scripts/dev/verify-collector-on-spring.sh`(외부 요청 없음)와 1회 실행 모드 사용법은 [레퍼런스 8절](docs/REFERENCE.md#8-spring-백엔드-이전-중)에 있습니다. TS 수집기와 동시에 켜면 안 됩니다(운영 구성은 TS 수집·사진 서비스를 두지 않습니다).
-
-화면을 Spring에서 읽게 해 보려면(개발용, 운영 기본값은 `sqlite`) Spring을 띄운 뒤 다음처럼 실행합니다. `scripts/dev/compare-screens.sh`는 임시 MySQL·Spring·SQLite에 두 모드를 띄워 화면을 비교합니다(Docker·JDK 필요).
-
-```bash
-AUCTIONBOSS_DATA_SOURCE=spring AUCTIONBOSS_SPRING_BASE=http://localhost:8080 npm run dev
-bash scripts/dev/compare-screens.sh
-```
+사진은 30분마다 사진이 없는 물건 최대 5건을 받고, 요청 사이에 30초를 쉽니다. 사진을 받지 못한 물건은 24시간 뒤에 다시 시도합니다. 수집이 접속 차단을 감지하면 사진도 같은 백오프 동안 쉽니다. 수집 대상 법원, 실행 주기, 분석 · 사진 건수 한도는 `config/collector.json`에서 바꿉니다.
 
 ### 전체 검사
 
 ```bash
-npx tsc --noEmit && npm test && npm run build && npm run lint   # TypeScript
-(cd backend && ./gradlew check)                                  # Java (Docker 필요)
+npx tsc --noEmit && npm test && npm run build && npm run lint   # TypeScript (테스트 683개)
+(cd backend && ./gradlew check)                                  # Java (테스트 789개, Docker 필요)
 ```
 
 ## 폴더 구조
 
 ```
 src/
-├── app/            # 화면(목록 · 상세 · 관심 · 피드 · 상태)과 REST API
+├── app/            # 화면(목록 · 상세 · 관심 · 피드 · 상태)과 폼 · 사진 · 헬스 라우트
 └── lib/
-    ├── domain/     # 도메인 모델과 비즈니스 규칙
-    ├── sources/    # 외부 소스 어댑터 (격리 경계)
-    └── db/         # 스키마와 저장소
-workers/            # 수집 · 분석 · 사진 워커, AI 프롬프트
-backend/            # Spring Boot 백엔드 (Flyway 스키마, JPA 엔티티, QueryDSL 검색, 계약 테스트)
-scripts/seed/       # 실명 가림 시드 생성, 계약 테스트용 정답 응답 생성
+    ├── data-port/  # 화면의 데이터 접근 유일 경로 (Spring 구현체)
+    └── domain/     # 도메인 모델과 순수 규칙
+workers/            # 분석 워커, AI 프롬프트
+backend/            # Spring Boot 백엔드 (API, 수집 · 사진 스케줄러, 소스 어댑터, 이전 도구, Flyway, 계약 테스트)
+scripts/            # 개발 검증 스크립트, 실명 가림 순수 함수
 openspec/           # 기능별 스펙과 설계 기록
 k8s/                # Kubernetes 매니페스트
 ```
 
 ## 한계와 다음 단계
 
-- **인증이 없습니다.** 지금은 개인용으로 설계했습니다. 여러 사용자를 지원하려면 로그인과 사용자별 관심 목록이 필요합니다.
+- **인증이 없습니다.** 지금은 개인용으로 설계했습니다. 쓰기 API가 열려 있어 백엔드 포트는 루프백에만 엽니다. 여러 사용자를 지원하려면 로그인과 사용자별 관심 목록이 필요합니다(로드맵 7단계).
+- **상시 운영 환경이 없습니다.** 전환 때 수집 · 사진을 실제 사이트에서 한 회차씩만 확인했고 장기 차단률과 안정성은 모릅니다. 백업(`mysqldump`)과 복구도 아직 없습니다(로드맵 6단계).
+- **분석 워커와 실제 Spring을 잇는 자동 E2E가 없고, 화면과 실제 Spring을 잇는 E2E도 없습니다.** 분석 워커는 가짜 CLI로 개발 환경에서 확인했고, 화면은 대역 응답으로 렌더링을 검증했습니다.
+- **사진 상세 응답이 달랐던 2건의 원인을 조사하지 못했습니다.**
 - **비공식 데이터에 의존합니다.** 소스 형식이 바뀌면 수집이 멈춥니다. 어댑터 구조 덕분에 상용 데이터 API로 교체할 수 있습니다.
 - **권리 분석은 하지 않습니다.** 등기부나 임차인 정보는 이 소스에 없습니다. AI 분석은 참고용 요약이며 투자 판단을 대신하지 않습니다.
-- 사진 워커는 실제 소스에서 사진 1건을 받아 저장하는 것까지 확인했습니다. 장기간 상주 운영은 검증하지 않았습니다.
 - 수집한 데이터는 개인 열람 용도로만 사용합니다.
 
 ## 더 보기
 
-- [레퍼런스](docs/REFERENCE.md): 설정, 환경 변수, REST API, 데이터 모델, 워커 동작
+- [레퍼런스](docs/REFERENCE.md): 설정, 환경 변수, REST API, 데이터 모델, 워커 동작, 전환 기록과 롤백
+- [로드맵](docs/ROADMAP.md): 단계별 완료 기준과 후속 과제
 - [기능 스펙](openspec/specs/): 기능별 요구사항
-- [개발 기록](docs/DEVELOPMENT_NOTES.md): 개발 중 사이클마다 남긴 실측 수치와 설계 판단
+- [개발 기록](docs/DEVELOPMENT_NOTES.md): 사이클마다 남긴 실측 수치와 설계 판단

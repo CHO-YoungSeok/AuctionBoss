@@ -260,10 +260,10 @@ export async function postAnalysis(options: {
 // ---------------------------------------------------------------------------
 // 회차 기록 (add-collection-observability, design.md D3)
 //
-// 분석 워커는 DB를 직접 쓰지 않으므로(D5) 회차 기록도 API를 거친다 — collector가
-// 저장소 함수를 직접 호출하는 것과 대비된다. 두 경로가 같은 저장소 함수
-// (`startRun`/`finishRun`)를 호출하는 얇은 라우트(`src/app/api/worker-runs/**`) 뒤에서
-// 만나므로 기록 규칙 자체는 갈라지지 않는다.
+// 분석 워커는 DB를 직접 쓰지 않으므로(D5) 회차 기록도 API를 거친다. 5단계에서
+// SQLite·TS 수집기·Next JSON 라우트(`src/app/api/worker-runs/**`)가 은퇴해, 이 호출은
+// 이제 Spring 백엔드의 `/api/worker-runs`가 받는다(`AUCTIONBOSS_API_BASE`).
+// 백엔드 수집·사진 워커도 같은 서비스로 회차를 기록하므로 기록 규칙은 갈라지지 않는다.
 //
 // 이 두 함수는 실패하면 그대로 throw한다 — "기록 실패가 워커를 죽이면 안 된다"(design.md
 // D4)는 규칙은 호출자(analyzer.ts)의 책임이다. 여기서 삼키면 analyzer.ts가 기록 성공

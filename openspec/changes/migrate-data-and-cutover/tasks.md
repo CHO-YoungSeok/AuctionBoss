@@ -67,12 +67,12 @@
 
 ## 9. 마무리
 
-- [ ] 9.1 게이트 5종을 모두 통과시킨다. TS 테스트 수 변화(8.3 표의 묶음별 감소 이유)와 Java 테스트 수 변화를 메모에 남긴다. `git diff --stat <1.1 시작 커밋> -- workers/analyzer.ts workers/lib/ workers/prompts/`가 비어 있는지 다시 확인한다
-- [ ] 9.2 실명 검사(D14): `git ls-files` 전체에서 원본 비고로 추출한 이름 목록(메모리에서만)이 나타나지 않는지 확인하고 건수(0)만 메모에 남긴다. `data/migration/`·`docs/untracked/`가 git에 없음을 확인한다
-- [ ] 9.3 `docs/DEVELOPMENT_NOTES.md` 17절에 수치를 남긴다: 1.3 실측(건수만), 6장 리허설 시간·멱등·롤백 시간, 7장 전환 수치(이전 시간, 행 수, 해시 일치, 다운타임, 수집 공백, 첫 회차 결과), 롤백 창 집계, 은퇴 전후 테스트 수·이미지 크기
-- [ ] 9.4 `docs/ROADMAP.md`를 갱신한다: 5단계 상태·완료 기준 해석("테이블별 행 수와 표본 값 일치"를 전수 해시와 API 전수 비교로, "수집 공백 시간"을 7.7 값으로), "지금 상태"의 구조 설명과 목표 구조 도달, 6단계 할 일(상시 환경, `mysqldump` 백업과 복구, 이전 백업의 보관 결정)
-- [ ] 9.5 `regression-verifier` 서브에이전트로 회귀 검증을 받고 지적 사항을 반영한다(특히 "운영 구성이 실수로 SQLite나 TS 수집기로 돌아갈 때 잡는 테스트", "이전 전 기동 거부", "스모크가 운영 볼륨을 지우는 경로")
-- [ ] 9.6 커밋하고 푸시한 뒤 GitHub Actions의 TS 잡과 Java 잡이 통과하는지 확인한다(장마다 커밋·푸시는 따로 한다)
+- [x] 9.1 게이트 5종을 모두 통과시킨다. TS 테스트 수 변화(8.3 표의 묶음별 감소 이유)와 Java 테스트 수 변화를 메모에 남긴다. `git diff --stat <1.1 시작 커밋> -- workers/analyzer.ts workers/lib/ workers/prompts/`가 비어 있는지 다시 확인한다
+- [x] 9.2 실명 검사(D14): `git ls-files` 전체에서 원본 비고로 추출한 이름 목록(메모리에서만)이 나타나지 않는지 확인하고 건수(0)만 메모에 남긴다. `data/migration/`·`docs/untracked/`가 git에 없음을 확인한다
+- [x] 9.3 `docs/DEVELOPMENT_NOTES.md` 17절에 수치를 남긴다: 1.3 실측(건수만), 6장 리허설 시간·멱등·롤백 시간, 7장 전환 수치(이전 시간, 행 수, 해시 일치, 다운타임, 수집 공백, 첫 회차 결과), 롤백 창 집계, 은퇴 전후 테스트 수·이미지 크기
+- [x] 9.4 `docs/ROADMAP.md`를 갱신한다: 5단계 상태·완료 기준 해석("테이블별 행 수와 표본 값 일치"를 전수 해시와 API 전수 비교로, "수집 공백 시간"을 7.7 값으로), "지금 상태"의 구조 설명과 목표 구조 도달, 6단계 할 일(상시 환경, `mysqldump` 백업과 복구, 이전 백업의 보관 결정)
+- [x] 9.5 `regression-verifier` 서브에이전트로 회귀 검증을 받고 지적 사항을 반영한다(특히 "운영 구성이 실수로 SQLite나 TS 수집기로 돌아갈 때 잡는 테스트", "이전 전 기동 거부", "스모크가 운영 볼륨을 지우는 경로")
+- [x] 9.6 커밋하고 푸시한 뒤 GitHub Actions의 TS 잡과 Java 잡이 통과하는지 확인한다(장마다 커밋·푸시는 따로 한다)
 - [ ] 9.7 `openspec validate migrate-data-and-cutover --strict`를 통과시킨 뒤 change를 아카이브하고(`port-collector-to-spring` 아카이브 뒤), 메인 스펙 `spring-backend`·`web-data-port`·`deployment-and-health`에 반영됐는지 확인한다. `web-data-port`·`deployment-and-health`의 Purpose 문장을 SQLite 은퇴에 맞게 메인 스펙에서 직접 고친다
 
 ## 메모 (구현 중 기록, 값·실명 없음)
@@ -203,3 +203,14 @@
 - **이미지 크기(8.5)**: 은퇴 전 `auctionboss-web:latest` 1.49GB(7장에 만든 이미지). 은퇴 뒤 이미지는 **재빌드하지 않았다**(`npm ci`가 외부 레지스트리를 쓰고 이 작업은 `npm install` 외 외부 요청을 하지 않는 조건이라). 빌드 도구 apt 설치(python3 make g++ gcc)와 `better-sqlite3` 네이티브 모듈이 빠져 줄어들 것으로 예상하며, 실측은 9장에서 하거나 CI 이미지 빌드로 확인.
 - **design과 다르게 한 것**: (1) 렌더·포트 테스트를 "메모리 `DataPort`"가 아니라 Spring 구현체 + 대역 `fetch`로 옮겼다(요청 지시. 직렬화·zod 경로까지 방어). (2) `src/lib/sources/courtauction/NOTES.md`는 남겼다(D12는 `src/lib/sources/**` 삭제): 사이트 응답·차단 실측 문서이고 `docs/`가 여러 곳에서 이 경로를 가리킨다. 코드·테스트·픽스처는 전부 지움. (3) `scripts/dev/fake-source-server.ts`는 지우지 않고 입력을 TS 어댑터 픽스처 대신 이미 가림 처리된 동결 골든 픽스처(`backend/src/test/resources/contracts/source/fixtures/*.json`)로 바꾸고 응답 봉투 두 함수를 인라인했다(Spring 수집기 개발 확인 `verify-collector-on-spring.sh`가 쓴다). (4) `scripts/dev/rehearsal*`와 `rehearse-cutover.sh`·`normalize-html.py`도 SQLite 의존·전환 전용이라 지웠다(D12 "scripts/dev/ 중 SQLite 의존 스크립트"). (5) `scripts/seed/{masking,sql}.ts`와 테스트는 유지(순수 함수, 9.2 실명 검사 도구가 `masking`을 씀), 나머지 seed 파일은 생성기에 종속이라 지움. (6) `.gitignore`의 `*.db*`·`/data/`는 남겼다(`backups/`·`data/`에 DB 파일이 있고 Spring 시드 등 다른 `.db`도 막아야 해서). (7) 린트 규칙 (3)의 테스트 면제.
 - **9장으로 넘기는 것(문서·메모 정리 필요)**: `README.md`(npm run collector·photos 안내 173~175줄, `compare-screens.sh` 200~204줄, SQLite 배지·구조도·기술 표, `scripts/seed/` 생성 안내, 구현체 둘/`AUCTIONBOSS_DATA_SOURCE` 기본 `sqlite` 서술), `docs/REFERENCE.md`(`scripts/migrate/` 4곳, 전환·롤백 런북의 `rehearse-cutover.sh`·`compare-screens`·`live-check-collector`·`npm run collector|photos`·`AUCTIONBOSS_DB`·`auctionboss-data` 볼륨), `docs/DEVELOPMENT_NOTES.md`(`src/lib/db` 9곳, `src/lib/sources` 12곳, `AUCTIONBOSS_DB` 5곳, `workers/collector` 3곳, `scripts/collector-golden`·`seed-to-sqlite`·`normalize-html`·`lib/storage`), `docs/ROADMAP.md`(`src/lib/db`·`src/lib/sources` 1곳씩). 코드 쪽 낡은 참조: `CLAUDE.md`·`GEMINI.md` 5줄의 스택 "SQLite(better-sqlite3)", 백엔드 주석·시드 SQL 머리말이 가리키는 `scripts/seed/*`·`scripts/migrate/export.ts`·`scripts/collector-golden/*`(동결 골든의 머리말이라 고치지 않음).
+
+### 9장 (2026-10-09, 문서·수치·게이트. 값·실명 없음)
+
+- **9.1 게이트(은퇴 후, 문서 수정 뒤 다시 실행)**: `npx tsc --noEmit` 통과, `npm test` 57파일 683개, `npm run build` 통과, `npm run lint` 오류 0·경고 1, `cd backend && ./gradlew cleanTest check` 통과 789개(실패·건너뜀 0, 결과 XML 합산). 테스트 수 변화는 8.3 표와 DEVELOPMENT_NOTES 18.8 범주별 표: TS 1257(시작) → 1350(은퇴 직전) → 679(은퇴) → 683(회귀 검증 +4), Java 723 → 789(3장 +62, 5장 환경 변수 바인딩 +4, 은퇴 변화 0). `git diff --stat 8cd214b -- workers/analyzer.ts workers/lib workers/prompts`는 `workers/lib/api.ts` **주석 4줄**만 나온다(이 장에서 낡은 경로를 가리키던 주석을 고침, 코드 0줄). `workers/analyzer.ts`·`workers/prompts/`는 0줄. `git diff --stat -- backend/src/test/resources/` 빈 출력.
+- **9.3**: `docs/DEVELOPMENT_NOTES.md`에 **18절**(5단계)을 새로 썼다(task 문구의 "17절"은 4단계가 이미 17절이라 18절로 함): 1.3 실측, 이전 도구·해시 규칙, 가져오기 시간, 리허설 수치, 실제 전환 수치, 이상 항목 판단 3건, 롤백 설계와 런북 결함 2건, 은퇴 범위·테스트 수(범주별)·이미지 크기, 남은 공백 9개. 13~17절과 5·6·7·8·11·12절은 내용을 바꾸지 않고 절 머리에 "5단계에서 은퇴함(태그 `pre-retire-sqlite`)" 주석을 달았다. 현재 구조를 설명하는 머리말·1·2·3·4(환경 변수 표 일부)·9·10절은 현재에 맞게 고쳤다.
+- **이미지 크기 실측**: 은퇴 후 같은 Dockerfile로 `docker build`(npm 레지스트리 접근, 외부 사이트 요청 없음, 약 1분 안팎)해 `auctionboss-web` 1,067,498,769바이트. 은퇴 전 1,490,157,310바이트 대비 −422,658,541바이트(−28.4%, 1.49GB → 1.07GB). 측정용 태그 이미지는 지웠다(기존 `auctionboss-web:latest` 1.49GB는 그대로). 빌드 도구와 `better-sqlite3` 기여는 분해해 재지 않았다.
+- **9.4**: `docs/ROADMAP.md` 5단계 완료(완료 기준 해석: 전수 해시·API 전수 비교, 수집 공백 17h51m, 결정 기록 2의 회차 기준, 72시간 관찰은 6단계 몫), 지금 상태·한계·목표 구조 도달, 후속 과제 6개, 6단계 할 일(`mysqldump` 백업·복구, 이전 백업 보관 결정, 장기 관찰). 같은 변경으로 `README.md`(아키텍처 mermaid, 배지 683 TS + 789 Java, Spring 이전 여정 5단계 표), `docs/REFERENCE.md`(운영 구성 기준 재작성: 9절은 전환 기록, 10절은 "태그 + 백업으로 되돌리기"), `CLAUDE.md`·`GEMINI.md`(스택 줄), `workers/lib/api.ts`(주석만)를 고쳤다.
+- **9.2 실명 검사(회귀 검증이 수행, 값·목록 없음)**: 이전 원본 백업(`backups/auctionboss-pre-cutover-20261009.db`, 읽기만, 복사본은 검사 뒤 삭제)의 비고 283행에서 `scripts/seed/masking.ts`의 `extractPersonNames`(태그 `pre-retire-sqlite`의 같은 파일과 diff 0)로 메모리에서만 추출한 이름 후보 15개를 (a) `git ls-files` 810개 파일 내용과 경로, (b) 미추적 비무시 파일 1개(`docs/BUILD_REPORT.html`), (c) `git log -p --all` 전체 출력(약 13.5MB, 태그 포함)에서 부분 문자열로 셌다. **출현 0건**(작업 트리 0, 이력 0, 후보 중 걸린 것 0개). `data/migration/`·`docs/untracked/`는 `git ls-files` 0개, 이력(`git log --all --name-only`)에도 0건이고 둘 다 `.gitignore`에 걸린다. 한계: 추출기가 패턴(`<이름>의 임차보증금`, `임차인·채무자·소유자 <이름>`)에 걸린 이름만 잡으므로 비고에 다른 문형으로 적힌 이름은 이 검사 밖이다.
+- **REFERENCE 10절(롤백)의 한계**: 은퇴 **전** 구성의 리허설(16.5s, 결함 2건 수정) 절차를 태그 체크아웃(`git worktree`) 경로로 옮겨 적었다. 은퇴 후 이 경로를 다시 리허설하지는 않았다(문서에 명시).
+- **남은 9장 task**: 9.5(회귀 검증 반영), 9.6(커밋·푸시·CI), 9.7(validate·아카이브).
+
