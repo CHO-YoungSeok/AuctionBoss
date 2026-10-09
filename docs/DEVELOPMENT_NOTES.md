@@ -1991,7 +1991,7 @@ TS +50: 픽스처 추출 4, 어댑터 골든 9, 저장 골든 13, 실제 사이�
 
 ## 18. 5단계: 데이터 이전·전환·은퇴 (migrate-data-and-cutover, 2026-10-09)
 
-운영 데이터를 SQLite에서 MySQL로 옮기고, 화면·수집·사진·분석 워커를 한 번에 Spring 백엔드 쪽으로 돌린 뒤, SQLite·TS 수집기·Next JSON API를 은퇴시켰다. 이 절의 수치는 모두 change의 `tasks.md` 메모(1~8장)에 기록된 실측이다. 값·실명은 적지 않는다. 계획은 `openspec/changes/migrate-data-and-cutover/`(proposal·design·결정 기록)에 있다. 시작 커밋 `defd02e`, 은퇴 직전 태그 `pre-retire-sqlite`.
+운영 데이터를 SQLite에서 MySQL로 옮기고, 화면·수집·사진·분석 워커를 한 번에 Spring 백엔드 쪽으로 돌린 뒤, SQLite·TS 수집기·Next JSON API를 은퇴시켰다. 이 절의 수치는 모두 change의 `tasks.md` 메모(1~8장)에 기록된 실측이다. 값·실명은 적지 않는다. 계획은 `openspec/changes/archive/2026-10-09-migrate-data-and-cutover/`(proposal·design·결정 기록)에 있다. 시작 커밋 `defd02e`, 은퇴 직전 태그 `pre-retire-sqlite`.
 
 ### 18.1 운영 데이터 실측 (1장)
 

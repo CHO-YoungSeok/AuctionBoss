@@ -319,7 +319,7 @@ scripts/docker-smoke.sh                   # 처음 기동과 재기동(데이터
 
 ## 9. 운영 전환 기록
 
-5단계(2026-10-09)에 SQLite(TS 구성)에서 MySQL·Spring 백엔드로 한 번 옮겼습니다. 같은 절차를 다시 쓸 일은 없으므로(역이전 도구 없음, 내보내기 도구 은퇴) 절차는 기록으로만 남깁니다. 설계는 `openspec/changes/migrate-data-and-cutover/design.md` D10, 수치는 [개발 기록 18절](DEVELOPMENT_NOTES.md)과 그 change의 `tasks.md` 메모에 있습니다.
+5단계(2026-10-09)에 SQLite(TS 구성)에서 MySQL·Spring 백엔드로 한 번 옮겼습니다. 같은 절차를 다시 쓸 일은 없으므로(역이전 도구 없음, 내보내기 도구 은퇴) 절차는 기록으로만 남깁니다. 설계는 `openspec/changes/archive/2026-10-09-migrate-data-and-cutover/design.md` D10, 수치는 [개발 기록 18절](DEVELOPMENT_NOTES.md)과 그 change의 `tasks.md` 메모에 있습니다.
 
 **전환 절차(요약)**: (1) 사전 확인(게이트 5종, `docker compose config -q`, 이미지 사전 빌드) → (2) 쓰기 정지(T0, 옛 TS 서비스 stop) → (3) SQLite 백업 API 스냅숏으로 8개 테이블 내보내기(매니페스트에 행 수·해시) → (4) MySQL 기동 → (5) 가져오기 드라이런 1회 뒤 본 실행(스케줄러를 끈 1회 실행: `AUCTIONBOSS_RUN_ONCE=import`, 한 트랜잭션, 해시 8/8 일치 필요) → (6) 스케줄러 끈 백엔드로 이전 뒤 API·화면 전수 비교(불일치 0 필요) → (7) 백엔드·웹 켬(T1) → (8) 확인(헬스, 화면 5개 200, 첫 수집·사진 회차 결과).
 

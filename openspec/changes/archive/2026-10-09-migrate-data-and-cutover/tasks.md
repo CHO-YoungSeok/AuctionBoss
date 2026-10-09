@@ -73,7 +73,7 @@
 - [x] 9.4 `docs/ROADMAP.md`를 갱신한다: 5단계 상태·완료 기준 해석("테이블별 행 수와 표본 값 일치"를 전수 해시와 API 전수 비교로, "수집 공백 시간"을 7.7 값으로), "지금 상태"의 구조 설명과 목표 구조 도달, 6단계 할 일(상시 환경, `mysqldump` 백업과 복구, 이전 백업의 보관 결정)
 - [x] 9.5 `regression-verifier` 서브에이전트로 회귀 검증을 받고 지적 사항을 반영한다(특히 "운영 구성이 실수로 SQLite나 TS 수집기로 돌아갈 때 잡는 테스트", "이전 전 기동 거부", "스모크가 운영 볼륨을 지우는 경로")
 - [x] 9.6 커밋하고 푸시한 뒤 GitHub Actions의 TS 잡과 Java 잡이 통과하는지 확인한다(장마다 커밋·푸시는 따로 한다)
-- [ ] 9.7 `openspec validate migrate-data-and-cutover --strict`를 통과시킨 뒤 change를 아카이브하고(`port-collector-to-spring` 아카이브 뒤), 메인 스펙 `spring-backend`·`web-data-port`·`deployment-and-health`에 반영됐는지 확인한다. `web-data-port`·`deployment-and-health`의 Purpose 문장을 SQLite 은퇴에 맞게 메인 스펙에서 직접 고친다
+- [x] 9.7 `openspec validate migrate-data-and-cutover --strict`를 통과시킨 뒤 change를 아카이브하고(`port-collector-to-spring` 아카이브 뒤), 메인 스펙 `spring-backend`·`web-data-port`·`deployment-and-health`에 반영됐는지 확인한다. `web-data-port`·`deployment-and-health`의 Purpose 문장을 SQLite 은퇴에 맞게 메인 스펙에서 직접 고친다
 
 ## 메모 (구현 중 기록, 값·실명 없음)
 
