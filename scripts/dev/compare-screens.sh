@@ -23,6 +23,18 @@
 #  7. 8.3: Spring을 멈추고 spring 인스턴스 화면이 오류로 끝나는지, SQLite 데이터가 보이지 않는지 확인.
 #  8. 모두 정리(Next 둘, Spring, 임시 컨테이너, 임시 디렉터리). 비밀 값은 출력하지 않는다(임시 컨테이너 전용 값만 쓴다).
 #
+# 원천 지정 환경 변수 (migrate-data-and-cutover D6, tasks 4.2). 변수를 하나도 주지 않으면 위 동작과 같다.
+#  SQLITE_DB=<파일>   임시 SQLite 대신 이 SQLite(백업 복사본)를 sqlite 인스턴스에 붙인다. 운영 원본 경로(data/auctionboss.db)는 거부한다.
+#                     이 변수가 있으면 시드 적재(2단계)를 하지 않는다(SKIP_SEED=1과 같다).
+#  SPRING_BASE=<주소>  임시 MySQL·Spring을 띄우지 않고 이미 떠 있는 Spring(이전된 MySQL)에 붙인다. 이 Spring은 멈추지 않는다
+#                     (단계 8의 중단 확인 생략).
+#  SKIP_SEED=1        임시 SQLite를 시드로 채우지 않는다(SQLITE_DB가 있어야 한다).
+#  SKIP_FORMS=1       폼 쓰기 단계(4B)를 건너뛴다. 관심·읽음 상태를 바꾸지 않는다. 쓰기 전 화면(A)만 비교하고, 쓰기 후에만
+#                     받던 변형(관심 필터 등)은 같은 읽기 화면으로 A 단계에서 받는다.
+#  SPRING_JAR=<jar>   bootJar 빌드를 건너뛰고 이 jar로 임시 Spring을 띄운다(SPRING_BASE가 없을 때만 의미 있음).
+#  SQLITE_DB 또는 SPRING_BASE를 주면(운영 복사본 비교) 차이가 나도 diff 내용은 출력하지 않는다(화면에 실명이 있다, D14).
+#  종료 코드는 차이 건수·폼 코드 불일치·SQLite 미개방 확인에 더해, 임시 Spring을 쓸 때만 Spring 중단 확인을 포함한다.
+#
 # 정규화 규칙(scripts/dev/normalize-html.py, 근거는 그 파일 머리말). "동작 차이"를 숨기는 규칙은 두지 않는다.
 #  N1. Next 빌드 ID 경로 -> BUILD (같은 빌드라 원래 같다. 다른 빌드로 비교해도 되게 한 것).
 #  N2. 스트리밍 조각(`self.__next_f.push`)은 이어 붙여 해석한 뒤 조각 번호·참조 번호(`4:`, `$L10`)를 지우고 줄을 정렬해 비교한다.
@@ -48,7 +60,22 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/auctionboss-compare.XXXXXX")"
 CONTAINER="auctionboss-compare-mysql-$$"
 # 임시 컨테이너 전용 값이다(저장소 .env의 값이 아니다).
 CMP_DB_NAME="auctionboss_cmp"; CMP_DB_USER="cmp"; CMP_DB_PASSWORD="cmp-pass-$$"; CMP_ROOT_PASSWORD="cmp-root-$$"
-SQLITE_DB="$WORK/sqlite/seed.db"
+EXTERNAL_SQLITE=0; [[ -n "${SQLITE_DB:-}" ]] && EXTERNAL_SQLITE=1
+EXTERNAL_SPRING=0; [[ -n "${SPRING_BASE:-}" ]] && EXTERNAL_SPRING=1
+SKIP_SEED="${SKIP_SEED:-}"; SKIP_FORMS="${SKIP_FORMS:-}"; SPRING_JAR="${SPRING_JAR:-}"
+[[ "$EXTERNAL_SQLITE" == 1 ]] && SKIP_SEED=1
+QUIET_DIFF=0; [[ "$EXTERNAL_SQLITE" == 1 || "$EXTERNAL_SPRING" == 1 ]] && QUIET_DIFF=1
+if [[ -z "${SQLITE_DB:-}" && -n "$SKIP_SEED" ]]; then echo "SKIP_SEED는 SQLITE_DB와 함께만 쓸 수 있습니다." >&2; rm -rf "$WORK"; exit 2; fi
+# 외부 Spring(이전된 운영 MySQL)에는 관심·읽음 쓰기를 보내지 않는다. SKIP_FORMS=1을 함께 줘야 한다.
+if [[ "$EXTERNAL_SPRING" == 1 && -z "$SKIP_FORMS" ]]; then echo "SPRING_BASE는 SKIP_FORMS=1과 함께만 쓸 수 있습니다(외부 Spring에 폼 쓰기를 보내지 않는다)." >&2; rm -rf "$WORK"; exit 2; fi
+if [[ -n "${SQLITE_DB:-}" ]]; then
+  [[ -f "$SQLITE_DB" ]] || { echo "SQLITE_DB 파일이 없습니다." >&2; rm -rf "$WORK"; exit 2; }
+  # -ef: 심볼릭·하드 링크로 같은 파일을 가리켜도 거부한다.
+  if [[ "$SQLITE_DB" -ef "$ROOT/data/auctionboss.db" || "$(cd "$(dirname "$SQLITE_DB")" && pwd -P)/$(basename "$SQLITE_DB")" == "$(cd "$ROOT/data" 2>/dev/null && pwd -P)/auctionboss.db" ]]; then
+    echo "운영 원본(data/auctionboss.db)은 쓸 수 없습니다. 백업 복사본을 지정하세요." >&2; rm -rf "$WORK"; exit 2
+  fi
+fi
+SQLITE_DB="${SQLITE_DB:-$WORK/sqlite/seed.db}"
 NO_DB_DIR="$WORK/no-such-dir"
 NO_DB="$NO_DB_DIR/auctionboss.db"
 OUT="$WORK/out"; mkdir -p "$OUT/a-sqlite" "$OUT/a-spring" "$OUT/c-sqlite" "$OUT/c-spring" "$WORK/sqlite"
@@ -64,7 +91,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for port in "$SQLITE_PORT" "$SPRING_PORT" "$BACKEND_PORT" "$MYSQL_PORT"; do
+PORTS=("$SQLITE_PORT" "$SPRING_PORT"); [[ "$EXTERNAL_SPRING" == 0 ]] && PORTS+=("$BACKEND_PORT" "$MYSQL_PORT")
+for port in "${PORTS[@]}"; do
   if lsof -iTCP:"$port" -sTCP:LISTEN -nP >/dev/null 2>&1; then echo "포트 $port가 이미 쓰이고 있습니다. 환경 변수로 다른 포트를 지정하세요." >&2; exit 2; fi
 done
 
@@ -73,30 +101,42 @@ wait_http() { # url, 초
   echo "응답 없음: $1" >&2; return 1
 }
 
-echo "== 1. 임시 MySQL + Spring =="
-docker run -d --name "$CONTAINER" -p "127.0.0.1:${MYSQL_PORT}:3306" \
-  -e MYSQL_ROOT_PASSWORD="$CMP_ROOT_PASSWORD" -e MYSQL_DATABASE="$CMP_DB_NAME" -e MYSQL_USER="$CMP_DB_USER" -e MYSQL_PASSWORD="$CMP_DB_PASSWORD" \
-  mysql:8.4 --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci >/dev/null
-for _ in $(seq 1 60); do
-  docker exec "$CONTAINER" mysqladmin ping -h 127.0.0.1 -u"$CMP_DB_USER" -p"$CMP_DB_PASSWORD" --silent >/dev/null 2>&1 && break; sleep 2
-done
-(cd backend && ./gradlew bootJar -x test --console=plain -q)
-JAR="$(ls -t backend/build/libs/*.jar | grep -v plain | head -1)"
-# 환경 변수가 저장소 .env(spring.config.import)보다 우선한다. 접속 정보는 임시 컨테이너 것만 쓴다.
-DB_HOST=127.0.0.1 DB_PORT="$MYSQL_PORT" DB_NAME="$CMP_DB_NAME" DB_USER="$CMP_DB_USER" DB_PASSWORD="$CMP_DB_PASSWORD" \
-  SERVER_PORT="$BACKEND_PORT" SPRING_PROFILES_ACTIVE=local,seed \
-  java -jar "$JAR" >"$WORK/spring.log" 2>&1 &
-SPRING_PID=$!; PIDS+=("$SPRING_PID")
-wait_http "http://127.0.0.1:${BACKEND_PORT}/api/items?pageSize=1" 120
+if [[ "$EXTERNAL_SPRING" == 1 ]]; then
+  echo "== 1. 외부 Spring 사용(임시 MySQL·Spring 생략) =="
+  wait_http "${SPRING_BASE%/}/api/items?pageSize=1" 30
+  SPRING_PID=""
+else
+  echo "== 1. 임시 MySQL + Spring =="
+  docker run -d --name "$CONTAINER" -p "127.0.0.1:${MYSQL_PORT}:3306" \
+    -e MYSQL_ROOT_PASSWORD="$CMP_ROOT_PASSWORD" -e MYSQL_DATABASE="$CMP_DB_NAME" -e MYSQL_USER="$CMP_DB_USER" -e MYSQL_PASSWORD="$CMP_DB_PASSWORD" \
+    mysql:8.4 --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci >/dev/null
+  for _ in $(seq 1 60); do
+    docker exec "$CONTAINER" mysqladmin ping -h 127.0.0.1 -u"$CMP_DB_USER" -p"$CMP_DB_PASSWORD" --silent >/dev/null 2>&1 && break; sleep 2
+  done
+  if [[ -n "$SPRING_JAR" ]]; then JAR="$SPRING_JAR"
+  else
+    (cd backend && ./gradlew bootJar -x test --console=plain -q)
+    JAR="$(ls -t backend/build/libs/*.jar | grep -v plain | head -1)"
+  fi
+  # 환경 변수가 저장소 .env(spring.config.import)보다 우선한다. 접속 정보는 임시 컨테이너 것만 쓴다.
+  DB_HOST=127.0.0.1 DB_PORT="$MYSQL_PORT" DB_NAME="$CMP_DB_NAME" DB_USER="$CMP_DB_USER" DB_PASSWORD="$CMP_DB_PASSWORD" \
+    SERVER_PORT="$BACKEND_PORT" SPRING_PROFILES_ACTIVE=local,seed \
+    java -jar "$JAR" >"$WORK/spring.log" 2>&1 &
+  SPRING_PID=$!; PIDS+=("$SPRING_PID")
+  wait_http "http://127.0.0.1:${BACKEND_PORT}/api/items?pageSize=1" 120
+
+fi
 
 echo "== 2. 같은 시드의 임시 SQLite =="
+if [[ -n "$SKIP_SEED" ]]; then echo "시드 적재 생략(SKIP_SEED/SQLITE_DB)"; else
 npx tsx -e 'import { seedToSqlite } from "./scripts/seed/seed-to-sqlite"; console.log(JSON.stringify(seedToSqlite(process.argv[1])))' "$SQLITE_DB"
+fi
 
 echo "== 3. next build, next start 둘 =="
 npx next build >"$WORK/build.log" 2>&1 || { tail -30 "$WORK/build.log"; exit 1; }
 AUCTIONBOSS_DATA_SOURCE=sqlite AUCTIONBOSS_DB="$SQLITE_DB" npx next start -p "$SQLITE_PORT" >"$WORK/next-sqlite.log" 2>&1 &
 PIDS+=("$!")
-AUCTIONBOSS_DATA_SOURCE=spring AUCTIONBOSS_SPRING_BASE="http://127.0.0.1:${BACKEND_PORT}" AUCTIONBOSS_DB="$NO_DB" \
+AUCTIONBOSS_DATA_SOURCE=spring AUCTIONBOSS_SPRING_BASE="${SPRING_BASE:-http://127.0.0.1:${BACKEND_PORT}}" AUCTIONBOSS_DB="$NO_DB" \
   npx next start -p "$SPRING_PORT" >"$WORK/next-spring.log" 2>&1 &
 PIDS+=("$!")
 S="http://127.0.0.1:${SQLITE_PORT}"; P="http://127.0.0.1:${SPRING_PORT}"
@@ -143,6 +183,13 @@ fetch_pair() { # 단계 이름|경로 목록을 두 인스턴스에서 연달아
 echo "== 4A. 쓰기 전 화면 =="
 fetch_pair a "${SCREENS[@]}"
 
+if [[ -n "$SKIP_FORMS" ]]; then
+echo "== 4B. 폼 동작 생략(SKIP_FORMS) — 쓰기 후에만 받던 변형은 읽기 화면으로 받는다 =="
+fetch_pair a "${SCREENS_C_ONLY[@]}"
+PHASES=(a)
+FORM_MISMATCH=0
+else
+PHASES=(a b-unread c)
 echo "== 4B. 폼 동작(같은 순서, 두 인스턴스) =="
 # 변경 이력이 많은 물건 3건을 고른다(시드 SQLite 기준). 등록 3건 -> 첫째 해제 -> 읽음 처리.
 IDS=($(sqlite3 "$SQLITE_DB" "SELECT item_id FROM item_changes GROUP BY item_id ORDER BY COUNT(*) DESC, item_id LIMIT 3"))
@@ -166,16 +213,17 @@ form_step "읽음 처리" /api/feed/mark-read "returnTo=%2Ffeed"
 
 echo "== 4C. 쓰기 후 화면 =="
 fetch_pair c "${SCREENS[@]}" "${SCREENS_C_ONLY[@]}"
+fi
 
 echo "== 5. 정규화 후 diff =="
 DIFFS=0; COUNT=0
-for phase in a b-unread c; do
+for phase in "${PHASES[@]}"; do
   for f in "$OUT/$phase-sqlite/"*.html; do
     name="$(basename "$f" .html)"; COUNT=$((COUNT + 1))
     normalize <"$f" >"$f.norm"; normalize <"$OUT/$phase-spring/$name.html" >"$OUT/$phase-spring/$name.html.norm"
     if ! diff -q "$f.norm" "$OUT/$phase-spring/$name.html.norm" >/dev/null || ! diff -q "$OUT/$phase-sqlite/$name.code" "$OUT/$phase-spring/$name.code" >/dev/null; then
       DIFFS=$((DIFFS + 1)); echo "  차이: $phase/$name (sqlite $(tr -d '\n' <"$OUT/$phase-sqlite/$name.code") / spring $(tr -d '\n' <"$OUT/$phase-spring/$name.code"))"
-      diff "$f.norm" "$OUT/$phase-spring/$name.html.norm" | head -c 600 || true
+      [[ "$QUIET_DIFF" == 1 ]] || diff "$f.norm" "$OUT/$phase-spring/$name.html.norm" | head -c 600 || true
     fi
   done
 done
@@ -217,19 +265,25 @@ fi
 echo "== 7. SQLite를 열지 않았는지 =="
 if [[ -e "$NO_DB" || -e "$NO_DB_DIR" || -e "$NO_DB-wal" ]]; then echo "실패: spring 인스턴스가 SQLite 경로를 만들었습니다: $NO_DB_DIR"; NO_DB_OPENED=1; else echo "통과: $NO_DB_DIR 가 계속 없습니다."; NO_DB_OPENED=0; fi
 
-echo "== 8. 8.3 Spring 중단 후 spring 인스턴스 =="
-kill "$SPRING_PID" 2>/dev/null || true; wait "$SPRING_PID" 2>/dev/null || true
 STOP_FAIL=0
-for entry in "list-default|/" "detail-analyzed|/items/1" "bookmarks|/bookmarks" "feed|/feed" "status|/status"; do
-  name="${entry%%|*}"; path="${entry#*|}"
-  code="$(curl -sS -m 20 -o "$OUT/stopped-$name.html" -w '%{http_code}' "$P$path")"
-  # 시드 물건의 주소가 화면에 보이면(SQLite 데이터가 보이면) 실패. 시드 물건 1의 사건번호를 기준으로 쓴다.
-  leak="$(grep -c "$(sqlite3 "$SQLITE_DB" 'SELECT case_no FROM items WHERE id=1')" "$OUT/stopped-$name.html" || true)"
-  echo "  $path -> HTTP $code, 시드 데이터 노출 ${leak}회"
-  [[ "$code" =~ ^5 ]] && [[ "$leak" == "0" ]] || STOP_FAIL=1
-done
-[[ "$(sqlite3 "$SQLITE_DB" 'SELECT COUNT(*) FROM items')" -gt 0 ]] || { echo "SQLite 시드가 비어 있어 확인이 무의미합니다" >&2; STOP_FAIL=1; }
-echo "Spring 중단 확인: $([[ $STOP_FAIL == 0 ]] && echo 통과 || echo 실패)"
-echo "-- spring 인스턴스 로그 끝(오류 형태 확인용)"; tail -5 "$WORK/next-spring.log" | cut -c1-200
+if [[ "$EXTERNAL_SPRING" == 1 ]]; then
+  echo "== 8. 외부 Spring은 멈추지 않으므로 중단 확인 생략 =="
+else
+  echo "== 8. 8.3 Spring 중단 후 spring 인스턴스 =="
+  kill "$SPRING_PID" 2>/dev/null || true; wait "$SPRING_PID" 2>/dev/null || true
+  STOP_FAIL=0
+  for entry in "list-default|/" "detail-analyzed|/items/1" "bookmarks|/bookmarks" "feed|/feed" "status|/status"; do
+    name="${entry%%|*}"; path="${entry#*|}"
+    code="$(curl -sS -m 20 -o "$OUT/stopped-$name.html" -w '%{http_code}' "$P$path")"
+    # 시드 물건의 주소가 화면에 보이면(SQLite 데이터가 보이면) 실패. 시드 물건 1의 사건번호를 기준으로 쓴다.
+    leak="$(grep -c "$(sqlite3 "$SQLITE_DB" 'SELECT case_no FROM items WHERE id=1')" "$OUT/stopped-$name.html" || true)"
+    echo "  $path -> HTTP $code, 시드 데이터 노출 ${leak}회"
+    [[ "$code" =~ ^5 ]] && [[ "$leak" == "0" ]] || STOP_FAIL=1
+  done
+  [[ "$(sqlite3 "$SQLITE_DB" 'SELECT COUNT(*) FROM items')" -gt 0 ]] || { echo "SQLite 시드가 비어 있어 확인이 무의미합니다" >&2; STOP_FAIL=1; }
+  echo "Spring 중단 확인: $([[ $STOP_FAIL == 0 ]] && echo 통과 || echo 실패)"
+  echo "-- spring 인스턴스 로그 끝(오류 형태 확인용)"; tail -5 "$WORK/next-spring.log" | cut -c1-200
+
+fi
 
 [[ "$DIFFS" == 0 && "$FORM_MISMATCH" == 0 && "$NO_DB_OPENED" == 0 && "$STOP_FAIL" == 0 ]]
