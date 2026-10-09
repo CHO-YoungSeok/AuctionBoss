@@ -1,0 +1,10 @@
+# 운영 프로필(migrate-data-and-cutover D9). 접속 정보는 환경 변수에서만, 기본값 없이 읽는다.
+# 없으면 기동이 실패한다 - local 프로필처럼 auctionboss/auctionboss로 대신 접속하지 않는다.
+# .env 읽기(local 프로필)도, 시드 로더(seed 프로필)도 없다. 포트(DB_PORT)만 흔한 기본값 3306을 둔다.
+# 수집·사진 주기 실행과 외부 요청 허용은 여기서 켜지 않는다(배포 구성이 환경 변수로 켠다).
+# 켜져 있는데 이전 완료 표식이 없으면 기동하지 않는다(migration.MigrationGuard).
+spring:
+  datasource:
+    url: jdbc:mysql://${DB_HOST}:${DB_PORT:3306}/${DB_NAME}?characterEncoding=utf8
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}

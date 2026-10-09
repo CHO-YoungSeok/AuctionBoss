@@ -1,1 +1,1 @@
-org.springframework.boot.EnvironmentPostProcessor=com.auctionboss.collect.runonce.RunOnceEnvironmentPostProcessor
+org.springframework.boot.EnvironmentPostProcessor=com.auctionboss.collect.runonce.RunOnceEnvironmentPostProcessor,com.auctionboss.migration.ProdProfileEnvironmentValidator

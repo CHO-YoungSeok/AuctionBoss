@@ -9,13 +9,14 @@ import com.auctionboss.collect.run.RunLock;
 import com.auctionboss.common.time.ServerClock;
 import com.auctionboss.worker.WorkerRunService;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
  * 1회 실행 모드의 빈(design D11). {@code auctionboss.run-once}를 명시해야만 존재한다(기본 꺼짐). 값은 {@code collector} 또는
- * {@code photos}이고 그 밖의 값, 그리고 스케줄러를 켜는 설정({@code auctionboss.collector.enabled},
+ * {@code photos}이고(이전·롤백 모드 {@code import}·{@code export-state}·{@code delta-report}는 migration 패키지가 맡는다) 그 밖의 값, 그리고 스케줄러를 켜는 설정({@code auctionboss.collector.enabled},
  * {@code auctionboss.photos.enabled})과의 동시 지정은 기동 실패다(둘이 같은 회차를 겹쳐 돌리지 않게).
  *
  * <p>
@@ -23,6 +24,8 @@ import org.springframework.context.annotation.Configuration;
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "auctionboss.run-once")
+// 이전·롤백 모드(import, export-state, delta-report)는 com.auctionboss.migration이 맡는다. 그 밖의 값은 여기서 기동 실패가 된다.
+@ConditionalOnExpression("!'${auctionboss.run-once:}'.matches('import|export-state|delta-report')")
 class RunOnceConfig {
 
 	@Bean
