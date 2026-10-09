@@ -63,12 +63,12 @@
 
 ## 9. 마무리
 
-- [ ] 9.1 게이트 5종을 모두 통과시킨다. TS·Java 테스트 수가 1.1보다 줄지 않았는지 확인하고, 줄었으면 이유를 보고한다. `git diff --stat <1.1 시작 커밋> -- workers/ src/lib/sources/`가 비어 있는지 확인한다
-- [ ] 9.2 수치를 `docs/DEVELOPMENT_NOTES.md`에 기록한다: 어댑터 골든 사례 수·저장 골든 시나리오·단계 수와 불일치 원인, 의도된 차이(타임아웃, 오류 메시지 첫 줄 비교), 회차 저장 시간, 두 인스턴스 잠금 결과, 8.1·8.4 결과, 테스트 수 변화
-- [ ] 9.3 `docs/REFERENCE.md`와 README에 수집 설정(`auctionboss.collector.*`, `auctionboss.photos.*`, `auctionboss.source.*`), 기본 꺼짐 두 겹, 1회 실행 모드, 동시 운영 금지와 5단계 런북 초안(design.md D14)을 반영한다
-- [ ] 9.4 `docs/ROADMAP.md` 4단계를 갱신한다: 완료 기준 해석(design.md D14: 저장 골든 전 시나리오 일치, 두 인스턴스 잠금 테스트), 운영 전환과 TS 수집기·사진 워커 은퇴를 5단계 할 일에 적고, 상태·수치·기록 위치를 채운다
-- [ ] 9.5 `regression-verifier` 서브에이전트로 회귀 검증을 받고 지적 사항을 반영한다(특히 "외부 요청이 테스트에서 나갈 수 있는 경로"와 "TS·Java 동작이 다시 갈라졌을 때 잡는 테스트")
-- [ ] 9.6 커밋하고 푸시한 뒤 GitHub Actions의 TS 잡과 Java 잡이 통과하는지 확인한다
+- [x] 9.1 게이트 5종을 모두 통과시킨다. TS·Java 테스트 수가 1.1보다 줄지 않았는지 확인하고, 줄었으면 이유를 보고한다. `git diff --stat <1.1 시작 커밋> -- workers/ src/lib/sources/`가 비어 있는지 확인한다
+- [x] 9.2 수치를 `docs/DEVELOPMENT_NOTES.md`에 기록한다: 어댑터 골든 사례 수·저장 골든 시나리오·단계 수와 불일치 원인, 의도된 차이(타임아웃, 오류 메시지 첫 줄 비교), 회차 저장 시간, 두 인스턴스 잠금 결과, 8.1·8.4 결과, 테스트 수 변화
+- [x] 9.3 `docs/REFERENCE.md`와 README에 수집 설정(`auctionboss.collector.*`, `auctionboss.photos.*`, `auctionboss.source.*`), 기본 꺼짐 두 겹, 1회 실행 모드, 동시 운영 금지와 5단계 런북 초안(design.md D14)을 반영한다
+- [x] 9.4 `docs/ROADMAP.md` 4단계를 갱신한다: 완료 기준 해석(design.md D14: 저장 골든 전 시나리오 일치, 두 인스턴스 잠금 테스트), 운영 전환과 TS 수집기·사진 워커 은퇴를 5단계 할 일에 적고, 상태·수치·기록 위치를 채운다
+- [x] 9.5 `regression-verifier` 서브에이전트로 회귀 검증을 받고 지적 사항을 반영한다(특히 "외부 요청이 테스트에서 나갈 수 있는 경로"와 "TS·Java 동작이 다시 갈라졌을 때 잡는 테스트")
+- [x] 9.6 커밋하고 푸시한 뒤 GitHub Actions의 TS 잡과 Java 잡이 통과하는지 확인한다
 - [ ] 9.7 `openspec validate port-collector-to-spring --strict`를 통과시킨 뒤 change를 아카이브하고(`switch-web-to-data-port` 아카이브 뒤), 메인 스펙 `spring-backend`에 요구사항이 반영됐는지 확인한다
 
 ---
@@ -178,3 +178,9 @@
 - TS SQLite와 비교: 같은 물건 37건, TS에 없는 물건 2건(새로 올라온 물건), 정규화 컬럼 불일치 0건.
 - JDK HttpClient의 헤더 순서·`connection` 헤더 차이(2장 메모)로 차단되지 않았다.
 - 확인용 DB·사진 디렉터리는 스크립트가 삭제했다. TS 워커는 원래 정지 상태라 재개하지 않았다.
+
+**9장 (9.1~9.4, 2026-10-09)**
+
+- 9.1 게이트 5종 통과(`npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint` 오류 0·경고 6, `cd backend && ./gradlew cleanTest check`). **최종 테스트 수: TS 1257개(88개 파일), Java 701개(64개 클래스, 실패·건너뜀 0).** 1.1 기준(TS 1212·84개 파일, Java 370·34개 클래스) 대비 TS +45, Java +331, 줄어든 것 없음. `git diff --stat 9f01ce5 -- workers/ src/lib/sources/` 출력 없음.
+- 9.2 `docs/DEVELOPMENT_NOTES.md` 17절. 9.3 `docs/REFERENCE.md` 8절(수집·사진 워커 설정, 1회 실행 모드, 개발 검증 스크립트, 동시 운영 금지와 런북 초안)과 `README.md`(배지·기술 스택 테스트 수, 아키텍처 4단계 완료 절, Spring 실행 절). 9.4 `docs/ROADMAP.md` 4단계 완료 표시, 5단계 할 일에 운영 전환·TS 수집기·사진 워커 은퇴 추가.
+- 9.5 회귀 검증(regression-verifier, 2026-10-09): 게이트 통과. 보강 테스트 2개 파일: `EnvironmentVariableBindingTest`(Java +22: REFERENCE 8절 표의 환경 변수 이름이 실제 속성에 묶이는지, 실제 환경 변수는 건드리지 않음), `scripts/dev/__tests__/live-guard.test.ts`(TS +5: 실제 사이트 스크립트는 `--i-confirm-live` 없이 외부 허용을 켜지 않음, 검증 스크립트는 루프백뿐, 가드가 풀려도 요청이 나가지 않게 없는 SQLite를 준 실행 2건). 최종 테스트 수(5단계 진행 중 파일 제외): **TS 1262개(89개 파일), Java 723개(65개 클래스)**. 변이 확인: TS `DEFAULT_BLOCK_BACKOFF_MS`를 59분으로 -> 저장 골든 3건 실패, TS 어댑터 `DEFAULT_PAGE_DELAY_MS`를 4초로 -> 어댑터 골든 2건 실패(둘 다 복원), `live-check-collector.sh`의 `LIVE=0`을 `LIVE=1`로 -> 가드 테스트 실패(복원). 문서 정정: 17.7 배포 파일 테스트 수(11개에서 17개), 17.8 `CourtAuctionHttpTest` 34, 시간대 확인이 수동이라는 점, 테스트 수 갱신.

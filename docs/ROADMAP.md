@@ -7,8 +7,8 @@
 ## 지금 상태 (2026-10-09)
 
 - TypeScript + Next.js 15 + SQLite. 수집 워커, 웹 앱, 분석 워커가 각각 독립된 프로세스로 돈다.
-- 완료한 기능은 18개다(`openspec/changes/archive/`). 테스트는 TypeScript 1212개, Java 370개이고, CI는 TypeScript 잡(타입 검사·테스트·빌드·린트)과 Java 잡(`./gradlew check`)을 병렬로 돈다.
-- 1~2단계로 `backend/`에 Spring Boot + MySQL 읽기·쓰기 API가 생겼고, 3단계로 화면이 데이터 포트를 거쳐 SQLite 또는 Spring에서 읽을 수 있게 됐다(`AUCTIONBOSS_DATA_SOURCE`). 운영의 화면·수집·분석 워커는 아직 기존 Next.js + SQLite 경로를 쓴다.
+- 완료한 기능은 18개다(`openspec/changes/archive/`). 테스트는 TypeScript 1262개, Java 723개이고, CI는 TypeScript 잡(타입 검사·테스트·빌드·린트)과 Java 잡(`./gradlew check`)을 병렬로 돈다.
+- 1~2단계로 `backend/`에 Spring Boot + MySQL 읽기·쓰기 API가 생겼고, 3단계로 화면이 데이터 포트를 거쳐 SQLite 또는 Spring에서 읽을 수 있게 됐다(`AUCTIONBOSS_DATA_SOURCE`). 4단계로 수집·사진 워커와 소스 어댑터도 Spring에 있지만 기본 꺼짐이다. 운영의 화면·수집·사진·분석 워커는 아직 기존 Next.js + SQLite + TS 워커 경로를 쓴다.
 - 쌓인 데이터: 물건 809건(서울중앙지방법원), 변경 이력 4,008건, 분석 12건.
 - Docker 이미지, `docker-compose.yml`, Kubernetes 매니페스트(`k8s/`)는 있다. 하지만 상시로 운영하는 환경은 아직 없다.
 
@@ -45,8 +45,8 @@ flowchart LR
 | **1. Spring 읽기 API** | `backend/`에 Spring Boot + MySQL 8을 세운다. Flyway로 테이블 8개를 1:1로 옮기고, 읽기 API 5개를 JPA + QueryDSL로 만든다. 개인 이름을 가린 시드 데이터를 적재한다 | 기존 Next.js API와 응답 JSON이 정렬 5종 × 방향 2종 × 주요 필터 조합에서 같다(계약 테스트). 목록 조회에 N+1이 없다 | ✅ 완료 (2026-10-08). 계약 테스트 90개 일치, 목록 조회 SQL 2개 고정. 기록: `openspec/changes/archive/2026-10-08-add-spring-mysql-backend/`, `docs/DEVELOPMENT_NOTES.md` 13절 |
 | **2. 쓰기 API + 분석 워커 연결** | 분석 저장, 워커 회차, 관심 물건, 변동 피드, 사진 파일 API를 옮긴다. 분석 워커의 주소와 실행 파일 환경 변수만 Spring으로 바꿔 검증한다 | 개발 환경(시드 MySQL + Spring)에서 분석 워커 코드 변경 0줄, 환경 변수만 바꾼 실행으로 분석 결과가 Spring에 저장된다 | ✅ 완료 (2026-10-09). 시나리오 7개·115단계 일치, `workers/` diff 0줄, 분석 12→15건. 운영 전환은 5단계. 기록: `openspec/changes/add-spring-write-api/`, `docs/DEVELOPMENT_NOTES.md` 15절 |
 | **3. 화면 전환** | 화면의 데이터 접근을 데이터 포트 한 곳으로 모으고, SQLite 구현과 Spring 구현을 환경 변수로 고른다(기본 SQLite). 운영 전환은 5단계에서 한다 | 페이지·컴포넌트·화면용 라우트는 데이터 포트만 쓰고 SQLite 접근은 포트의 SQLite 구현체 한 곳(린트로 강제), 기존 화면 테스트가 두 원천에서 통과한다 | ✅ 완료 (2026-10-09). 화면 5개와 변형 35건의 HTML이 두 모드에서 차이 0건(개발 환경, 스트리밍 조각 번호만 정규화), 화면당 Spring 요청 수 상한(최대 11개) 고정, 새 읽기 API 5개, 시나리오 10개·171단계 일치, 테스트 TS 923→1212·Java 332→370. 운영 기본값은 `sqlite`. 기록: `openspec/changes/switch-web-to-data-port/`, `docs/DEVELOPMENT_NOTES.md` 16절 |
-| **4. 수집 워커 이식** | 수집을 Spring `@Scheduled`로 옮긴다. 물건 저장과 변경 이력 기록을 한 트랜잭션으로 묶는다. 차단 대응(1시간 쉬기)과 요청 상한을 그대로 옮긴다 | 같은 응답 샘플로 기존 수집기와 같은 저장 결과가 나온다. 수집 회차가 겹쳐 실행되지 않는다 | ⏳ |
-| **5. 데이터 이전** | 운영 중인 SQLite 데이터를 MySQL로 옮기고 SQLite를 은퇴시킨다. 분석 워커·화면·수집 워커의 운영 전환을 데이터 이전과 함께 한다. 화면은 `AUCTIONBOSS_DATA_SOURCE=spring`으로 전환한다. 전환 뒤 기존 JSON API(Next 라우트, 3단계에서 만든 계약 원본 5개 포함)와 데이터 포트의 SQLite 구현체를 은퇴시키고, 은퇴 후 린트 경계를 다시 정리한다 | 테이블별 행 수와 표본 값이 일치한다. 이전하는 동안 수집 공백 시간을 기록한다 | ⏳ |
+| **4. 수집 워커 이식** | 소스 어댑터와 수집·사진 워커를 Spring으로 옮긴다(스케줄러는 `TaskScheduler` 고정 주기 틱 + MySQL `GET_LOCK` 단일 실행 잠금). 물건 저장과 변경 이력 기록을 한 트랜잭션으로 묶는다. 차단 대응(1시간 쉬기)과 요청 상한을 그대로 옮긴다. 스케줄러와 외부 요청은 기본 꺼짐으로 두고, 운영 전환은 하지 않는다 | 같은 응답 샘플로 기존 수집기와 같은 저장 결과가 나온다(저장 골든 전 시나리오 일치). 수집 회차가 겹쳐 실행되지 않는다(두 인스턴스 잠금 테스트). 실제 사이트에는 요청 4개로 한 번만 확인한다 | ✅ 완료 (2026-10-09). 어댑터 골든 34사례·저장 골든 10시나리오·44단계 불일치 0건, `workers/`·`src/lib/sources/` diff 0줄, 두 인스턴스 같은 시각 틱 20회에 회차 1·나머지 overlap, 아키텍처 규칙 5개, 실제 사이트 확인 요청 4·차단 0·TS 저장 결과와 불일치 0건(같은 물건 37건), 테스트 TS 1212→1262·Java 370→723. 운영 수집·사진은 아직 TS 워커이고 전환은 5단계. 기록: `openspec/changes/port-collector-to-spring/`, `docs/DEVELOPMENT_NOTES.md` 17절 |
+| **5. 데이터 이전** | 운영 중인 SQLite 데이터를 MySQL로 옮기고 SQLite를 은퇴시킨다. 분석 워커·화면·수집·사진 워커의 운영 전환을 데이터 이전과 함께 한다. 화면은 `AUCTIONBOSS_DATA_SOURCE=spring`으로 전환한다. 수집·사진은 TS `collector`·`photos`를 멈춘 뒤 Spring의 스케줄러와 외부 요청 허용을 켜고(두 수집기 동시 운영 금지, 런북 초안은 `docs/REFERENCE.md` 8절), 이때 `collector_state`의 백오프와 로테이션 위치도 옮긴다. 전환 뒤 TS 수집기·사진 워커와 기존 어댑터를 은퇴시킨다. 전환 뒤 기존 JSON API(Next 라우트, 3단계에서 만든 계약 원본 5개 포함)와 데이터 포트의 SQLite 구현체를 은퇴시키고, 은퇴 후 린트 경계를 다시 정리한다 | 테이블별 행 수와 표본 값이 일치한다. 이전하는 동안 수집 공백 시간을 기록한다. 전환 뒤 첫 회차를 관찰해 차단·실패가 없음을 확인한다 | ⏳ |
 | **6. 운영 체계** | 상시 환경에 배포한다. GitHub Actions로 이미지를 빌드해 배포하고, Actuator로 지표를 낸다. 워커가 멈추면 알림을 보낸다. `mysqldump` 백업을 만들고 **복구를 실제로 한 번 해 본다** | 2주 이상 운영. 실행 횟수, 성공률, 차단 횟수, 가짜 변경 건수, 감지까지 걸린 시간을 기록한다 | ⏳ |
 | **7. 인증 (선택)** | Spring Security로 로그인을 넣는다. 관심 목록과 읽음 기록에 `user_id`를 붙인다 | 쓰기 API가 인증 없이 거부된다 | ⏳ |
 

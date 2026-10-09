@@ -213,7 +213,7 @@ SQLite 테이블 8개로 구성됩니다. 스키마는 `src/lib/db/schema.ts`에
 
 ## 8. Spring 백엔드 (이전 중)
 
-`backend/`는 기존 백엔드를 Spring Boot + MySQL로 옮기는 중인 새 백엔드입니다. 1단계에서 읽기 API를, 2단계에서 쓰기 API를, 3단계에서 화면용 읽기 API 5개를 옮겼고, 화면·수집·분석 워커의 운영 경로는 아직 위의 기존 구조(Next + SQLite)를 씁니다. 단계는 [로드맵](ROADMAP.md)에 있습니다.
+`backend/`는 기존 백엔드를 Spring Boot + MySQL로 옮기는 중인 새 백엔드입니다. 1단계에서 읽기 API를, 2단계에서 쓰기 API를, 3단계에서 화면용 읽기 API 5개를, 4단계에서 수집·사진 워커와 소스 어댑터를 옮겼습니다. 화면·수집·사진·분석 워커의 운영 경로는 아직 위의 기존 구조(Next + SQLite, TS 워커)를 씁니다. Spring의 수집·사진 워커는 기본 꺼짐입니다. 단계는 [로드맵](ROADMAP.md)에 있습니다.
 
 | 항목 | 내용 |
 | --- | --- |
@@ -225,10 +225,66 @@ SQLite 테이블 8개로 구성됩니다. 스키마는 `src/lib/db/schema.ts`에
 | 화면용 읽기 API(3단계) | `GET /api/items/filter-options`, `/api/items/:id/analyses`, `/api/items/:id/photos`, `/api/worker-runs/status`, `/api/collector-state/rotation`. 4절의 같은 경로 Next 라우트가 계약 원본이고, 시나리오 골든(`screen-reads`, `worker-status`)으로 비교합니다. 선택지는 `COLLATE utf8mb4_0900_bin`으로 SQLite와 같은 구분·정렬을 합니다 |
 | 화면 폼 엔드포인트 | `POST /api/bookmarks/toggle`, `POST /api/feed/mark-read`(303 리다이렉트)는 Spring에 없고 Next에 남습니다. 데이터 포트로 Spring의 `bookmarks`·`feed/read`를 부릅니다 |
 | 분석 워커 연결 | 분석 워커는 코드 변경 없이 `AUCTIONBOSS_API_BASE`만 바꿔 Spring에 저장할 수 있습니다(개발 환경 검증: `scripts/dev/verify-analyzer-on-spring.sh`, 수동). 운영 전환은 5단계입니다 |
+| 수집·사진 워커(4단계) | 소스 어댑터(`collect.source.courtauction`)와 수집·사진 회차, 스케줄러, 단일 실행 잠금을 Java로 옮겼습니다. 기본 꺼짐이고 켜는 방법·설정은 아래 "수집·사진 워커 설정"에 있습니다. 같은 입력에서 TS와 같은 요청·저장 결과가 나오는 것은 어댑터 골든 34사례와 저장 골든 10시나리오·44단계로 비교합니다 |
 | 스키마 | `backend/src/main/resources/db/migration/V1__baseline.sql`. 5절의 테이블 8개를 컬럼 이름까지 그대로 옮겼습니다. 금액은 BIGINT, 시각은 UTC `DATETIME(3)` |
 | 시드 | `seed` 프로필에서 DB가 비어 있을 때만 `db/seed/*.sql`을 넣습니다. 실명을 가린 물건 809건, 변경 이력 4,008건, 분석 12건 |
 | 계약 테스트 | 기존 API 응답 90개와 시나리오 10개·171단계를 정답으로 저장해 두고, 같은 요청에 같은 JSON이 나오는지 비교합니다 |
 | 화면 데이터 포트 | `src/lib/data-port`가 화면의 데이터 접근(읽기 13, 쓰기 3, 사진 파일 1)을 한 곳에 모읍니다. 구현체는 SQLite와 Spring 둘이고 `AUCTIONBOSS_DATA_SOURCE`로 고릅니다(3절). 화면 한 장이 Spring으로 보내는 요청은 최대 `/` 6, `/items/:id` 5, `/bookmarks` 2, `/feed` 2, `/status` 11개입니다. `src/app/**`에서 `@/lib/db`·`better-sqlite3`를 가져오면 린트가 실패합니다(기존 JSON API 라우트 제외) |
+
+**수집·사진 워커 설정 (4단계, 기본 꺼짐)**
+
+Spring의 수집·사진 워커는 설정으로 명시해 켜기 전에는 스케줄러 빈조차 만들어지지 않습니다. 소스 HTTP 클라이언트는 외부 요청 허용 설정이 따로 없으면 루프백이 아닌 주소로 요청을 보내지 않습니다. 이 두 겹은 별개이고, 실제 사이트로 요청이 나가려면 둘 다 켜야 합니다. compose·K8s는 이 설정을 켜지 않고 이름도 두지 않으며, `deploy-config.test.ts`가 고정합니다. 환경 변수는 Spring의 이름 규칙으로 속성 이름을 바꾼 것입니다(`.`·`-`를 `_`로, 대문자로. 예: `auctionboss.source.page-delay-ms` → `AUCTIONBOSS_SOURCE_PAGE_DELAY_MS`).
+
+| 속성 | 환경 변수 | 기본값 | 설명 |
+| --- | --- | --- | --- |
+| `auctionboss.collector.enabled` | `AUCTIONBOSS_COLLECTOR_ENABLED` | `false` | 수집 스케줄러를 만듭니다(첫 겹) |
+| `auctionboss.photos.enabled` | `AUCTIONBOSS_PHOTOS_ENABLED` | `false` | 사진 스케줄러를 만듭니다(첫 겹) |
+| `auctionboss.source.external-requests-allowed` | `AUCTIONBOSS_SOURCE_EXTERNAL_REQUESTS_ALLOWED` | `false` | `false`이면 루프백이 아닌 주소는 소켓을 열기 전에 거절합니다(둘째 겹) |
+| `auctionboss.source.base-url` | `AUCTIONBOSS_SOURCE_BASE_URL` | 법원경매정보 주소 | 소스 주소. 테스트·개발 검증은 루프백 가짜 서버를 가리킵니다 |
+| `auctionboss.source.page-size` / `page-delay-ms` / `bid-window-days` / `max-pages` | `AUCTIONBOSS_SOURCE_PAGE_SIZE` 등 | 40 / 5000 / 60 / 50 | 3절 `AUCTIONBOSS_COLLECT_*`와 같은 뜻 |
+| `auctionboss.collector.run-immediately` / `auctionboss.photos.run-immediately` | `AUCTIONBOSS_COLLECTOR_RUN_IMMEDIATELY` 등 | `true` | 기동 직후 회차를 한 번 실행할지 |
+| `auctionboss.collector.max-courts-per-run` / `max-requests-per-run` | `AUCTIONBOSS_COLLECTOR_MAX_COURTS_PER_RUN` 등 | 설정 파일 값 | 설정 파일의 회차당 법원 수·요청 수 상한을 덮어씁니다 |
+| `auctionboss.collector.block-backoff-ms` | `AUCTIONBOSS_COLLECTOR_BLOCK_BACKOFF_MS` | 3600000 | 차단 시 공유 백오프 길이 |
+| `auctionboss.photos.max-items-per-run` | `AUCTIONBOSS_PHOTOS_MAX_ITEMS_PER_RUN` | 설정 파일 값 | 회차당 물건 수 |
+| `auctionboss.photos.dir` | `AUCTIONBOSS_PHOTOS_DIR` | `data/photos` | 사진 파일 디렉터리. 읽기 API와 사진 워커가 같은 값을 씁니다 |
+| `auctionboss.config-path` | `AUCTIONBOSS_CONFIG_PATH` | 없음 | `config/collector.json` 위치. 수집 범위·주기·사진 설정은 호출마다 이 파일에서 읽습니다 |
+| `auctionboss.workers.shutdown-wait-ms` | `AUCTIONBOSS_WORKERS_SHUTDOWN_WAIT_MS` | 30000 | 종료 시 진행 중 회차를 기다리는 상한. 넘으면 회차 스레드를 중단합니다 |
+
+켜졌을 때의 동작: 고정 주기 틱마다 MySQL `GET_LOCK`(워커별 이름)으로 단일 실행을 보장합니다. 잠금을 못 얻으면 실행하지 않고 `skipped`(`error_kind=overlap`)를, 공유 백오프가 남았으면 `skipped(backoff)`를 기록합니다. 스케줄러가 켜질 때 "기존(TS) 수집기·사진 워커가 같은 소스에 요청하고 있으면 안 된다"는 경고를, 기동할 때마다 두 워커와 외부 요청 허용 상태를 로그로 남깁니다.
+
+**1회 실행 모드 (개발 검증·실제 사이트 최소 확인용)**
+
+웹 서버와 스케줄러 없이 틱 하나만 돌리고 종료합니다. 같은 단일 실행 잠금·공유 백오프 확인·회차 기록을 거칩니다. 종료 코드는 성공 0, 건너뜀·차단·실패·시간 초과·회차 미시작 1입니다. 스케줄러를 켜는 설정과 같이 주면 기동이 실패하고, 외부 요청 허용 설정은 건드리지 않습니다.
+
+```bash
+# 수집 1회: 법원 1곳, 페이지 1개 (요청 2개: 세션, 검색). 실제 사이트로 나가는 명령이므로 사람이 한 번만 실행
+java -jar backend.jar --auctionboss.run-once=collector --auctionboss.source.external-requests-allowed=true \
+  --auctionboss.source.max-pages=1 --auctionboss.collector.max-courts-per-run=1
+# 사진 1회: 대기 조건을 만족하는 물건 하나 (요청 2개: 세션, 상세)
+java -jar backend.jar --auctionboss.run-once=photos --auctionboss.source.external-requests-allowed=true \
+  --auctionboss.photos.only-item-id=<id>
+```
+
+환경 변수로는 `AUCTIONBOSS_RUN_ONCE=collector|photos`이고, 대기 상한은 `auctionboss.run-once-timeout-ms`(기본 30분)입니다. 요청 허용을 주지 않으면 소켓을 열기 전에 거절되어 종료 코드 1입니다.
+
+**개발 검증 스크립트 (수동, Docker·JDK 필요, CI에서 안 돌림)**
+
+| 스크립트 | 하는 일 | 외부 요청 |
+| --- | --- | --- |
+| `scripts/dev/verify-collector-on-spring.sh` | 임시 MySQL과 루프백 가짜 소스 서버에 Spring을 붙여 수집·사진 전체 경로(저장·API·사진 파일)와, Spring 둘이 같은 MySQL을 볼 때 회차가 겹치지 않는지 확인합니다 | 없음(가짜 서버만) |
+| `scripts/dev/live-check-collector.sh` | 실제 사이트 최소 확인 절차를 고정한 스크립트입니다. 기본은 dry-run(가짜 서버, 임시 SQLite). 사전 확인(TS 워커 정지, 백오프 만료, 직전 TS 회차 15분 이상) 뒤 수집 1회·사진 1회를 하고 TS SQLite(읽기 전용)와 비교합니다 | `--i-confirm-live`를 줘야만. 요청 합계 4, 사진 전 대기 60초 이상 |
+
+**동시 운영 금지와 5단계 런북 초안**
+
+TS 수집기·사진 워커와 Spring 수집기·사진 워커를 동시에 켜면 안 됩니다. 두 수집기는 서로 다른 DB(SQLite와 MySQL)의 백오프와 로테이션 위치를 보므로 어떤 잠금으로도 서로를 막을 수 없어, 요청 예산이 두 배가 되고 한쪽이 차단돼도 다른 쪽이 모릅니다. 4단계는 이를 켜지 않는 쪽의 장치(위의 기본 꺼짐 두 겹, 배포 파일 테스트, 기동 경고)로 막았고, 전환은 5단계에서 아래 순서로 합니다(초안이며 5단계 change에서 확정합니다).
+
+1. TS `collector`·`photos`를 정지하고 진행 중인 회차가 없음을 확인합니다.
+2. 데이터를 이전합니다. 이때 `collector_state`의 `backoff_until`과 `collector.rotation.nextCourtCode`도 옮깁니다.
+3. Spring에 `AUCTIONBOSS_COLLECTOR_ENABLED`·`AUCTIONBOSS_PHOTOS_ENABLED`·`AUCTIONBOSS_SOURCE_EXTERNAL_REQUESTS_ALLOWED`를 설정합니다.
+4. compose에서 TS 수집·사진 서비스를 제거합니다.
+5. 첫 회차를 관찰합니다.
+
+롤백은 역순(Spring 끄고 TS 켜기)입니다. 그 사이 MySQL에 쌓인 수집분은 5단계 런북에서 다룹니다.
 
 **프로필**
 
