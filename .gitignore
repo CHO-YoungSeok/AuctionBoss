@@ -58,3 +58,6 @@ backend/.gradle/
 backend/.idea/
 backend/out/
 backend/*.iml
+
+# migration backups (real data, never commit)
+/backups/

@@ -16,19 +16,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { openDatabase } from "../../src/lib/db/client";
+import { DATETIME_COLUMNS } from "./columns";
 
-/** export-seed.ts의 DATETIME_COLUMNS와 같아야 한다(테스트가 실제 시드로 누락을 잡는다). */
-export const DATETIME_COLUMNS: ReadonlySet<string> = new Set([
-  "first_seen_at",
-  "last_seen_at",
-  "photo_collected_at",
-  "analyzed_at",
-  "changed_at",
-  "started_at",
-  "finished_at",
-  "created_at",
-  "updated_at",
-]);
+export { DATETIME_COLUMNS };
 
 export const MYSQL_DATETIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/;
 

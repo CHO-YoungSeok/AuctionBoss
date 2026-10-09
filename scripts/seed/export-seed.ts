@@ -9,43 +9,29 @@ import Database from "better-sqlite3";
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { extractPersonNames, findSuspiciousPhrases, maskNames } from "./masking";
-import { buildInserts, type SqlColumn, type SqlColumnKind } from "./sql";
+import { readColumns, TABLE_SPECS } from "./columns";
+import { buildInserts, type SqlColumn } from "./sql";
 
 const ROOT = path.resolve(__dirname, "../..");
-const DB_PATH = path.join(ROOT, "data/auctionboss.db");
-const OUT_DIR = path.join(ROOT, "backend/src/main/resources/db/seed");
-const REPORT_PATH = path.join(ROOT, "docs/untracked/seed-masking-report.md");
+// 재생성 검증용 덮어쓰기(기본값은 커밋된 시드 경로). 값은 경로뿐이다.
+const DB_PATH = process.env.SEED_DB ?? path.join(ROOT, "data/auctionboss.db");
+const OUT_DIR = process.env.SEED_OUT_DIR ?? path.join(ROOT, "backend/src/main/resources/db/seed");
+const REPORT_PATH = process.env.SEED_REPORT ?? path.join(ROOT, "docs/untracked/seed-masking-report.md");
 const COMMAND = "npx tsx scripts/seed/export-seed.ts";
 
 /** FK 순서. 빈 테이블은 파일을 만들지 않는다. */
-const TABLES: { file: string; table: string; order: string }[] = [
-  { file: "01_items.sql", table: "items", order: "id" },
-  { file: "02_item_changes.sql", table: "item_changes", order: "id" },
-  { file: "03_analyses.sql", table: "analyses", order: "id" },
-  { file: "04_worker_runs.sql", table: "worker_runs", order: "id" },
-  { file: "05_collector_state.sql", table: "collector_state", order: "key" },
-];
-
-const DATETIME_COLUMNS = new Set([
-  "first_seen_at",
-  "last_seen_at",
-  "photo_collected_at",
-  "analyzed_at",
-  "changed_at",
-  "started_at",
-  "finished_at",
-  "created_at",
-  "updated_at",
-]);
-const DATE_COLUMNS = new Set(["auction_date", "auction_decision_date"]);
-const JSON_COLUMNS = new Set(["detail"]);
-
-function columnKind(name: string, sqliteType: string): SqlColumnKind {
-  if (DATETIME_COLUMNS.has(name)) return "datetime";
-  if (DATE_COLUMNS.has(name)) return "date";
-  if (JSON_COLUMNS.has(name)) return "json";
-  return sqliteType.toUpperCase() === "INTEGER" ? "int" : "text";
-}
+const SEED_FILES: Record<string, string> = {
+  items: "01_items.sql",
+  item_changes: "02_item_changes.sql",
+  analyses: "03_analyses.sql",
+  worker_runs: "04_worker_runs.sql",
+  collector_state: "05_collector_state.sql",
+};
+const TABLES: { file: string; table: string; order: string }[] = TABLE_SPECS.filter((t) => t.table in SEED_FILES).map((t) => ({
+  file: SEED_FILES[t.table],
+  table: t.table,
+  order: t.key,
+}));
 
 type Row = Record<string, unknown>;
 
@@ -55,11 +41,7 @@ function main(): void {
   const data: Record<string, { columns: SqlColumn[]; rows: Row[] }> = {};
 
   for (const t of TABLES) {
-    const info = db.prepare(`SELECT name, type FROM pragma_table_info('${t.table}')`).all() as {
-      name: string;
-      type: string;
-    }[];
-    const columns = info.map((c) => ({ name: c.name, kind: columnKind(c.name, c.type) }));
+    const columns = readColumns(db, t.table);
     const rows = db.prepare(`SELECT * FROM ${t.table} ORDER BY ${t.order}`).all() as Row[];
     sourceCounts[t.table] = rows.length;
     data[t.table] = { columns, rows };

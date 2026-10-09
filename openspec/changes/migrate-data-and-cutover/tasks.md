@@ -1,16 +1,16 @@
 ## 1. 시작 기준과 운영 데이터 실측
 
-- [ ] 1.1 시작 기준을 확인한다. `port-collector-to-spring`이 아카이브됐는지(메인 스펙 `spring-backend`에 "수집 스케줄러 기본 꺼짐과 외부 요청 차단"이 있는지) 보고, 게이트 5종(`npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint`, `cd backend && ./gradlew check`)이 통과하는지, TS·Java 테스트 수와 change 시작 커밋 해시를 이 파일 하단 메모에 남긴다(7.6의 `workers/analyzer.ts`·`workers/lib/`·`workers/prompts/` 무변경 확인 기준)
-- [ ] 1.2 이전 원본을 정한다: `data/auctionboss.db`와 compose 볼륨 `auctionboss_auctionboss-data`의 DB를 읽기 전용으로 열어 테이블별 행 수·최대 id·마지막 회차 시각만 비교하고(값 출력 금지), design.md "결정 기록" 1(`data/auctionboss.db`)과 맞는지 확인해 메모에 남긴다. 볼륨 쪽이면 런북(D10 3)의 복사 명령을 확정한다
-- [ ] 1.3 운영 원본으로 design.md의 전제를 실측해 메모에 남긴다(값 출력 금지, 건수·길이·형식 판정만): (a) 테이블별 행 수·최대 id·`sqlite_sequence`, (b) MySQL `VARCHAR` 컬럼마다 원본 최대 문자 길이와 정의 길이(초과 건수), (c) 시각 컬럼 9개의 형식 분포(`toMysqlDatetime` 통과 여부), 날짜 2개, 정수 컬럼의 비정수 값 건수, (d) `worker_runs.detail` JSON 유효성과 실수 값 포함 여부, (e) 자연 키를 `utf8mb4_0900_ai_ci` UNIQUE로 넣었을 때 충돌 건수(임시 MySQL 컨테이너), (f) 사진 기록 수·파일 수·고아 파일 수·총 바이트, (g) 워커별 회차 결과 비율(롤백 창 기준 D11). 하나라도 전제와 다르면(특히 (b) 초과나 (e) 충돌) design.md를 고치거나 사용자에게 스키마 변경 여부를 묻고 멈춘다
-- [ ] 1.4 롤백 창 기준을 design.md "결정 기록" 2(회차 기준)로 확정하고, 1.3 (g) 실측 주기로 72시간 기준이면 몇 회차였는지 계산해 차이를 메모에 남긴다
+- [x] 1.1 시작 기준을 확인한다. `port-collector-to-spring`이 아카이브됐는지(메인 스펙 `spring-backend`에 "수집 스케줄러 기본 꺼짐과 외부 요청 차단"이 있는지) 보고, 게이트 5종(`npx tsc --noEmit`, `npm test`, `npm run build`, `npm run lint`, `cd backend && ./gradlew check`)이 통과하는지, TS·Java 테스트 수와 change 시작 커밋 해시를 이 파일 하단 메모에 남긴다(7.6의 `workers/analyzer.ts`·`workers/lib/`·`workers/prompts/` 무변경 확인 기준)
+- [x] 1.2 이전 원본을 정한다: `data/auctionboss.db`와 compose 볼륨 `auctionboss_auctionboss-data`의 DB를 읽기 전용으로 열어 테이블별 행 수·최대 id·마지막 회차 시각만 비교하고(값 출력 금지), design.md "결정 기록" 1(`data/auctionboss.db`)과 맞는지 확인해 메모에 남긴다. 볼륨 쪽이면 런북(D10 3)의 복사 명령을 확정한다
+- [x] 1.3 운영 원본으로 design.md의 전제를 실측해 메모에 남긴다(값 출력 금지, 건수·길이·형식 판정만): (a) 테이블별 행 수·최대 id·`sqlite_sequence`, (b) MySQL `VARCHAR` 컬럼마다 원본 최대 문자 길이와 정의 길이(초과 건수), (c) 시각 컬럼 9개의 형식 분포(`toMysqlDatetime` 통과 여부), 날짜 2개, 정수 컬럼의 비정수 값 건수, (d) `worker_runs.detail` JSON 유효성과 실수 값 포함 여부, (e) 자연 키를 `utf8mb4_0900_ai_ci` UNIQUE로 넣었을 때 충돌 건수(임시 MySQL 컨테이너), (f) 사진 기록 수·파일 수·고아 파일 수·총 바이트, (g) 워커별 회차 결과 비율(롤백 창 기준 D11). 하나라도 전제와 다르면(특히 (b) 초과나 (e) 충돌) design.md를 고치거나 사용자에게 스키마 변경 여부를 묻고 멈춘다
+- [x] 1.4 롤백 창 기준을 design.md "결정 기록" 2(회차 기준)로 확정하고, 1.3 (g) 실측 주기로 72시간 기준이면 몇 회차였는지 계산해 차이를 메모에 남긴다
 
 ## 2. 내보내기 도구(TS)
 
-- [ ] 2.1 `export-seed.ts`의 컬럼 종류 판정과 테이블 순서를 `scripts/seed/columns.ts`로 옮겨 시드 내보내기와 함께 쓴다. 기존 시드 생성 결과가 바이트 단위로 같은지(임시 디렉터리에 다시 생성해 커밋된 `db/seed/*.sql`과 비교) 확인한다
-- [ ] 2.2 `scripts/migrate/normalize.ts`(D4 행 정규화·테이블 해시, 순수 함수)를 만든다. vitest `normalize.test.ts`: 밀리초 없는 시각·`+09:00` 시각이 같은 순간의 `.SSSZ`로, 키 순서·공백이 다른 JSON이 같은 문자열로, 큰 정수(1천억 이상)가 정확한 10진 문자열로, 뒤쪽 공백·이모지·백슬래시가 그대로, `collector_state` 키가 바이트 순으로 정렬되는지. 변이 확인: JSON 키 정렬을 빼면 "키 순서" 사례가, 문자열 `trim`을 넣으면 "뒤쪽 공백" 사례가 실패한다
-- [ ] 2.3 `scripts/migrate/export.ts`를 만든다(D2·D3·D8): 백업 API 스냅숏, 사전 조건(쓰기 중 아님, 최근 회차 `running` 아님, 컬럼 집합), id 포함 INSERT, 매니페스트, 참조 사진만 복사·해시, 고아 건수, 출력 위치 `data/migration/<시각>/`만 허용. vitest `export.test.ts`(임시 SQLite 합성 픽스처): (a) 빈 번호 id와 `sqlite_sequence > max(id)`가 매니페스트에 그대로, (b) 생성 SQL을 `seed-to-sqlite`의 파서로 되읽은 행이 원본과 같음, (c) 최근 회차가 `running`이면 거부, (d) `data/migration/` 밖 출력 경로 거부, (e) 형식이 다른 시각 행이 있으면 테이블·id·컬럼 이름으로 실패하고 값은 출력에 없음(D14 표식 문자열 검사), (f) 고아 사진 파일은 복사되지 않고 건수 1, (g) 두 번 실행한 SQL·매니페스트(시각 필드 제외)가 바이트 단위로 같음. 변이 확인: id 컬럼을 빼면 (a)(b)가, 경로 검사를 빼면 (d)가 실패한다
-- [ ] 2.4 교차 언어 골든을 만든다(D4): `scripts/migrate/fixtures/`의 합성 SQLite 생성기와 `generate-migration-golden.ts`가 `backend/src/test/resources/migration/{sql/*.sql, manifest.json, photos/**}`를 쓴다. 합성값만 쓰는지(실명 없음) `masking.ts`의 이름 추출이 0건인지 vitest로 확인하고, 두 번 생성해 바이트 단위로 같은지 확인한다
+- [x] 2.1 `export-seed.ts`의 컬럼 종류 판정과 테이블 순서를 `scripts/seed/columns.ts`로 옮겨 시드 내보내기와 함께 쓴다. 기존 시드 생성 결과가 바이트 단위로 같은지(임시 디렉터리에 다시 생성해 커밋된 `db/seed/*.sql`과 비교) 확인한다
+- [x] 2.2 `scripts/migrate/normalize.ts`(D4 행 정규화·테이블 해시, 순수 함수)를 만든다. vitest `normalize.test.ts`: 밀리초 없는 시각·`+09:00` 시각이 같은 순간의 `.SSSZ`로, 키 순서·공백이 다른 JSON이 같은 문자열로, 큰 정수(1천억 이상)가 정확한 10진 문자열로, 뒤쪽 공백·이모지·백슬래시가 그대로, `collector_state` 키가 바이트 순으로 정렬되는지. 변이 확인: JSON 키 정렬을 빼면 "키 순서" 사례가, 문자열 `trim`을 넣으면 "뒤쪽 공백" 사례가 실패한다
+- [x] 2.3 `scripts/migrate/export.ts`를 만든다(D2·D3·D8): 백업 API 스냅숏, 사전 조건(쓰기 중 아님, 최근 회차 `running` 아님, 컬럼 집합), id 포함 INSERT, 매니페스트, 참조 사진만 복사·해시, 고아 건수, 출력 위치 `data/migration/<시각>/`만 허용. vitest `export.test.ts`(임시 SQLite 합성 픽스처): (a) 빈 번호 id와 `sqlite_sequence > max(id)`가 매니페스트에 그대로, (b) 생성 SQL을 `seed-to-sqlite`의 파서로 되읽은 행이 원본과 같음, (c) 최근 회차가 `running`이면 거부, (d) `data/migration/` 밖 출력 경로 거부, (e) 형식이 다른 시각 행이 있으면 테이블·id·컬럼 이름으로 실패하고 값은 출력에 없음(D14 표식 문자열 검사), (f) 고아 사진 파일은 복사되지 않고 건수 1, (g) 두 번 실행한 SQL·매니페스트(시각 필드 제외)가 바이트 단위로 같음. 변이 확인: id 컬럼을 빼면 (a)(b)가, 경로 검사를 빼면 (d)가 실패한다
+- [x] 2.4 교차 언어 골든을 만든다(D4): `scripts/migrate/fixtures/`의 합성 SQLite 생성기와 `generate-migration-golden.ts`가 `backend/src/test/resources/migration/{sql/*.sql, manifest.json, photos/**}`를 쓴다. 합성값만 쓰는지(실명 없음) `masking.ts`의 이름 추출이 0건인지 vitest로 확인하고, 두 번 생성해 바이트 단위로 같은지 확인한다
 
 ## 3. 가져오기·검증(Spring 1회 실행)
 
@@ -74,3 +74,29 @@
 - [ ] 9.5 `regression-verifier` 서브에이전트로 회귀 검증을 받고 지적 사항을 반영한다(특히 "운영 구성이 실수로 SQLite나 TS 수집기로 돌아갈 때 잡는 테스트", "이전 전 기동 거부", "스모크가 운영 볼륨을 지우는 경로")
 - [ ] 9.6 커밋하고 푸시한 뒤 GitHub Actions의 TS 잡과 Java 잡이 통과하는지 확인한다(장마다 커밋·푸시는 따로 한다)
 - [ ] 9.7 `openspec validate migrate-data-and-cutover --strict`를 통과시킨 뒤 change를 아카이브하고(`port-collector-to-spring` 아카이브 뒤), 메인 스펙 `spring-backend`·`web-data-port`·`deployment-and-health`에 반영됐는지 확인한다. `web-data-port`·`deployment-and-health`의 Purpose 문장을 SQLite 은퇴에 맞게 메인 스펙에서 직접 고친다
+
+## 메모 (구현 중 기록, 값·실명 없음)
+
+### 1장 (2026-10-09)
+
+- **1.1 시작 기준**: 시작 커밋 `defd02ee7eead7dc6d82ff25ebfc2db87315f96f`. `port-collector-to-spring`은 아직 아카이브 전(`openspec/changes/`에 있고 메인 스펙 `spring-backend`에 "수집 스케줄러 기본 꺼짐과 외부 요청 차단" 없음) — 4단계 8장 마무리 중. 게이트(TS): `npx tsc --noEmit` 통과, `npm test` 88파일 1257개 통과, `npm run lint` 오류 0·경고 6, `npm run build` 통과. Java(`./gradlew check`)와 Java 테스트 수: **723(4단계 아카이브 시점, 회귀 검증 확인)**(4단계 마무리 값, 이번 작업은 빌드 금지).
+- **1.2 이전 원본**: compose 볼륨 `auctionboss_auctionboss-data`의 DB(읽기 전용 마운트로 파일만 복사해 확인) — items 0, item_changes 0, analyses 0, worker_runs 1, bookmarks 0, feed_reads 0, collector_state 0, item_photos 0, 수집 회차 없음. `data/auctionboss.db`(백업 API 스냅숏으로 확인) — items 809, item_changes 4008, analyses 12, worker_runs 10, collector_state 1, item_photos 16, 마지막 수집 회차 2026-10-08. "결정 기록" 1과 일치: **이전 원본은 `data/auctionboss.db`**, 런북에서 볼륨 복사 명령은 필요 없음. 확인용 복사본은 지웠다.
+- **1.3 실측**(스냅숏 기준):
+  - (a) items 809 (최대 id 1393, `sqlite_sequence` 1393), item_changes 4008 (4008/4008), analyses 12 (12/12), worker_runs 10 (10/10), bookmarks 0, feed_reads 0, collector_state 1, item_photos 16 (16/16). SQLite 컬럼 집합 = MySQL 컬럼 집합(8개 테이블 모두 차이 0).
+  - (b) VARCHAR 48개 컬럼 전부 초과 0건. 가장 빡빡한 것: `items.dong` 16/100, `items.address` 51/500, `items.duplicate_case_no` 77/500, `items.building_unit` 167/500, `collector_state.key` 32/100. TEXT 최대 485바이트(한도 65535), `analyses.body` 최대 2027바이트(MEDIUMTEXT). INT 컬럼 범위 초과 0, 정수 컬럼의 비정수 값 0. **V4 불필요.**
+  - (c) 시각 컬럼 15개(빈 테이블 포함)의 비NULL 값은 전부 `YYYY-MM-DDTHH:mm:ss.SSSZ`, `toMysqlDatetime` 변환 실패 0. 날짜 2개(`auction_date`, `auction_decision_date`)는 전부 `YYYY-MM-DD`, 실패 0. **발견**: `items.photo_attempted_at`(V2)은 시드 시절 `DATETIME_COLUMNS`에 없어 값이 있는 행(1건)이 TEXT로 나갔을 것 — `scripts/seed/columns.ts`에 추가함(2.1).
+  - (d) `worker_runs.detail`: 10행 중 NULL 2, 유효 JSON 8, 깨진 JSON 0, 실수 값 포함 0, 16자리 이상 숫자 0. MySQL `json_valid` 8/8.
+  - (e) 임시 MySQL 8.4 컨테이너(포트 33999, 끝나고 삭제)에서 `utf8mb4_0900_ai_ci`로 `items (court, case_no, item_no)` 809행 → 고유 809, `collector_state.key` 1행 → 고유 1. **충돌 0.** 추가로 V1~V3를 적용한 빈 스키마에 내보내기 SQL 8개를 실제 적재: 오류 0, 행 수 809/4008/12/10/0/0/1/16 일치, `photo_attempted_at` 비NULL 1, 최대 id 1393.
+  - (f) 사진 기록 16, 파일 17, 고아 1, 기록된 파일 누락 0, 크기 불일치 0, 경로 형식(`{itemId}/{seq}.{ext}`) 위반 0, 총 2,584,125바이트(기록된 16개 2,584,119).
+  - (g) 회차 결과: collector — success 3, skipped(backoff) 1 / photos — success 1, skipped(backoff) 1 / analyzer — success 4. 차단·실패 0. 수집 회차 4개가 약 723시간에 흩어져 있어 주기가 규칙적이지 않다(중앙 간격 약 6.8일). 분석 중앙 간격 약 10분(연속 사용 구간).
+- **1.4 롤백 창**: "결정 기록" 2(회차 기준) 확정. 72시간 기준이면 TS 시절 실측 주기로는 수집 회차가 0~1회(운영 환경 없이 수동 실행뿐)라 design D11의 "수집 성공 30회"는 실측 주기로 채울 수 없다. 회차 기준(수집·사진 성공 1회 이상, 차단·실패 0, 분석 가짜 CLI 1회 성공, 화면 5개·API 동등성 차이 0)이 현실적이며, 72시간 기준과의 차이는 ROADMAP에 적는다(9.4).
+
+### 2장 (2026-10-09)
+
+- **2.1**: `scripts/seed/columns.ts`(컬럼 종류 판정 `columnKind`, 시각·날짜·JSON 컬럼 집합, `TABLE_SPECS` FK 순서·기본 키, `EXPECTED_COLUMNS` = MySQL 컬럼 순서, `readColumns`)를 만들어 `export-seed.ts`·`seed-to-sqlite.ts`가 함께 쓴다. `export-seed.ts`에 `SEED_DB`·`SEED_OUT_DIR`·`SEED_REPORT` 환경 변수 덮어쓰기를 더함(기본값 동작 불변). 바이트 비교: 원래 코드(HEAD 판)와 새 코드를 같은 스냅숏에 돌려 임시 디렉터리에 쓴 5개 SQL이 **동일**(`photo_attempted_at`을 NULL로 한 복사본 기준). 실제 스냅숏에서는 `01_items.sql` 한 줄만 다르다 — `photo_attempted_at` 값이 문자열 리터럴에서 DATETIME 리터럴로 바뀐 것(의도한 수정). 커밋된 `db/seed/*.sql`과의 직접 비교는 원본이 시드 이후 바뀌어(items·worker_runs가 이후 갱신, 시드에는 V2 컬럼 자체가 없음) 의미가 없어 하지 않았고 커밋된 시드는 건드리지 않았다. 시드 테스트(`seed-to-sqlite.test.ts` 등)는 그대로 통과.
+- **D4 규칙 조정(설계 문구와 다른 점)**: 행 값 순서를 "원본 SQLite 컬럼 순서" 대신 **MySQL 컬럼 순서(`EXPECTED_COLUMNS`, 매니페스트 `columns`)**로 정했다. SQLite 물리 순서는 `ALTER TABLE ADD COLUMN` 이력에 따라 달라질 수 있어 Java가 `information_schema`로 따를 수 있는 쪽이 안전하다. 또 JSON 컬럼의 숫자는 정수만 허용하고 16자리 이상 숫자는 거부(두 언어의 숫자 표기 차이를 막음). 규칙 전문은 `scripts/migrate/normalize.ts` 머리 주석이 기준이며 Java(3.1)가 따른다.
+- **2.2·2.3·2.4 파일**: `scripts/migrate/normalize.ts`, `export.ts`, `generate-migration-golden.ts`, `fixtures/synthetic-source.ts`, 테스트 `scripts/migrate/__tests__/{normalize,export,golden}.test.ts`, `scripts/seed/__tests__/columns.test.ts`, 골든 `backend/src/test/resources/migration/{sql/01~08_*.sql, manifest.json, photos/**}`(합성값만, `sourceSha256`은 null·시각·커밋은 고정값).
+- **변이 확인(실제로 하고 되돌림)**: JSON 키 정렬 제거 → "키 순서" 사례와 골든 일치 테스트 실패. 문자열 `trim` 추가 → "뒤쪽 공백" 사례 외 2개 실패. SQL에서 id 컬럼 제거 → (a)(b)와 골든 일치 실패. 출력 경로 검사 제거 → (d) 실패. 모두 원복 후 전체 통과.
+- **실제 원본 내보내기 시험**: `scripts/migrate/export.ts`로 운영 원본을 내보내 0.12초에 끝남(행 수 809/4008/12/10/0/0/1/16, 사진 16개·고아 1). 결과는 `data/migration/<시각>/`(git 무시)에 썼다가 1.3 (e) 적재 확인 뒤 지웠다. 7.3에서 다시 만든다.
+- **게이트(2장 끝, TS)**: `npx tsc --noEmit` 통과, `npm test` 92파일 1287개 통과(시작 1257 + 30), `npm run lint` 오류 0.
+- `.gitignore`에 `/backups/` 추가("결정 기록" 4). `data/migration/`은 기존 `/data/` 규칙으로 무시됨(`git check-ignore` 확인).
