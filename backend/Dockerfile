@@ -18,6 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --no-create-home app
 WORKDIR /app
+# 사진 디렉터리(auctionboss.photos.dir). 빈 named volume은 이미지 디렉터리의 소유권을 물려받으므로
+# 비루트 사용자 app(10001)이 쓸 수 있게 미리 만들어 둔다(migrate-data-and-cutover D8).
+RUN mkdir -p /app/photos && chown 10001:10001 /app/photos
 COPY --from=build /workspace/extracted/dependencies/ ./
 COPY --from=build /workspace/extracted/spring-boot-loader/ ./
 COPY --from=build /workspace/extracted/snapshot-dependencies/ ./

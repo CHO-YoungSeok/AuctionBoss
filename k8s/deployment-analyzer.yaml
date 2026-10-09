@@ -23,11 +23,15 @@ spec:
           envFrom:
             - configMapRef:
                 name: auctionboss-config
-            - secretRef:
-                name: auctionboss-secret
           env:
             - name: AUCTIONBOSS_API_BASE
-              value: "http://auctionboss-service:3000"
+              value: "http://auctionboss-backend:8080"
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: auctionboss-secret
+                  key: ANTHROPIC_API_KEY
+                  optional: true
           resources:
             requests:
               cpu: "200m"

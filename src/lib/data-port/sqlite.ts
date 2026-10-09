@@ -15,6 +15,7 @@ import {
   createRepository,
   createWorkerRunsRepository,
   getBookmarksRepository,
+  getDb,
   getCollectorStateRepository,
   getRepository,
   getWorkerRunsRepository,
@@ -61,6 +62,9 @@ export function createSqlitePort(db?: Db, options: SqlitePortOptions = {}): Data
     };
 
   return {
+    async health() {
+      (db ?? getDb()).prepare("SELECT 1").get();
+    },
     async listItems(query) {
       return repos().items.listItems(query);
     },

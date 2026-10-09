@@ -52,7 +52,12 @@ class EnvironmentVariableBindingTest {
 				Arguments.of("AUCTIONBOSS_CONFIG_PATH", "auctionboss.config-path"),
 				Arguments.of("AUCTIONBOSS_WORKERS_SHUTDOWN_WAIT_MS", "auctionboss.workers.shutdown-wait-ms"),
 				Arguments.of("AUCTIONBOSS_RUN_ONCE", "auctionboss.run-once"),
-				Arguments.of("AUCTIONBOSS_RUN_ONCE_TIMEOUT_MS", "auctionboss.run-once-timeout-ms"));
+				Arguments.of("AUCTIONBOSS_RUN_ONCE_TIMEOUT_MS", "auctionboss.run-once-timeout-ms"),
+				// 운영 전환·롤백 런북(docs/REFERENCE.md 9·10절)이 docker compose run -e 로 주는 이름
+				Arguments.of("AUCTIONBOSS_IMPORT_DIR", "auctionboss.import.dir"),
+				Arguments.of("AUCTIONBOSS_IMPORT_REPLACE", "auctionboss.import.replace"),
+				Arguments.of("AUCTIONBOSS_IMPORT_DRY_RUN", "auctionboss.import.dry-run"),
+				Arguments.of("AUCTIONBOSS_DELTA_SINCE", "auctionboss.delta.since"));
 	}
 
 	@ParameterizedTest(name = "{0} -> {1}")

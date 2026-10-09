@@ -1,19 +1,20 @@
+# 웹: 단일 컨테이너. 데이터 볼륨·SQLite 없음 - 데이터 원천은 백엔드(spring)다.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: auctionboss-web-collector
+  name: auctionboss-web
   namespace: auctionboss
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: auctionboss
-      component: web-collector
+      component: web
   template:
     metadata:
       labels:
         app: auctionboss
-        component: web-collector
+        component: web
     spec:
       containers:
         - name: web
@@ -24,17 +25,18 @@ spec:
           envFrom:
             - configMapRef:
                 name: auctionboss-config
-            - secretRef:
-                name: auctionboss-secret
-          volumeMounts:
-            - name: data-volume
-              mountPath: /app/data
+          env:
+            - name: AUCTIONBOSS_DATA_SOURCE
+              value: "spring"
+            - name: AUCTIONBOSS_SPRING_BASE
+              value: "http://auctionboss-backend:8080"
+          # 백엔드가 잠시 내려가도 웹 컨테이너를 재시작하지 않는다(재시작해도 낫지 않는다): liveness는 포트만 본다.
           livenessProbe:
-            httpGet:
-              path: /api/health
+            tcpSocket:
               port: 3000
             initialDelaySeconds: 15
             periodSeconds: 20
+          # 트래픽 수신 가능 여부는 /api/health(백엔드 헬스체크로 판정)로 본다.
           readinessProbe:
             httpGet:
               path: /api/health
@@ -48,48 +50,3 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
-              
-        - name: collector
-          image: auctionboss:latest
-          imagePullPolicy: IfNotPresent
-          command: ["npm", "run", "collector"]
-          envFrom:
-            - configMapRef:
-                name: auctionboss-config
-            - secretRef:
-                name: auctionboss-secret
-          volumeMounts:
-            - name: data-volume
-              mountPath: /app/data
-          resources:
-            requests:
-              cpu: "250m"
-              memory: "256Mi"
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
-
-        # SQLite 파일·사진 디렉터리를 쓰므로 web·collector와 같은 Pod에서 같은 PVC를 공유한다.
-        - name: photos
-          image: auctionboss:latest
-          imagePullPolicy: IfNotPresent
-          command: ["npm", "run", "photos"]
-          envFrom:
-            - configMapRef:
-                name: auctionboss-config
-            - secretRef:
-                name: auctionboss-secret
-          volumeMounts:
-            - name: data-volume
-              mountPath: /app/data
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
-            limits:
-              cpu: "250m"
-              memory: "256Mi"
-      volumes:
-        - name: data-volume
-          persistentVolumeClaim:
-            claimName: auctionboss-data-pvc

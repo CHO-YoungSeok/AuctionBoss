@@ -6,7 +6,7 @@ metadata:
 spec:
   selector:
     app: auctionboss
-    component: web-collector
+    component: web
   ports:
     - protocol: TCP
       port: 3000

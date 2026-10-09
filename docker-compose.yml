@@ -1,3 +1,10 @@
+# 운영 구성(migrate-data-and-cutover D9): mysql + backend(수집·사진·API) + web + analyzer.
+# 이 구성은 SQLite를 쓰지 않는다. 물건·사진 수집은 backend가 맡고(TS collector·photos 서비스 없음),
+# web은 데이터 원천을 backend로 둔다.
+#
+# 주의: prod 프로필의 backend는 "이전 완료 표식"(collector_state.migration.completed)이 MySQL에 없으면
+# 기동을 거부한다. 이전(docs/REFERENCE.md "운영 전환 런북") 전에 `docker compose up`을 하면 backend가
+# 뜨지 않고, 그에 묶인 web·analyzer도 뜨지 않는다. 스모크·개발용은 docker-compose.smoke.yml(별도 프로젝트).
 version: "3.8"
 
 services:
@@ -5,10 +12,12 @@ services:
     build: .
     ports:
       - "3000:3000"
-    volumes:
-      - auctionboss-data:/app/data
+    depends_on:
+      backend:
+        condition: service_healthy
     healthcheck:
       # 이미지에 curl이 없으므로 Node 22 전역 fetch로 확인한다. 200이 아니면 실패.
+      # /api/health는 backend의 헬스체크를 불러 판정한다(웹은 DB를 직접 열지 않는다).
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
@@ -16,59 +25,34 @@ services:
       start_period: 30s
     environment:
       - NODE_ENV=production
-      - AUCTIONBOSS_DB=/app/data/auctionboss.db
-
-  collector:
-    build: .
-    command: npm run collector
-    volumes:
-      - auctionboss-data:/app/data
-    depends_on:
-      web:
-        condition: service_healthy
-    environment:
-      - NODE_ENV=production
-      - AUCTIONBOSS_DB=/app/data/auctionboss.db
-
-  photos:
-    build: .
-    command: npm run photos
-    volumes:
-      - auctionboss-data:/app/data
-    depends_on:
-      web:
-        condition: service_healthy
-    environment:
-      - NODE_ENV=production
-      - AUCTIONBOSS_DB=/app/data/auctionboss.db
+      - AUCTIONBOSS_DATA_SOURCE=spring
+      - AUCTIONBOSS_SPRING_BASE=http://backend:8080
 
   analyzer:
     build: .
     command: npm run analyzer
     depends_on:
-      - web
-    # ${VAR:-}: 값이 없어도 compose 파일 전체 해석이 실패하지 않는다(빈 키는 CLI 모드로 간다).
+      backend:
+        condition: service_healthy
+    # ${VAR:-}: API 키가 없어도 compose 파일 전체 해석이 실패하지 않는다(빈 키는 CLI 모드로 간다).
     environment:
       - NODE_ENV=production
-      - AUCTIONBOSS_API_BASE=http://web:3000
+      - AUCTIONBOSS_API_BASE=http://backend:8080
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - AUCTIONBOSS_ANALYZE_MODEL=${AUCTIONBOSS_ANALYZE_MODEL:-}
 
-  # --- Spring Boot + MySQL 백엔드 (기존 web/collector/analyzer와 독립) ---
   mysql:
     image: mysql:8.4
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
-    # 값은 .env에서 주입한다(cp .env.example .env). `:?`(필수 검사)를 쓰지 않는 이유:
-    # compose는 파일 전체를 한 번에 치환하므로 `:?`가 있으면 .env가 없을 때 기존 web/collector/
-    # analyzer까지 실행할 수 없게 된다. 값이 비면 MySQL 컨테이너가 기동 시점에
-    # "password option is not specified"로 스스로 실패하므로 비밀은 여전히 저장소에 두지 않는다.
+    # 값은 .env에서 주입한다(cp .env.example .env). 모든 서비스가 MySQL을 필요로 하므로 `:?`(필수 검사)를 쓴다:
+    # 값이 없으면 어떤 변수가 없는지 알리며 구성 해석 단계에서 실패하고 어떤 서비스도 시작하지 않는다.
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-}
-      MYSQL_DATABASE: ${DB_NAME:-}
-      MYSQL_USER: ${DB_USER:-}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD가 필요합니다(.env)}
+      MYSQL_DATABASE: ${DB_NAME:?DB_NAME이 필요합니다(.env)}
+      MYSQL_USER: ${DB_USER:?DB_USER가 필요합니다(.env)}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD가 필요합니다(.env)}
     volumes:
       - mysql-data:/var/lib/mysql
     # 호스트 3306은 로컬 개발용 MySQL이 쓰는 경우가 많아 기본 3307로 연다(로컬 루프백만).
@@ -90,15 +74,21 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     environment:
-      SPRING_PROFILES_ACTIVE: local,seed
+      SPRING_PROFILES_ACTIVE: prod
       DB_HOST: mysql
       DB_PORT: "3306"
-      DB_NAME: ${DB_NAME:-}
-      DB_USER: ${DB_USER:-}
-      DB_PASSWORD: ${DB_PASSWORD:-}
+      DB_NAME: ${DB_NAME:?DB_NAME이 필요합니다(.env)}
+      DB_USER: ${DB_USER:?DB_USER가 필요합니다(.env)}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD가 필요합니다(.env)}
       AUCTIONBOSS_CONFIG_PATH: /app/config/collector.json
+      # 수집·사진 주기 실행과 외부 요청 허용(세 설정). 수집기는 이 서비스 하나뿐이어야 한다.
+      AUCTIONBOSS_COLLECTOR_ENABLED: "true"
+      AUCTIONBOSS_PHOTOS_ENABLED: "true"
+      AUCTIONBOSS_SOURCE_EXTERNAL_REQUESTS_ALLOWED: "true"
+      AUCTIONBOSS_PHOTOS_DIR: /app/photos
     volumes:
       - ./config/collector.json:/app/config/collector.json:ro
+      - photos-data:/app/photos
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/health"]
       interval: 10s
@@ -107,5 +97,7 @@ services:
       start_period: 40s
 
 volumes:
+  # 이전 전 TS 구성의 SQLite·사진 볼륨. 롤백 창 동안 남긴다(어느 서비스도 마운트하지 않는다). 은퇴 때 선언을 지운다.
   auctionboss-data:
   mysql-data:
+  photos-data:

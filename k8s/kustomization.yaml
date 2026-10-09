@@ -4,7 +4,11 @@ resources:
   - namespace.yaml
   - pvc.yaml
   - configmap.yaml
+  - configmap-collector.yaml
   - secret.yaml
+  - statefulset-mysql.yaml
+  - deployment-backend.yaml
+  - service-backend.yaml
   - deployment.yaml
   - deployment-analyzer.yaml
   - service.yaml

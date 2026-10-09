@@ -87,6 +87,14 @@ export type PhotoFile =
   | { status: 400 | 404; message: string };
 
 export interface DataPort {
+  // ---- 상태 ----
+  /**
+   * 원천이 응답하는지 묻는다(`/api/health`용). 정상이면 값 없이 끝나고, 아니면 던진다.
+   * Spring 원천은 백엔드 `/api/health`를 부르며(SQLite 파일을 열지 않는다), SQLite 원천은 `SELECT 1`이다.
+   * 던지는 오류에는 원인 문자열을 담지 않는다(주소·쿼리 같은 값이 응답으로 새지 않게).
+   */
+  health(): Promise<void>;
+
   // ---- 읽기 13 ----
   /** 화면 조건(`parseItemQueryLenient` 결과)과 `{ pageSize: 1 }`, `{ analyzed: true, pageSize: 1 }` 같은 건수 조회. */
   listItems(query: ItemQuery): Promise<ItemListResult>;

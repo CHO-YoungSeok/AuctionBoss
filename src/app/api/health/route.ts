@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { getDataPort } from "@/lib/data-port";
 
 export const dynamic = "force-dynamic";
 
-export function GET(): NextResponse {
+export async function GET(): Promise<NextResponse> {
   try {
-    const db = getDb();
-    db.prepare("SELECT 1").get();
+    await getDataPort().health();
     return NextResponse.json(
       {
         status: "ok",

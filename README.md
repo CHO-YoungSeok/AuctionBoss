@@ -190,10 +190,12 @@ Docker만 있으면 됩니다. 실명을 가린 시드 809건이 자동으로 �
 
 ```bash
 cp .env.example .env
-docker compose up -d mysql backend   # http://localhost:8080/api/items
+docker compose -p auctionboss-smoke -f docker-compose.smoke.yml up -d --wait   # http://localhost:18080/api/items
 ```
 
-수집·사진 워커는 Spring에서도 돌 수 있지만 기본 꺼짐입니다(`auctionboss.collector.enabled`, `auctionboss.photos.enabled`). 외부 요청도 `auctionboss.source.external-requests-allowed`를 켜기 전에는 루프백으로만 나갑니다. 루프백 가짜 소스로 전체 경로를 확인하는 `scripts/dev/verify-collector-on-spring.sh`(외부 요청 없음)와 1회 실행 모드 사용법은 [레퍼런스 8절](docs/REFERENCE.md#8-spring-백엔드-이전-중)에 있습니다. TS 수집기와 동시에 켜면 안 됩니다.
+이 명령은 시드로 뜨는 스모크 구성(별도 프로젝트)입니다. 저장소 루트의 `docker compose up`은 운영 구성(MySQL + 백엔드 + 웹 + 분석 워커)이고, **이전 완료 표식이 없으면 백엔드가 뜨지 않습니다**(그에 묶인 웹·분석 워커도 뜨지 않습니다). 이전 절차는 [레퍼런스 9절](docs/REFERENCE.md#9-운영-전환-런북)입니다. 운영 구성에는 TS 수집·사진 서비스가 없고 백엔드가 수집·사진을 맡습니다.
+
+수집·사진 워커는 Spring에서도 돌 수 있고 코드 기본값은 꺼짐입니다(운영 배포 구성의 백엔드만 켭니다)(`auctionboss.collector.enabled`, `auctionboss.photos.enabled`). 외부 요청도 `auctionboss.source.external-requests-allowed`를 켜기 전에는 루프백으로만 나갑니다. 루프백 가짜 소스로 전체 경로를 확인하는 `scripts/dev/verify-collector-on-spring.sh`(외부 요청 없음)와 1회 실행 모드 사용법은 [레퍼런스 8절](docs/REFERENCE.md#8-spring-백엔드-이전-중)에 있습니다. TS 수집기와 동시에 켜면 안 됩니다(운영 구성은 TS 수집·사진 서비스를 두지 않습니다).
 
 화면을 Spring에서 읽게 해 보려면(개발용, 운영 기본값은 `sqlite`) Spring을 띄운 뒤 다음처럼 실행합니다. `scripts/dev/compare-screens.sh`는 임시 MySQL·Spring·SQLite에 두 모드를 띄워 화면을 비교합니다(Docker·JDK 필요).
 

@@ -10,8 +10,17 @@ type Any = any;
 const load = (p: string): Any => yaml.load(read(p));
 
 const compose = load("docker-compose.yml");
+const smoke = load("docker-compose.smoke.yml");
 const k8sWeb = load("k8s/deployment.yaml");
 const k8sAnalyzer = load("k8s/deployment-analyzer.yaml");
+const k8sBackend = load("k8s/deployment-backend.yaml");
+const k8sBackendSvc = load("k8s/service-backend.yaml");
+const k8sConfigMap = load("k8s/configmap.yaml");
+const k8sSecret = load("k8s/secret.yaml");
+const k8sKustomization = load("k8s/kustomization.yaml");
+const k8sPvcs: Any[] = yaml.loadAll(read("k8s/pvc.yaml"));
+const k8sMysqlDocs: Any[] = yaml.loadAll(read("k8s/statefulset-mysql.yaml"));
+const k8sMysql = k8sMysqlDocs.find((d) => d.kind === "StatefulSet");
 
 function envNames(env: Any): string[] {
   if (Array.isArray(env)) {
@@ -32,6 +41,42 @@ function envValue(env: Any, name: string): string | undefined {
 }
 const containers = (d: Any): Any[] => d.spec.template.spec.containers;
 
+const K8S_FILES = [
+  "configmap",
+  "configmap-collector",
+  "deployment",
+  "deployment-analyzer",
+  "deployment-backend",
+  "service-backend",
+  "statefulset-mysql",
+  "secret",
+  "service",
+  "ingress",
+  "kustomization",
+  "namespace",
+  "pvc",
+].map((n) => `k8s/${n}.yaml`);
+// 환경 변수·인자를 심을 수 있는 모든 경로: compose 둘, 이미지, CI, 스크립트, K8s 매니페스트
+const DEPLOY_FILES = [
+  "docker-compose.yml",
+  "docker-compose.smoke.yml",
+  "Dockerfile",
+  "backend/Dockerfile",
+  ".github/workflows/ci.yml",
+  "scripts/dev/compare-screens.sh",
+  "scripts/docker-smoke.sh",
+  ...K8S_FILES,
+];
+// 실제로 배포되는 구성(개발 스크립트는 임시 컨테이너·시험용 값을 쓰므로 제외)
+const DEPLOYED_FILES = DEPLOY_FILES.filter((f) => !f.startsWith("scripts/"));
+// 세 설정을 켜도 되는 파일은 운영 백엔드를 정의하는 두 곳뿐이다.
+const SWITCH_ON_ALLOWED = ["docker-compose.yml", "k8s/deployment-backend.yaml"];
+const stripComments = (text: string) =>
+  text
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("#"))
+    .join("\n");
+
 describe("analyzer가 읽는 서버 주소 변수", () => {
   const apiSrc = read("workers/lib/api.ts");
   it("analyzer 소스가 AUCTIONBOSS_API_BASE를 읽고 기본값은 localhost", () => {
@@ -39,31 +84,32 @@ describe("analyzer가 읽는 서버 주소 변수", () => {
     expect(apiSrc).toMatch(/DEFAULT_API_BASE\s*=\s*"http:\/\/localhost/);
   });
 
-  it("compose analyzer", () => {
+  it("compose analyzer는 백엔드 서비스를 본다", () => {
     const env = compose.services.analyzer.environment;
     const names = envNames(env);
     expect(names).toContain("AUCTIONBOSS_API_BASE");
     expect(names).not.toContain("BASE_URL");
     const v = envValue(env, "AUCTIONBOSS_API_BASE")!;
-    expect(v).toBe("http://web:3000");
-    expect(v).not.toMatch(/localhost|127\.0\.0\.1/);
+    expect(v).toBe("http://backend:8080");
+    expect(v).not.toMatch(/localhost|127\.0\.0\.1|web:3000/);
+    expect(compose.services.analyzer.depends_on.backend.condition).toBe("service_healthy");
     expect(names).toContain("ANTHROPIC_API_KEY");
     expect(envValue(env, "ANTHROPIC_API_KEY")).toBe("${ANTHROPIC_API_KEY:-}");
     expect(envValue(env, "AUCTIONBOSS_ANALYZE_MODEL")).toBe("${AUCTIONBOSS_ANALYZE_MODEL:-}");
   });
 
-  it("K8s analyzer", () => {
+  it("K8s analyzer는 백엔드 서비스를 본다", () => {
     const env = containers(k8sAnalyzer)[0].env;
     const names = envNames(env);
     expect(names).toContain("AUCTIONBOSS_API_BASE");
     expect(names).not.toContain("BASE_URL");
-    expect(envValue(env, "AUCTIONBOSS_API_BASE")).not.toMatch(/localhost|127\.0\.0\.1/);
-    // 운영 분석 워커는 Spring이 아니라 Next 서비스를 본다(add-spring-write-api: 운영 경로 유지).
-    expect(envValue(env, "AUCTIONBOSS_API_BASE")).toBe("http://auctionboss-service:3000");
+    const v = envValue(env, "AUCTIONBOSS_API_BASE")!;
+    expect(v).toBe(`http://${k8sBackendSvc.metadata.name}:8080`);
+    expect(v).not.toMatch(/localhost|127\.0\.0\.1|auctionboss-service/);
   });
 });
 
-describe("compose", () => {
+describe("compose 웹 헬스체크", () => {
   it("web 헬스체크는 curl 없이 node로 /api/health를 확인", () => {
     const test: string[] = compose.services.web.healthcheck.test;
     expect(test[0]).toBe("CMD");
@@ -73,121 +119,60 @@ describe("compose", () => {
     expect(test.join(" ")).toContain("r.status===200");
     expect(compose.services.web.healthcheck.start_period).toBeTruthy();
   });
-
-  it("photos 서비스는 web과 같은 데이터 볼륨, npm run photos", () => {
-    const { web, photos, collector } = compose.services;
-    expect(photos.command).toBe("npm run photos");
-    const vol = (s: Any) => s.volumes.find((v: string) => v.endsWith(":/app/data"));
-    expect(vol(photos)).toBeTruthy();
-    expect(vol(photos)).toBe(vol(web));
-    expect(envNames(photos.environment)).toContain("AUCTIONBOSS_DB");
-    for (const s of [collector, photos]) {
-      expect(s.depends_on.web.condition).toBe("service_healthy");
-    }
-  });
 });
 
-describe("K8s", () => {
-  it("photos 컨테이너는 web과 같은 PVC 볼륨을 같은 경로에 마운트", () => {
-    const cs = containers(k8sWeb);
-    const web = cs.find((c) => c.name === "web");
-    const photos = cs.find((c) => c.name === "photos");
-    expect(photos).toBeTruthy();
-    expect(photos.command).toEqual(["npm", "run", "photos"]);
-    expect(photos.volumeMounts).toEqual(web.volumeMounts);
-    expect(
-      k8sWeb.spec.template.spec.volumes.some((v: Any) => v.name === web.volumeMounts[0].name),
-    ).toBe(true);
-  });
-
-  it("secret 예시 주석에 ANTHROPIC_API_KEY", () => {
-    expect(read("k8s/secret.yaml")).toContain("ANTHROPIC_API_KEY");
-  });
-});
-
-describe("운영 데이터 원천 유지(switch-web-to-data-port D2)", () => {
-  // 웹 서비스에 spring을 넣으면 화면이 수집이 멈춘 MySQL 시드를 보여 준다. 전환은 5단계 이전 직후 한 번.
-  const isSpring = (v: string | undefined) => v?.trim().toLowerCase() === "spring";
-  it("compose 웹 서비스는 AUCTIONBOSS_DATA_SOURCE를 spring으로 두지 않는다", () => {
-    const env = compose.services.web.environment;
-    expect(isSpring(envValue(env, "AUCTIONBOSS_DATA_SOURCE"))).toBe(false);
-    expect(envNames(env)).not.toContain("AUCTIONBOSS_SPRING_BASE");
-  });
-
-  it("K8s 웹 배포와 configmap은 AUCTIONBOSS_DATA_SOURCE를 spring으로 두지 않는다", () => {
-    for (const c of containers(k8sWeb)) {
-      expect(isSpring(envValue(c.env, "AUCTIONBOSS_DATA_SOURCE"))).toBe(false);
-      expect(envNames(c.env)).not.toContain("AUCTIONBOSS_SPRING_BASE");
-    }
-    const cm = load("k8s/configmap.yaml");
-    expect(isSpring(cm.data?.AUCTIONBOSS_DATA_SOURCE)).toBe(false);
-    expect(Object.keys(cm.data ?? {})).not.toContain("AUCTIONBOSS_SPRING_BASE");
-  });
-
-  it("어느 배포 파일에도 AUCTIONBOSS_DATA_SOURCE=spring 문자열이 없다", () => {
-    for (const f of ["docker-compose.yml", ...["configmap", "deployment", "deployment-analyzer"].map((n) => `k8s/${n}.yaml`)]) {
-      expect(read(f)).not.toMatch(/AUCTIONBOSS_DATA_SOURCE["']?\s*[:=]\s*["']?spring/i);
-    }
-  });
-});
-
-describe("백엔드 수집·사진 워커 기본 꺼짐 유지(port-collector-to-spring D4, D14)", () => {
-  // 백엔드 수집기를 켜는 설정이 배포 구성에 들어가면 TS 수집기와 같은 소스에 동시에 요청한다(서로의 백오프를 못 본다).
-  // 운영 수집·사진은 기존 TS 서비스가 계속 맡는다. 켜는 전환은 5단계 런북에서 기존 워커를 멈춘 뒤 한다.
+describe("운영 구성에서만 수집·사진 켬(migrate-data-and-cutover D9)", () => {
+  // 수집기는 백엔드 하나뿐이어야 한다: TS collector·photos와 백엔드 스케줄러가 같은 소스에 동시에 요청하면
+  // 서로의 백오프를 못 본다. 켜는 곳은 compose backend와 K8s 백엔드뿐이다.
   const SWITCHES = [
     "AUCTIONBOSS_COLLECTOR_ENABLED",
     "AUCTIONBOSS_PHOTOS_ENABLED",
     "AUCTIONBOSS_SOURCE_EXTERNAL_REQUESTS_ALLOWED",
   ];
-  // Spring이 같은 설정으로 읽는 점 표기(SPRING_APPLICATION_JSON, 명령 인자 등으로 들어올 수 있다).
   const DOTTED = [
     "auctionboss.collector.enabled",
     "auctionboss.photos.enabled",
     "auctionboss.source.external-requests-allowed",
   ];
   const isOn = (v: unknown) => /^(true|1|yes|on)$/i.test(String(v ?? "").trim());
-  const deployFiles = [
-    "docker-compose.yml",
-    // 환경 변수·인자를 심을 수 있는 나머지 경로: 이미지, CI, 개발 스크립트(백엔드 서비스를 local 프로필로 띄운다)
-    "Dockerfile",
-    "backend/Dockerfile",
-    ".github/workflows/ci.yml",
-    "scripts/dev/compare-screens.sh",
-    ...[
-      "configmap",
-      "deployment",
-      "deployment-analyzer",
-      "secret",
-      "service",
-      "ingress",
-      "kustomization",
-      "namespace",
-      "pvc",
-    ].map((n) => `k8s/${n}.yaml`),
-  ];
+  const isTsWorkerCommand = (cmd: unknown) =>
+    /(^|\s)(npm run (collector|photos)|tsx\s+\S*workers\/(collector|photos)(\.ts)?)(\s|$)/.test(
+      Array.isArray(cmd) ? cmd.join(" ") : String(cmd ?? ""),
+    );
 
-  it("compose 서비스 어디에도 세 설정을 켜지 않는다", () => {
+  it("compose backend는 세 설정을 모두 켜고 나머지 서비스는 하나도 켜지 않는다", () => {
     for (const [name, svc] of Object.entries<Any>(compose.services)) {
+      for (const key of SWITCHES) {
+        expect(isOn(envValue(svc.environment, key)), `${name} ${key}`).toBe(name === "backend");
+      }
+    }
+  });
+
+  it("K8s 백엔드 컨테이너는 세 설정을 모두 켜고 나머지 컨테이너·configmap은 켜지 않는다", () => {
+    for (const key of SWITCHES) expect(isOn(envValue(containers(k8sBackend)[0].env, key)), key).toBe(true);
+    for (const d of [k8sWeb, k8sAnalyzer]) {
+      for (const c of containers(d)) {
+        for (const key of SWITCHES) expect(isOn(envValue(c.env, key)), `${c.name} ${key}`).toBe(false);
+      }
+    }
+    for (const doc of [k8sConfigMap, ...k8sMysqlDocs]) {
+      for (const key of SWITCHES) expect(JSON.stringify(doc), key).not.toMatch(new RegExp(`${key}"?[:,]"?(true|1)`));
+    }
+    for (const key of SWITCHES) expect(isOn(k8sConfigMap.data?.[key]), `configmap ${key}`).toBe(false);
+  });
+
+  it("스모크 구성은 세 설정을 켜지 않고 외부 요청 허용 이름도 두지 않는다", () => {
+    for (const [name, svc] of Object.entries<Any>(smoke.services)) {
       for (const key of SWITCHES) {
         expect(isOn(envValue(svc.environment, key)), `${name} ${key}`).toBe(false);
       }
     }
+    expect(read("docker-compose.smoke.yml")).not.toContain("EXTERNAL_REQUESTS_ALLOWED");
+    expect(read("scripts/docker-smoke.sh")).not.toContain("EXTERNAL_REQUESTS_ALLOWED");
   });
 
-  it("K8s 컨테이너와 configmap 어디에도 세 설정을 켜지 않는다", () => {
-    for (const d of [k8sWeb, k8sAnalyzer]) {
-      for (const c of containers(d)) {
-        for (const key of SWITCHES) {
-          expect(isOn(envValue(c.env, key)), `${c.name} ${key}`).toBe(false);
-        }
-      }
-    }
-    const cm = load("k8s/configmap.yaml");
-    for (const key of SWITCHES) expect(isOn(cm.data?.[key]), `configmap ${key}`).toBe(false);
-  });
-
-  it("어느 배포 파일에도 세 설정을 켜는 문자열이 없다(이름 표기와 점 표기, 값 표기 변형 포함)", () => {
-    for (const f of deployFiles) {
+  it("세 설정을 켜는 문자열은 compose backend와 K8s 백엔드 파일에만 있다(이름·점 표기, 값 표기 변형 포함)", () => {
+    for (const f of DEPLOY_FILES.filter((f) => !SWITCH_ON_ALLOWED.includes(f))) {
       const text = read(f);
       for (const key of [...SWITCHES, ...DOTTED]) {
         const escaped = key.replace(/[.]/g, "\\.");
@@ -195,17 +180,12 @@ describe("백엔드 수집·사진 워커 기본 꺼짐 유지(port-collector-to
           new RegExp(`${escaped}["']?\\s*[:=]\\s*["']?(true|1|yes|on)\\b`, "i"),
         );
       }
+      expect(text, f).not.toContain("EXTERNAL_REQUESTS_ALLOWED");
     }
   });
 
-  it("배포 구성에 외부 요청 허용 이름 자체가 없다(켜지 않을 뿐 아니라 꺼 둔 값도 두지 않는다)", () => {
-    for (const f of deployFiles) {
-      expect(read(f), f).not.toContain("EXTERNAL_REQUESTS_ALLOWED");
-    }
-  });
-
-  it("배포 구성에 1회 실행 모드 이름이 없다(컨테이너가 회차 한 번 뒤 종료·재시작하며 실제 소스에 요청하게 된다)", () => {
-    for (const f of deployFiles) {
+  it("배포 파일에 1회 실행 모드 이름이 없다(컨테이너가 회차 한 번 뒤 종료·재시작하며 실제 소스에 요청하게 된다)", () => {
+    for (const f of DEPLOY_FILES) {
       expect(read(f), f).not.toMatch(/AUCTIONBOSS_RUN_ONCE|auctionboss\.run-once/i);
     }
     for (const [name, svc] of Object.entries<Any>(compose.services)) {
@@ -213,14 +193,250 @@ describe("백엔드 수집·사진 워커 기본 꺼짐 유지(port-collector-to
     }
   });
 
-  it("운영 수집·사진은 기존 TS 서비스가 그대로 맡는다", () => {
-    expect(compose.services.collector.command).toBe("npm run collector");
-    expect(compose.services.photos.command).toBe("npm run photos");
-    const names = containers(k8sWeb).map((c: Any) => c.name);
-    expect(names).toEqual(expect.arrayContaining(["web", "collector", "photos"]));
-    const byName = (n: string) => containers(k8sWeb).find((c: Any) => c.name === n);
-    expect(byName("collector").command).toEqual(["npm", "run", "collector"]);
-    expect(byName("photos").command).toEqual(["npm", "run", "photos"]);
+  it("TS collector·photos 서비스·컨테이너가 없고 npm run collector|photos 명령도 배포 파일에 없다", () => {
+    expect(Object.keys(compose.services).sort()).toEqual(["analyzer", "backend", "mysql", "web"]);
+    for (const [name, svc] of Object.entries<Any>(compose.services)) {
+      expect(isTsWorkerCommand(svc.command), name).toBe(false);
+    }
+    expect(Object.keys(smoke.services).sort()).toEqual(["backend", "mysql"]);
+    expect(containers(k8sWeb).map((c: Any) => c.name)).toEqual(["web"]);
+    for (const d of [k8sWeb, k8sAnalyzer, k8sBackend, k8sMysql]) {
+      for (const c of containers(d)) {
+        expect(isTsWorkerCommand([...(c.command ?? []), ...(c.args ?? [])]), c.name).toBe(false);
+      }
+    }
+    for (const f of DEPLOY_FILES) {
+      expect(stripComments(read(f)), f).not.toMatch(/npm run (collector|photos)\b/);
+      expect(stripComments(read(f)), f).not.toMatch(/workers\/(collector|photos)(\.ts)?\b/);
+    }
+  });
+
+  it("수집기가 동시에 둘 이상 켜지는 구성이 없다(compose·K8s 각각 정확히 하나, 그것은 백엔드)", () => {
+    const composeCollectors = Object.entries<Any>(compose.services)
+      .filter(
+        ([, svc]) =>
+          isTsWorkerCommand(svc.command) ||
+          isOn(envValue(svc.environment, "AUCTIONBOSS_COLLECTOR_ENABLED")) ||
+          isOn(envValue(svc.environment, "AUCTIONBOSS_PHOTOS_ENABLED")),
+      )
+      .map(([name]) => name);
+    expect(composeCollectors).toEqual(["backend"]);
+
+    const workloads = [k8sWeb, k8sAnalyzer, k8sBackend, k8sMysql];
+    const k8sCollectors = workloads.flatMap((d) =>
+      containers(d)
+        .filter(
+          (c: Any) =>
+            isTsWorkerCommand(c.command) ||
+            isOn(envValue(c.env, "AUCTIONBOSS_COLLECTOR_ENABLED")) ||
+            isOn(envValue(c.env, "AUCTIONBOSS_PHOTOS_ENABLED")),
+        )
+        .map((c: Any) => `${d.metadata.name}/${c.name}`),
+    );
+    expect(k8sCollectors).toEqual(["auctionboss-backend/backend"]);
+  });
+
+  it("compose backend는 prod 프로필(시드·local 아님)과 사진 볼륨을 쓴다", () => {
+    const b = compose.services.backend;
+    expect(envValue(b.environment, "SPRING_PROFILES_ACTIVE")).toBe("prod");
+    expect(envValue(b.environment, "AUCTIONBOSS_PHOTOS_DIR")).toBe("/app/photos");
+    expect(b.volumes).toContain("photos-data:/app/photos");
+    expect(b.volumes).toContain("./config/collector.json:/app/config/collector.json:ro");
+    expect(Object.keys(compose.volumes)).toEqual(expect.arrayContaining(["photos-data", "mysql-data"]));
+    // 포트는 루프백에만
+    for (const svc of [b, compose.services.mysql]) {
+      for (const p of svc.ports) expect(String(p)).toMatch(/^127\.0\.0\.1:/);
+    }
+  });
+
+  it("K8s 백엔드는 prod 프로필, 사진 PVC, 수집 설정 마운트를 쓴다", () => {
+    const c = containers(k8sBackend)[0];
+    expect(envValue(c.env, "SPRING_PROFILES_ACTIVE")).toBe("prod");
+    const photosDir = envValue(c.env, "AUCTIONBOSS_PHOTOS_DIR")!;
+    expect(c.volumeMounts.find((m: Any) => m.mountPath === photosDir)).toBeTruthy();
+    const photosVol = k8sBackend.spec.template.spec.volumes.find((v: Any) => v.name === "photos");
+    expect(photosVol.persistentVolumeClaim.claimName).toBe("auctionboss-photos-pvc");
+    expect(k8sPvcs.map((p) => p.metadata.name)).toContain("auctionboss-photos-pvc");
+  });
+
+  it("K8s 백엔드 Pod는 fsGroup을 이미지의 비루트 사용자(10001)로 둔다(root 소유 PVC에 사진을 쓸 수 있게)", () => {
+    expect(k8sBackend.spec.template.spec.securityContext?.fsGroup).toBe(10001);
+    expect(read("backend/Dockerfile")).toMatch(/useradd[^\n]*--uid 10001/);
+  });
+
+  it("백엔드 이미지가 사진 디렉터리를 비루트 사용자(10001) 소유로 만든다", () => {
+    const df = read("backend/Dockerfile");
+    expect(df).toMatch(/mkdir -p \/app\/photos\s*&&\s*chown 10001:10001 \/app\/photos/);
+    expect(df).toMatch(/useradd[^\n]*--uid 10001/);
+  });
+});
+
+describe("백엔드 단일 인스턴스(K8s)", () => {
+  it("replicas 1과 Recreate 전략", () => {
+    expect(k8sBackend.spec.replicas).toBe(1);
+    expect(k8sBackend.spec.strategy.type).toBe("Recreate");
+  });
+
+  it("백엔드 서비스는 ClusterIP이고 Ingress가 백엔드를 가리키지 않는다", () => {
+    expect(k8sBackendSvc.spec.type).toBe("ClusterIP");
+    expect(k8sBackendSvc.spec.ports[0].port).toBe(8080);
+    expect(read("k8s/ingress.yaml")).not.toContain("auctionboss-backend");
+  });
+
+  it("백엔드 프로브는 /api/health", () => {
+    const c = containers(k8sBackend)[0];
+    expect(c.readinessProbe.httpGet.path).toBe("/api/health");
+    expect(c.livenessProbe.httpGet.path).toBe("/api/health");
+  });
+
+  it("MySQL은 영속 볼륨을 가진 StatefulSet", () => {
+    expect(k8sMysql.spec.volumeClaimTemplates.length).toBeGreaterThan(0);
+    expect(containers(k8sMysql)[0].image).toMatch(/^mysql:8\.4/);
+    expect(containers(k8sMysql)[0].args).toEqual(
+      expect.arrayContaining(["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]),
+    );
+  });
+
+  it("kustomization이 매니페스트를 빠짐없이 싣는다", () => {
+    const listed: string[] = k8sKustomization.resources;
+    for (const f of K8S_FILES.filter((f) => !f.endsWith("kustomization.yaml"))) {
+      expect(listed, f).toContain(f.replace("k8s/", ""));
+    }
+  });
+
+  it("collector.json 사본(ConfigMap)이 원본과 같다", () => {
+    const cm = load("k8s/configmap-collector.yaml");
+    expect(JSON.parse(cm.data["collector.json"])).toEqual(JSON.parse(read("config/collector.json")));
+  });
+});
+
+describe("웹은 spring 원천(migrate-data-and-cutover D9)", () => {
+  it("compose 웹: spring 원천, 백엔드 서비스 주소, 백엔드 헬스 의존, 볼륨·DB 경로 없음", () => {
+    const web = compose.services.web;
+    expect(envValue(web.environment, "AUCTIONBOSS_DATA_SOURCE")).toBe("spring");
+    const base = envValue(web.environment, "AUCTIONBOSS_SPRING_BASE")!;
+    expect(base).toBe("http://backend:8080");
+    expect(Object.keys(compose.services)).toContain(new URL(base).hostname);
+    expect(web.depends_on.backend.condition).toBe("service_healthy");
+    expect(web.volumes ?? []).toEqual([]);
+    expect(envNames(web.environment)).not.toContain("AUCTIONBOSS_DB");
+  });
+
+  it("K8s 웹: 컨테이너 하나, spring 원천, 백엔드 서비스 주소, 볼륨·DB 경로 없음, 프로브", () => {
+    expect(containers(k8sWeb)).toHaveLength(1);
+    const web = containers(k8sWeb)[0];
+    expect(envValue(web.env, "AUCTIONBOSS_DATA_SOURCE")).toBe("spring");
+    expect(envValue(web.env, "AUCTIONBOSS_SPRING_BASE")).toBe(
+      `http://${k8sBackendSvc.metadata.name}:${k8sBackendSvc.spec.ports[0].port}`,
+    );
+    expect(k8sWeb.spec.template.spec.volumes ?? []).toEqual([]);
+    expect(web.volumeMounts ?? []).toEqual([]);
+    expect(envNames(web.env)).not.toContain("AUCTIONBOSS_DB");
+    expect(web.readinessProbe.httpGet.path).toBe("/api/health");
+    // 백엔드 중단만으로 웹을 재시작하지 않는다: liveness는 /api/health를 보지 않는다.
+    expect(web.livenessProbe.httpGet).toBeUndefined();
+    expect(web.livenessProbe.tcpSocket.port).toBe(3000);
+  });
+
+  it("어느 배포 파일에도 웹·분석 워커용 SQLite 파일 경로(AUCTIONBOSS_DB)가 없다", () => {
+    for (const f of DEPLOYED_FILES) {
+      expect(stripComments(read(f)), f).not.toMatch(/AUCTIONBOSS_DB\b/);
+    }
+    expect(Object.keys(k8sConfigMap.data ?? {})).not.toContain("AUCTIONBOSS_DB");
+  });
+
+  it("SQLite 볼륨·PVC는 선언만 남고 어느 서비스·워크로드도 마운트하지 않는다(롤백 창)", () => {
+    expect(Object.keys(compose.volumes)).toContain("auctionboss-data");
+    for (const [name, svc] of Object.entries<Any>(compose.services)) {
+      for (const v of svc.volumes ?? []) expect(String(v), name).not.toMatch(/^auctionboss-data:/);
+    }
+    expect(k8sPvcs.map((p) => p.metadata.name)).toContain("auctionboss-data-pvc");
+    for (const d of [k8sWeb, k8sAnalyzer, k8sBackend, k8sMysql]) {
+      expect(JSON.stringify(d.spec.template.spec.volumes ?? [])).not.toContain("auctionboss-data-pvc");
+    }
+  });
+});
+
+describe("비밀", () => {
+  const dbVars = ["DB_NAME", "DB_USER", "DB_PASSWORD"];
+
+  it("compose DB 변수는 필수 검사(${VAR:?})로 받는다", () => {
+    const be = compose.services.backend.environment;
+    const my = compose.services.mysql.environment;
+    for (const k of dbVars) expect(be[k], k).toMatch(new RegExp(`^\\$\\{${k}:\\?`));
+    expect(my.MYSQL_ROOT_PASSWORD).toMatch(/^\$\{MYSQL_ROOT_PASSWORD:\?/);
+    expect(my.MYSQL_DATABASE).toMatch(/^\$\{DB_NAME:\?/);
+    expect(my.MYSQL_USER).toMatch(/^\$\{DB_USER:\?/);
+    expect(my.MYSQL_PASSWORD).toMatch(/^\$\{DB_PASSWORD:\?/);
+    // 스모크도 같은 규칙(기본 비밀번호로 대신 접속하지 않는다)
+    for (const k of dbVars) expect(smoke.services.backend.environment[k], k).toMatch(/^\$\{[A-Z_]+:\?/);
+    expect(smoke.services.mysql.environment.MYSQL_ROOT_PASSWORD).toMatch(/^\$\{MYSQL_ROOT_PASSWORD:\?/);
+  });
+
+  it("배포 파일에 비밀번호 리터럴이 없다", () => {
+    for (const f of DEPLOYED_FILES) {
+      for (const line of stripComments(read(f)).split("\n")) {
+        const m = line.match(/(PASSWORD|API_KEY|SECRET)[A-Z_]*["']?\s*[:=]\s*(.+)$/);
+        if (!m) continue;
+        const rhs = m[2].trim().replace(/^["']|["']$/g, "");
+        // 허용: 변수 치환(${...}), 빈 값, 키 이름 참조(secretKeyRef의 key: 줄은 이 패턴이 아니다)
+        expect(rhs === "" || rhs.startsWith("${") || rhs.startsWith("$"), `${f}: ${line.trim()}`).toBe(true);
+      }
+    }
+  });
+
+  it("K8s: secret.yaml에 값이 없고, 비밀 변수는 secretKeyRef로만 받는다", () => {
+    expect(Object.keys(k8sSecret.data ?? {})).toEqual([]);
+    expect(k8sSecret.stringData).toBeUndefined();
+    for (const d of [k8sWeb, k8sAnalyzer, k8sBackend, k8sMysql]) {
+      for (const c of containers(d)) {
+        for (const e of c.env ?? []) {
+          if (/PASSWORD|API_KEY|SECRET|^DB_(NAME|USER)$/.test(e.name)) {
+            expect(e.value, `${c.name} ${e.name}`).toBeUndefined();
+            expect(e.valueFrom.secretKeyRef.name, `${c.name} ${e.name}`).toBe("auctionboss-secret");
+          }
+        }
+      }
+    }
+    const names = envNames(containers(k8sBackend)[0].env);
+    for (const k of dbVars) expect(names).toContain(k);
+  });
+
+  it("secret 예시 주석에 키 이름(ANTHROPIC_API_KEY, DB_PASSWORD, MYSQL_ROOT_PASSWORD)", () => {
+    const text = read("k8s/secret.yaml");
+    for (const k of ["ANTHROPIC_API_KEY", "DB_PASSWORD", "MYSQL_ROOT_PASSWORD"]) expect(text).toContain(k);
+  });
+});
+
+describe("스모크 격리(migrate-data-and-cutover D9)", () => {
+  // 스모크가 운영 MySQL 볼륨을 지우는 사고를 막는다: 별도 파일·프로젝트 이름·볼륨·포트만 쓴다.
+  const script = read("scripts/docker-smoke.sh");
+  const lines = stripComments(script).split("\n");
+
+  it("docker-smoke.sh는 -p auctionboss-smoke와 docker-compose.smoke.yml만 쓴다", () => {
+    expect(script).toContain("-p auctionboss-smoke");
+    expect(script).toContain("-f docker-compose.smoke.yml");
+    const composeLines = lines.filter((l) => /docker[ -]compose/.test(l));
+    expect(composeLines.length).toBeGreaterThan(0);
+    for (const l of composeLines) {
+      expect(l).toContain("-p auctionboss-smoke -f docker-compose.smoke.yml");
+    }
+    // 운영 파일을 가리키지 않는다
+    expect(lines.join("\n")).not.toMatch(/docker-compose\.yml/);
+    // `down -v`는 항상 격리된 DC 배열로
+    for (const l of lines.filter((l) => /down\s+-v/.test(l))) expect(l).toContain('"${DC[@]}"');
+  });
+
+  it("스모크 구성은 독립 프로젝트 이름·볼륨·호스트 포트를 쓴다", () => {
+    expect(smoke.name).toBe("auctionboss-smoke");
+    const prodVolumes = Object.keys(compose.volumes);
+    for (const v of Object.keys(smoke.volumes)) expect(prodVolumes).not.toContain(v);
+    expect(envValue(smoke.services.backend.environment, "SPRING_PROFILES_ACTIVE")).toBe("local,seed");
+    expect(smoke.services.mysql.ports).toBeUndefined();
+    for (const p of smoke.services.backend.ports) {
+      expect(String(p)).toMatch(/^127\.0\.0\.1:/);
+      expect(String(p)).not.toMatch(/:8080:8080$/);
+    }
   });
 });
 

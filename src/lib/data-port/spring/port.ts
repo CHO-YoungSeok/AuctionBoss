@@ -61,6 +61,18 @@ export function createSpringPort(options: SpringPortOptions): DataPort {
   }
 
   return {
+    async health() {
+      const path = "/api/health";
+      let response;
+      try {
+        response = await client.raw("GET", path);
+      } catch (error) {
+        // 원인 문자열(연결 오류가 주소를 담을 수 있다)은 버리고 메서드·경로·상태만 남긴다.
+        if (error instanceof DataSourceError) throw new DataSourceError(error.method, error.path, error.status);
+        throw new DataSourceError("GET", path, null);
+      }
+      if (response.status !== 200) throw new DataSourceError("GET", path, response.status);
+    },
     async listItems(query) {
       // 직렬화가 워커 전용 필드를 받으면 던진다(조용히 버리지 않는다).
       return get("/api/items", itemListResponseSchema, itemQuerySearchParams(query));

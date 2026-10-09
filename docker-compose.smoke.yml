@@ -1,0 +1,55 @@
+# 스모크·개발용 구성(migrate-data-and-cutover D9). 운영 구성(docker-compose.yml)과 독립이다.
+#  - 프로젝트 이름이 달라(auctionboss-smoke) 컨테이너·네트워크·볼륨이 운영 구성과 겹치지 않는다.
+#    scripts/docker-smoke.sh의 `down -v`는 이 프로젝트의 볼륨만 지운다.
+#  - local,seed 프로필: 커밋된 시드(809건)를 빈 MySQL에 적재한다. 수집·사진 주기 실행과 외부 요청 허용은
+#    켜지 않는다(실제 사이트로 요청이 나가지 않는다).
+#  - 호스트 포트는 운영 구성(8080)과 겹치지 않게 18080을 쓰고, MySQL은 호스트에 열지 않는다.
+# 사용: scripts/docker-smoke.sh (직접 쓸 때도 반드시 `-p auctionboss-smoke -f docker-compose.smoke.yml`)
+name: auctionboss-smoke
+
+services:
+  mysql:
+    image: mysql:8.4
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD가 필요합니다(.env)}
+      MYSQL_DATABASE: ${DB_NAME:?DB_NAME이 필요합니다(.env)}
+      MYSQL_USER: ${DB_USER:?DB_USER가 필요합니다(.env)}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD가 필요합니다(.env)}
+    volumes:
+      - smoke-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  backend:
+    build: ./backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${SMOKE_BACKEND_PORT:-18080}:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: local,seed
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: ${DB_NAME:?DB_NAME이 필요합니다(.env)}
+      DB_USER: ${DB_USER:?DB_USER가 필요합니다(.env)}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD가 필요합니다(.env)}
+      AUCTIONBOSS_CONFIG_PATH: /app/config/collector.json
+    volumes:
+      - ./config/collector.json:/app/config/collector.json:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+
+volumes:
+  smoke-mysql-data:
