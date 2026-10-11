@@ -202,6 +202,13 @@ MySQL 테이블 8개로 구성됩니다. 스키마는 Flyway 마이그레이션(
 3. 면적당 가격과 차수별 저감률을 코드로 먼저 계산해 프롬프트에 넣습니다.
 4. 물건을 하나씩 순서대로 분석하고 결과를 API로 저장합니다. 한 건이 실패해도 다음 물건으로 넘어갑니다.
 
+**모델과 실행 모드**
+
+- `ANTHROPIC_API_KEY`가 있으면 Claude API를, 없으면 로컬에 로그인된 Claude Code CLI를 사용합니다(`AUCTIONBOSS_API_BASE`를 백엔드 주소로 지정하고 `npm run analyzer`).
+- API 모드 기본 모델은 `claude-opus-5-5`입니다. 비용을 낮추려면 `AUCTIONBOSS_ANALYZE_MODEL=claude-sonnet-5-5`로 바꿉니다(단가 절반).
+- 컨테이너로 띄우는 analyzer에는 Claude Code CLI가 없으므로 `ANTHROPIC_API_KEY`가 반드시 필요합니다.
+- API 모드는 서버 측 대체가 켜져 있어, 안전 분류기가 거절하면 같은 호출 안에서 다른 모델이 이어받습니다. 실제로 답한 모델이 `analyses.model`에 저장됩니다. 출력이 잘렸거나 끝내 거절되면 분석을 저장하지 않고 실패로 기록합니다.
+
 ## 7. 배포
 
 | 방식 | 파일 | 내용 |
