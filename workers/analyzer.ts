@@ -36,6 +36,8 @@ import {
   type FinishWorkerRunInput,
 } from "./lib/api";
 import { DEFAULT_CLAUDE_TIMEOUT_MS, runClaude as defaultRunClaude, type RunClaude } from "./lib/claude";
+import { classifyFailure } from "./lib/classify-failure";
+import { FailureCooldown } from "./lib/failure-cooldown";
 import { PROMPT_VERSION, loadPromptTemplate, renderItemPrompt } from "./lib/prompt";
 
 export interface Logger {
@@ -57,7 +59,15 @@ export interface AnalysisRunSummary {
   failed: number;
 }
 
+/** 백엔드 `ItemSearchCondition.MAX_PAGE_SIZE`(GET /api/items의 pageSize 상한)와 같은 값. 쿨다운 여유분을 더해도 이를 넘기지 않는다. */
+const BACKEND_MAX_PAGE_SIZE = 200;
+
 export interface AnalysisRunOptions {
+  /**
+   * 물건별 실패 쿨다운. 회차 사이에 유지돼야 하므로 상주 실행(`startAnalyzer`)이 하나를
+   * 만들어 계속 넘긴다. 생략하면 회차마다 새로 만들어 쿨다운이 없는 것과 같다(하위 호환).
+   */
+  cooldown?: FailureCooldown;
   maxItemsPerRun: number;
   /**
    * 회차당 최대 재분석 건수(design.md D5). 기본값 0 — 재분석 조회 자체를 생략한다.
@@ -130,8 +140,9 @@ async function safeFinishWorkerRun(
  *
  * 목록 조회 실패는 회차 전체의 실패라 그대로 throw한다(호출자가 로그를 남긴다) — 그
  * 전에 이 회차를 `failed`로 기록한다(design.md D3). 물건 단위 실패는 여기서 잡아 세기만
- * 하고 절대 밖으로 던지지 않으며, 회차 자체는 `success`로 기록된다(개별 실패는
- * `detail.failed`에 담긴다) — 분석할 대상이 전혀 없는 회차도 마찬가지로 `success`/0건으로
+ * 하고 밖으로 던지지 않는다. 물건 탓(item) 실패는 쿨다운에 넣고 계속하며 회차는 `success`
+ * (개별 실패는 `detail.failed`)다. 환경 탓(systemic: 백엔드 다운·인증·한도 등) 실패는 회차를
+ * 중단하고 `failed`로 기록한다(쿨다운 없음; 같은 물건이 3회 연속 중단시키면 쿨다운) — 분석할 대상이 전혀 없는 회차도 마찬가지로 `success`/0건으로
  * 기록된다(스펙 "분석할 물건이 없는 회차": 기록 자체가 없으면 죽은 워커와 구별할 수 없다).
  */
 export async function runAnalysisOnce(options: AnalysisRunOptions): Promise<AnalysisRunSummary> {
@@ -145,6 +156,7 @@ export async function runAnalysisOnce(options: AnalysisRunOptions): Promise<Anal
     runClaude = defaultRunClaude,
     fetchFn = ((input, init) => fetch(input, init)) as FetchFn,
     logger = consoleLogger,
+    cooldown = new FailureCooldown(),
   } = options;
 
   // 회차마다 읽는다 — 프롬프트를 고치고 다음 주기를 기다리면 반영되게 하기 위함.
@@ -155,11 +167,29 @@ export async function runAnalysisOnce(options: AnalysisRunOptions): Promise<Anal
   try {
     // 1단계: 신규 분석. 항상 먼저 조회하고, 항상 전량 처리한다 — 재분석이 이 한도를
     // 잠식하지 않는다(design.md D4의 "신규 우선").
-    const { items: newItems, total: newTotal } = await fetchUnanalyzedItems({
+    // 쿨다운 중인 물건이 한도를 차지하지 않도록 그 수만큼 더 조회한 뒤 걸러서 자른다.
+    // (서버 순서가 고정이라 앞쪽 실패 물건이 뒤 물건을 굶기는 것을 막는다.)
+    let skippedByCooldown = 0;
+    const withCooldown = (pageSize: number): number =>
+      Math.min(pageSize + cooldown.coolingCount(), BACKEND_MAX_PAGE_SIZE);
+    const pickAvailable = (items: AuctionItem[], limit: number): AuctionItem[] => {
+      const picked: AuctionItem[] = [];
+      for (const item of items) {
+        if (cooldown.isCoolingDown(item.id)) {
+          skippedByCooldown += 1;
+          continue;
+        }
+        if (picked.length < limit) picked.push(item);
+      }
+      return picked;
+    };
+
+    const { items: fetchedNew, total: newTotal } = await fetchUnanalyzedItems({
       baseUrl,
-      pageSize: maxItemsPerRun,
+      pageSize: withCooldown(maxItemsPerRun),
       fetchFn,
     });
+    const newItems = pickAvailable(fetchedNew, maxItemsPerRun);
 
     // 2단계: 재분석. 한도가 설정된 경우에만 조회한다(하위 호환 기본값 0 → 조회 자체를
     // 생략). 1단계에서 이미 고른 물건은 제외한다 — 코드 리뷰 finding 2 수정 이후로는
@@ -171,20 +201,32 @@ export async function runAnalysisOnce(options: AnalysisRunOptions): Promise<Anal
       const alreadyPicked = new Set(newItems.map((item) => item.id));
       const { items: candidates } = await fetchReanalysisCandidates({
         baseUrl,
-        pageSize: maxReanalysisPerRun,
+        pageSize: withCooldown(maxReanalysisPerRun),
         promptVersion,
         fetchFn,
       });
-      reanalysisItems = candidates.filter((item) => !alreadyPicked.has(item.id));
+      reanalysisItems = pickAvailable(
+        candidates.filter((item) => !alreadyPicked.has(item.id)),
+        maxReanalysisPerRun,
+      );
+    }
+
+    if (skippedByCooldown > 0) {
+      logger.info(`[analyzer] 실패 쿨다운 중이라 ${skippedByCooldown}건 건너뜀`);
     }
 
     const targets = [...newItems, ...reanalysisItems];
 
     if (targets.length === 0) {
+      const allCooling = skippedByCooldown > 0;
       // 두 메시지를 구분한다: 재분석 조회 자체를 안 한 경우(하위 호환 기본 동작)와
       // 재분석까지 조회했는데도 없는 경우는 "무엇을 확인했는지"가 다르다.
       logger.info(
-        maxReanalysisPerRun > 0 ? "[analyzer] 미분석 물건도 재분석 대상도 없음" : "[analyzer] 미분석 물건 없음",
+        allCooling
+          ? `[analyzer] 대상 ${skippedByCooldown}건이 전부 쿨다운 중`
+          : maxReanalysisPerRun > 0
+            ? "[analyzer] 미분석 물건도 재분석 대상도 없음"
+            : "[analyzer] 미분석 물건 없음",
       );
       const emptySummary: AnalysisRunSummary = { attempted: 0, succeeded: 0, failed: 0 };
       await safeFinishWorkerRun(baseUrl, fetchFn, logger, runId, {
@@ -199,9 +241,12 @@ export async function runAnalysisOnce(options: AnalysisRunOptions): Promise<Anal
         `분석 시작 (prompt=${promptVersion}${model ? `, model=${model}` : ""})`,
     );
 
-    const summary: AnalysisRunSummary = { attempted: targets.length, succeeded: 0, failed: 0 };
+    const summary: AnalysisRunSummary = { attempted: 0, succeeded: 0, failed: 0 };
+
+    let abort: { error: unknown; item: AuctionItem } | null = null;
 
     for (const item of targets) {
+      summary.attempted += 1;
       try {
         const prompt = renderItemPrompt(template, item);
         const result = await runClaude({ prompt, model, timeoutMs });
@@ -217,16 +262,53 @@ export async function runAnalysisOnce(options: AnalysisRunOptions): Promise<Anal
           },
         });
         summary.succeeded += 1;
+        cooldown.recordSuccess(item.id);
         logger.info(`[analyzer] 분석 저장 완료 ${describeItem(item)} (${result.text.length}자)`);
       } catch (error) {
         summary.failed += 1;
-        logger.error(`[analyzer] 분석 실패 ${describeItem(item)} — ${describeError(error)}`);
+        if (classifyFailure(error) === "systemic") {
+          // 환경 문제(백엔드 다운, 인증·한도, CLI 실행 불가 등) — 물건 탓이 아니므로 쿨다운에
+          // 넣지 않고, 남은 물건도 같은 이유로 실패할 뿐이라 유료 호출을 멈추고 회차를 끝낸다.
+          logger.error(
+            `[analyzer] 시스템 오류로 회차 중단 ${describeItem(item)} — ${describeError(error)} ` +
+              `(남은 ${targets.length - summary.attempted}건 미시도, 쿨다운 미기록)`,
+          );
+          if (cooldown.recordSystemicAbort(item.id)) {
+            logger.warn(
+              `[analyzer] ${describeItem(item)}이(가) 시스템 오류로 연속 회차를 중단시켜 쿨다운에 넣습니다 — 오분류 가능성 확인 필요`,
+            );
+          }
+          abort = { error, item };
+          break;
+        }
+        const entry = cooldown.recordFailure(item.id);
+        logger.error(
+          `[analyzer] 분석 실패 ${describeItem(item)} — ${describeError(error)} ` +
+            `(연속 ${entry.consecutiveFailures}회, ${new Date(entry.nextRetryAt).toISOString()} 이후 재시도)`,
+        );
       }
     }
 
     logger.info(
       `[analyzer] 회차 종료 — 시도 ${summary.attempted}건, 성공 ${summary.succeeded}건, 실패 ${summary.failed}건`,
     );
+
+    if (abort) {
+      const cause = abort.error;
+      await safeFinishWorkerRun(baseUrl, fetchFn, logger, runId, {
+        outcome: "failed",
+        errorKind: cause instanceof Error ? cause.name : String(cause),
+        errorMessage: describeError(cause),
+        detail: {
+          newCount: newItems.length,
+          reanalysisCount: reanalysisItems.length,
+          succeeded: summary.succeeded,
+          failed: summary.failed,
+        },
+      });
+      return summary;
+    }
+    cooldown.clearAbortStreak();
 
     await safeFinishWorkerRun(baseUrl, fetchFn, logger, runId, {
       outcome: "success",
@@ -303,6 +385,8 @@ export function startAnalyzer(
 ): AnalyzerHandle {
   const logger = deps?.logger ?? consoleLogger;
   let running = false;
+  // 프로세스 수명 동안 유지되는 실패 쿨다운(재시작하면 초기화된다).
+  const cooldown = new FailureCooldown();
 
   const tick = async (): Promise<void> => {
     if (running) {
@@ -320,6 +404,7 @@ export function startAnalyzer(
         runClaude: deps?.runClaude,
         fetchFn: deps?.fetchFn,
         logger,
+        cooldown,
       });
     } catch (error) {
       // 회차 단위 실패(서버 미기동, 응답 형식 변경 등)는 워커를 죽이지 않는다.

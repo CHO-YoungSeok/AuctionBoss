@@ -45,8 +45,18 @@ export type RunClaude = (options: RunClaudeOptions) => Promise<ClaudeResult>;
 
 export class ClaudeInvocationError extends Error {
   override readonly name = "ClaudeInvocationError";
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
+  /**
+   * CLI/API가 직접 낸 진단 문구(stderr, is_error 봉투의 result)만 담는다. 실패 분류가
+   * 문구를 볼 때 이 필드만 보게 해, 명령줄(execFile의 message)이나 모델 출력 같은
+   * 무관한 텍스트가 환경 오류로 오인되지 않게 한다.
+   */
+  readonly diagnostic?: string;
+  /** CLI 봉투의 api_error_status 같은 구조화된 HTTP 상태. 있으면 문구보다 우선해 분류한다. */
+  readonly status?: number;
+  constructor(message: string, options?: { cause?: unknown; diagnostic?: string; status?: number }) {
+    super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
+    this.diagnostic = options?.diagnostic;
+    this.status = options?.status;
   }
 }
 
@@ -61,6 +71,8 @@ export const claudeEnvelopeSchema = z.object({
   subtype: z.string().optional(),
   is_error: z.boolean(),
   result: z.string().optional(),
+  /** is_error 봉투에서 API가 돌려준 HTTP 상태(401, 429, 529 등). */
+  api_error_status: z.number().nullable().optional(),
   /** 최신 CLI가 top-level model을 주면 그것을 우선 쓴다. */
   model: z.string().optional(),
   modelUsage: z
@@ -132,6 +144,7 @@ export function parseClaudeEnvelope(stdout: string): ClaudeResult {
       `claude CLI가 오류를 보고했습니다 (subtype=${envelope.subtype ?? "unknown"}): ${
         truncate(envelope.result ?? "(내용 없음)")
       }`,
+      { diagnostic: envelope.result ?? "", status: envelope.api_error_status ?? undefined },
     );
   }
 
@@ -167,6 +180,18 @@ export function buildClaudeArgs(model?: string | null): string[] {
   ];
   if (model) args.push("--model", model);
   return args;
+}
+
+/** 비정상 종료 때 stdout이 is_error 봉투면 돌려준다. 아니면 null(모델 출력은 진단으로 쓰지 않는다). */
+function parseErrorEnvelope(stdout: string | undefined): ClaudeEnvelope | null {
+  const trimmed = stdout?.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = claudeEnvelopeSchema.safeParse(JSON.parse(trimmed));
+    return parsed.success && parsed.data.is_error ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }
 
 function truncate(value: string, max = 400): string {
@@ -215,10 +240,27 @@ export const runClaudeHeadless: RunClaude = async ({
             return;
           }
           const code = (error as NodeJS.ErrnoException & { code?: number | string }).code;
+          // CLI는 API 오류 때 종료 코드 1, 빈 stderr로 끝내고 JSON 봉투를 stdout에 남긴다.
+          const envelope = parseErrorEnvelope(out);
+          if (envelope) {
+            reject(
+              new ClaudeInvocationError(
+                `claude CLI가 오류를 보고했습니다 (code=${String(code)}, status=${envelope.api_error_status ?? "none"}): ${
+                  truncate(envelope.result ?? "(내용 없음)")
+                }`,
+                {
+                  cause: error,
+                  diagnostic: envelope.result ?? "",
+                  status: envelope.api_error_status ?? undefined,
+                },
+              ),
+            );
+            return;
+          }
           reject(
             new ClaudeInvocationError(
               `claude CLI 실행 실패 (code=${String(code)}): ${truncate(err?.trim() || error.message)}`,
-              { cause: error },
+              { cause: error, diagnostic: err?.trim() ?? "" },
             ),
           );
         },
