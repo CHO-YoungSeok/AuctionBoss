@@ -46,6 +46,9 @@ public class CollectorRun {
 
 	public static final String LOCK_NAME = "auctionboss.collector";
 
+	/** 차단이 아닌 실패가 같은 법원에서 이만큼 연속되면 로테이션을 다음 법원으로 넘긴다. */
+	static final int MAX_CONSECUTIVE_FAILURES = 3;
+
 	/** 회차 결과. {@code outcome}은 success·failed·blocked 중 하나다. */
 	public record Result(RunOutcome outcome, String errorKind, String errorMessage, CollectorRunDetail detail) {
 	}
@@ -120,11 +123,19 @@ public class CollectorRun {
 					if (e instanceof SourceException se) {
 						pagesRequested += se.requestsMade();
 					}
-					// 이 법원은 끝까지 수집되지 못했다: 다음 회차는 다른 법원으로 건너뛰지 않고 이 법원부터 다시 시도한다(차단 시 위치 유지).
-					nextStart = court.courtCode();
+					// 이 법원은 끝까지 수집되지 못했다. 차단이면 위치 유지(IP 단위 차단, 법원을 건너뛰면 그 법원만 늦어진다).
+					// 그 밖의 실패는 MAX_CONSECUTIVE_FAILURES 미만일 때만 위치를 유지하고, 도달하면 다음 법원으로 넘겨
+					// 결정적으로 실패하는 법원 하나가 로테이션을 영구히 붙잡지 못하게 한다.
+					nextStart = e instanceof SourceBlockedException ? court.courtCode()
+							: nextStartAfterFailure(court, scope.courts());
 					throw e;
 				}
 			}
+			// 대상 법원을 모두 가져왔으면 이후 저장 결과와 무관하게 연속 실패 횟수를 초기화한다(저장 실패로 위치가 전진해도 묵은 횟수가 남지 않게).
+			safe("연속 실패 횟수 초기화 실패 - 다음 실패 때 횟수가 이어질 수 있습니다", () -> {
+				rotation.clearFailures();
+				return null;
+			}, null);
 			log.info("[collector] 수집된 물건 {}건", allItems.size());
 
 			UpsertResult saved = upsert.upsertItems(allItems, clock.now());
@@ -160,6 +171,30 @@ public class CollectorRun {
 			}
 			return new Result(outcome, errorKind, e.getMessage(), detail);
 		}
+	}
+
+	/** 차단이 아닌 실패 후의 다음 시작 위치. 연속 실패가 한도 미만이면 그 법원, 한도에 닿으면 목록의 다음 법원(횟수 초기화). */
+	private String nextStartAfterFailure(CourtRef failed, List<CourtRef> courts) {
+		int count = safe("연속 실패 횟수 기록 실패 - 이 법원부터 다시 시도합니다", () -> rotation.recordFailure(failed.courtCode()), 1);
+		if (count < MAX_CONSECUTIVE_FAILURES) {
+			return failed.courtCode();
+		}
+		safe("연속 실패 횟수 초기화 실패", () -> {
+			rotation.clearFailures();
+			return null;
+		}, null);
+		int at = courts.indexOf(failed);
+		// 같은 courtCode가 인접해 중복돼 있으면 같은 코드를 다시 고르지 않도록 다른 코드가 나올 때까지 전진한다.
+		String next = failed.courtCode();
+		for (int i = 1; i <= courts.size(); i++) {
+			String code = courts.get((at + i) % courts.size()).courtCode();
+			if (!code.equals(failed.courtCode())) {
+				next = code;
+				break;
+			}
+		}
+		log.warn("[collector] {}이(가) 연속 {}회 실패 - 로테이션을 다음 법원({})으로 넘깁니다", failed.name(), count, next);
+		return next;
 	}
 
 	/** {@code runId}가 없으면(시작 기록이 실패했으면) 종료 기록을 시도하지 않는다: 갱신할 행이 없고, 새 행은 시작 시각이 달라진다. */

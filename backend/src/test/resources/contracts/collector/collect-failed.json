@@ -79,6 +79,11 @@
         ],
         "collectorState": [
           {
+            "key": "collector.rotation.failure",
+            "value": "B000210|1",
+            "updated_at": "2026-10-08T00:00:00.000Z"
+          },
+          {
             "key": "collector.rotation.nextCourtCode",
             "value": "B000210",
             "updated_at": "2026-10-08T00:00:00.000Z"
@@ -160,6 +165,11 @@
           }
         ],
         "collectorState": [
+          {
+            "key": "collector.rotation.failure",
+            "value": "B000210|2",
+            "updated_at": "2026-10-08T00:10:00.000Z"
+          },
           {
             "key": "collector.rotation.nextCourtCode",
             "value": "B000210",

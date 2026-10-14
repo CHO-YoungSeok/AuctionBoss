@@ -293,7 +293,7 @@ class CollectorRunTest extends AbstractMySqlTest {
 	}
 
 	@Test
-	void 두_번째_법원에서_실패하면_첫_법원_물건은_저장하지_않고_위치는_실패한_법원이다() {
+	void 두_번째_법원에서_실패하면_첫_법원_물건은_저장하지_않고_한도_전까지_위치는_실패한_법원이다() {
 		source.onSearch(s -> {
 			if (s.courts().get(0).courtCode().equals("B000211")) {
 				throw new SourceRequestException("연결 끊김", "http://x/");
@@ -309,6 +309,150 @@ class CollectorRunTest extends AbstractMySqlTest {
 		assertThat(result.detail().targetCourts()).containsExactly("서울중앙지방법원", "서울동부지방법원");
 		assertThat(result.detail().pagesRequested()).isEqualTo(2);
 		assertThat(result.detail().itemsFetched()).isEqualTo(1);
+	}
+
+	private void failCourt(String code, java.util.function.Supplier<SourceException> error) {
+		source.onSearch(s -> {
+			if (s.courts().get(0).courtCode().equals(code)) {
+				throw error.get();
+			}
+			return result(1, item("1"));
+		});
+	}
+
+	@Test
+	void 차단이_아닌_실패가_연속_세_번이면_다음_법원으로_넘기고_횟수를_초기화한다() {
+		rotation.set("B000211");
+		failCourt("B000211", () -> new ResponseSchemaException("형식 변경", List.of()));
+
+		CollectorRun.Result first = run.run(scope(1, 999, A, B, C));
+		assertThat(first.outcome()).isEqualTo(RunOutcome.FAILED);
+		assertThat(first.errorKind()).isEqualTo("ResponseSchemaError");
+		assertThat(rotation.get()).isEqualTo("B000211");
+		run.run(scope(1, 999, A, B, C));
+		assertThat(rotation.get()).isEqualTo("B000211");
+		assertThat(rotation.failureCount("B000211")).isEqualTo(2);
+
+		CollectorRun.Result third = run.run(scope(1, 999, A, B, C));
+		assertThat(third.outcome()).isEqualTo(RunOutcome.FAILED);
+		assertThat(rotation.get()).isEqualTo("B000215");
+		assertThat(rotation.failureCount("B000211")).isZero();
+
+		run.run(scope(1, 999, A, B, C));
+		assertThat(calledCodes()).containsExactly("B000211", "B000211", "B000211", "B000215");
+		assertThat(rotation.get()).isEqualTo("B000210");
+	}
+
+	@Test
+	void 차단은_실패_횟수에_세지도_초기화하지도_않는다() {
+		rotation.set("B000211");
+		source.onSearch(s -> {
+			throw new SourceRequestException("연결 끊김", "http://x/");
+		});
+		run.run(scope(1, 999, A, B, C));
+		assertThat(rotation.failureCount("B000211")).isEqualTo(1);
+
+		source.reset();
+		source.onSearch(s -> {
+			throw new RobotDetectedException("차단", null);
+		});
+		assertThat(run.run(scope(1, 999, A, B, C)).outcome()).isEqualTo(RunOutcome.BLOCKED);
+		assertThat(rotation.failureCount("B000211")).isEqualTo(1);
+
+		source.reset();
+		source.onSearch(s -> {
+			throw new SourceRequestException("연결 끊김", "http://x/");
+		});
+		clock.set(T0.plusSeconds(3600));
+		run.run(scope(1, 999, A, B, C));
+		assertThat(rotation.failureCount("B000211")).isEqualTo(2);
+		assertThat(rotation.get()).isEqualTo("B000211");
+
+		run.run(scope(1, 999, A, B, C));
+		assertThat(rotation.get()).isEqualTo("B000215");
+		assertThat(rotation.failureCount("B000211")).isZero();
+	}
+
+	@Test
+	void 같은_법원_코드가_인접해_중복돼도_한도_뒤에는_다른_코드로_넘어간다() {
+		CourtRef dup = new CourtRef("서울동부지방법원(중복)", "B000211");
+		rotation.set("B000211");
+		failCourt("B000211", () -> new SourceRequestException("연결 끊김", "http://x/"));
+		for (int i = 0; i < 3; i++) {
+			run.run(scope(1, 999, A, B, dup, C));
+		}
+		assertThat(rotation.get()).isEqualTo("B000215");
+	}
+
+	@Test
+	void 한도_뒤에는_마지막_법원에서도_목록_처음으로_돌아간다() {
+		rotation.set("B000215");
+		failCourt("B000215", () -> new SourceRequestException("HTTP 500", "http://x/"));
+		for (int i = 0; i < 3; i++) {
+			run.run(scope(1, 999, A, B, C));
+		}
+		assertThat(rotation.get()).isEqualTo("B000210");
+	}
+
+	@Test
+	void 성공하면_연속_실패_횟수가_초기화된다() {
+		rotation.set("B000211");
+		failCourt("B000211", () -> new SourceRequestException("연결 끊김", "http://x/"));
+		run.run(scope(1, 999, A, B, C));
+		run.run(scope(1, 999, A, B, C));
+		assertThat(rotation.failureCount("B000211")).isEqualTo(2);
+
+		source.reset();
+		source.onSearch(s -> result(1, item("1")));
+		CollectorRun.Result ok = run.run(scope(1, 999, A, B, C));
+		assertThat(ok.outcome()).isEqualTo(RunOutcome.SUCCESS);
+		assertThat(rotation.failureCount("B000211")).isZero();
+		assertThat(rotation.get()).isEqualTo("B000215");
+	}
+
+	@Test
+	void 차단은_몇_번을_반복해도_위치를_유지하고_실패_횟수를_세지_않는다() {
+		rotation.set("B000211");
+		failCourt("B000211", () -> new RobotDetectedException("차단", null));
+		for (int i = 0; i < 4; i++) {
+			CollectorRun.Result r = run.run(scope(1, 999, A, B, C));
+			assertThat(r.outcome()).isEqualTo(RunOutcome.BLOCKED);
+		}
+		assertThat(rotation.get()).isEqualTo("B000211");
+		assertThat(rotation.failureCount("B000211")).isZero();
+	}
+
+	@Test
+	void 가져오기는_모두_성공했지만_저장이_실패하면_연속_실패_횟수는_초기화되고_위치는_전진한다() {
+		rotation.set("B000211");
+		failCourt("B000211", () -> new SourceRequestException("연결 끊김", "http://x/"));
+		run.run(scope(1, 999, A, B, C));
+		run.run(scope(1, 999, A, B, C));
+		assertThat(rotation.failureCount("B000211")).isEqualTo(2);
+
+		source.reset();
+		source.onSearch(s -> result(1, item("1")));
+		doThrow(new IllegalStateException("이력 INSERT 실패")).when(upsert).upsertItems(any(), any());
+		CollectorRun.Result r = run.run(scope(1, 999, A, B, C));
+
+		assertThat(r.outcome()).isEqualTo(RunOutcome.FAILED);
+		assertThat(rotation.failureCount("B000211")).isZero();
+		assertThat(rotation.get()).isEqualTo("B000215");
+	}
+
+	@Test
+	void 첫_법원이_아닌_법원이_세_번째_실패하면_실패한_법원_다음으로_넘긴다() {
+		rotation.set("B000210");
+		rotation.recordFailure("B000211");
+		rotation.recordFailure("B000211");
+		failCourt("B000211", () -> new SourceRequestException("연결 끊김", "http://x/"));
+
+		CollectorRun.Result r = run.run(scope(2, 999, A, B, C));
+
+		assertThat(r.outcome()).isEqualTo(RunOutcome.FAILED);
+		assertThat(calledCodes()).containsExactly("B000210", "B000211");
+		assertThat(rotation.get()).isEqualTo("B000215");
+		assertThat(rotation.failureCount("B000211")).isZero();
 	}
 
 	@Test
