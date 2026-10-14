@@ -1,5 +1,5 @@
 /**
- * 유찰횟수(`failedBidCount`)와 소스가 준 1차 저감률(`minBidPriceRateRound1`)의 모순을
+ * 유찰횟수(`failedBidCount`)와 소스가 준 1차 최저가율(`minBidPriceRateRound1`)의 모순을
  * 판정하는 순수 헬퍼 (ux-overhaul-phase1 design.md D3, tasks.md 3.1).
  *
  * 실데이터 389건 중 79건(20%)에서 두 값이 서로 맞지 않는다(예: `failedBidCount=8`인데
@@ -7,9 +7,9 @@
  * 맞는지는 우리가 모른다 — design.md D3: "고치지 않고 드러낸다."
  *
  * 판정 근거: 국내 법원경매는 통상 유찰 1회당 감정가의 80%로 재산정한다(20% 저감,
- * discount.ts의 저감률 단계 재조정이 실측 389건으로 이 규칙을 확인했다 — 1.0/0.8/0.64/
- * 0.51/0.41이 정확히 0.8ⁿ이다). 이 규칙대로라면 `failedBidCount`회 유찰한 물건의 저감률은
- * 이론상 `100 × 0.8^failedBidCount`(%)여야 한다. 실제 저감률이 이 값과 큰 차이가 나면
+ * discount.ts의 최저가율 단계 재조정이 실측 389건으로 이 규칙을 확인했다 — 1.0/0.8/0.64/
+ * 0.51/0.41이 정확히 0.8ⁿ이다). 이 규칙대로라면 `failedBidCount`회 유찰한 물건의 최저가율은
+ * 이론상 `100 × 0.8^failedBidCount`(%)여야 한다. 실제 최저가율이 이 값과 큰 차이가 나면
  * 두 필드 중 하나(또는 둘 다)가 신뢰할 수 없다는 뜻이다.
  */
 import type { AuctionItem } from "@/lib/domain";
@@ -36,9 +36,9 @@ export interface RateMismatchResult {
   /** 두 값이 임계값을 넘겨 어긋나는지. */
   mismatched: boolean;
   failedBidCount: number;
-  /** 소스가 준 실제 1차 저감률(%). */
+  /** 소스가 준 실제 1차 최저가율(%). */
   actualRatePercent: number;
-  /** `failedBidCount`회 유찰 규칙(0.8ⁿ)으로 예측한 저감률(%). */
+  /** `failedBidCount`회 유찰 규칙(0.8ⁿ)으로 예측한 최저가율(%). */
   expectedRatePercent: number;
   /** 두 값의 차이(퍼센트포인트, 항상 0 이상). */
   diffPercentPoints: number;
@@ -82,5 +82,5 @@ export function detectFailedBidRateMismatch({
 /** 배지 옆에 붙일 짧은 설명. design.md D3: 어느 쪽이 맞는지 우리가 판단하지 않고,
  * 두 값과 그 차이를 그대로 보여준다. */
 export function formatMismatchDescription(result: RateMismatchResult): string {
-  return `유찰 ${result.failedBidCount}회면 저감률이 약 ${result.expectedRatePercent.toFixed(1)}%일 것으로 예상되지만, 실제 저감률은 ${result.actualRatePercent.toFixed(1)}%입니다 — 두 값이 서로 모순되어 어느 쪽이 맞는지 알 수 없습니다.`;
+  return `소스가 표기한 1차 최저가율은 ${result.actualRatePercent.toFixed(1)}%이지만, 유찰 ${result.failedBidCount}회면 최저가율이 약 ${result.expectedRatePercent.toFixed(1)}%일 것으로 예상됩니다 — 두 값이 서로 모순되어 어느 쪽이 맞는지 알 수 없습니다.`;
 }

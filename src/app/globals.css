@@ -425,7 +425,7 @@ tbody tr:hover {
   color: #1a4fd6;
 }
 
-/* 목록의 저감률 단계 표시(improve-item-discovery-ux design.md D1). 텍스트 라벨
+/* 목록의 최저가율 단계 표시(improve-item-discovery-ux design.md D1). 텍스트 라벨
    (discount-stage-label)이 단계를 구별하는 주된 수단이고, 아래 색은 훑어보기를 돕는
    보조 수단일 뿐이다(spec: "색에만 의존해서는 안 된다") — 라벨을 지워도 색만으로
    4단계가 구별되게 만들지 않는다. */
@@ -483,7 +483,7 @@ tbody tr:hover {
   background: #fffaf2;
 }
 
-/* 유찰횟수-저감률 불일치 배지(목록·상세 공용, design.md D3, task 3.3). 어느 쪽이
+/* 유찰횟수-최저가율 불일치 배지(목록·상세 공용, design.md D3, task 3.3). 어느 쪽이
    맞는지 판단하지 않고 "두 값이 모순된다"는 사실만 알린다. */
 .badge-mismatch {
   display: inline-block;

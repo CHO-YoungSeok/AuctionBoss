@@ -209,7 +209,7 @@ export default async function ItemListPage({
                   {/* 판단 지표(design.md D1) — 분석을 기다리지 않고도 1차 선별이 가능하도록
                       감정가 대비 최저가 비율과 면적당 가격을 추가한다. 목록 쿼리의
                       WHERE/ORDER BY는 건드리지 않는다 — 표시만 추가한다. */}
-                  <th className="num">저감률</th>
+                  <th className="num" title="감정가 대비 최저가 (최저매각가격 ÷ 감정가)">최저가율</th>
                   {/* ux-overhaul-phase1 design.md Risks: "새 열은 만들지 않는다" — 면적
                       병기(spec: "면적 평 병기")가 새로 필요해졌지만 새 <th>를 추가하지
                       않고, 기존 "면적당 가격" 열 안에 면적(㎡·평)과 면적당 가격을 함께
@@ -283,7 +283,7 @@ export default async function ItemListPage({
                       </td>
                       <td className="num">
                         {formatCount(item.failedBidCount)}
-                        {/* 유찰-저감률 불일치(design.md D3) — 어느 쪽이 맞는지 판단하지
+                        {/* 유찰-최저가율 불일치(design.md D3) — 어느 쪽이 맞는지 판단하지
                             않고 모순 사실만 알린다. */}
                         {mismatch?.mismatched ? (
                           <span className="badge-mismatch" title={formatMismatchDescription(mismatch)}>

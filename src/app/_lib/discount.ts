@@ -1,11 +1,11 @@
 /**
- * 목록 화면의 저감률(최저매각가격 ÷ 감정가) 계산·표시·단계 구분.
+ * 목록 화면의 최저가율(최저매각가격 ÷ 감정가) 계산·표시·단계 구분. 필터의 "저감률"(=100−최저가율)과 방향이 반대이므로 섞어 쓰지 말 것.
  *
  * `computePricePerArea`(`src/lib/domain/price.ts`)의 가드 스타일을 그대로 따른다: 계산이
  * 실패하는 모든 경우(감정가 없음·0·음수, 최저가 없음, 부동소수 오차로 인한 비유한값)를
  * 여기서 전부 끝내서 `NaN`/`Infinity`가 호출자(JSX)로 새 나가지 않게 한다(tasks.md 1.1).
  *
- * 저감률 자체는 이 화면(목록)에만 필요한 표시 계산이라 `computePricePerArea`처럼
+ * 최저가율 자체는 이 화면(목록)에만 필요한 표시 계산이라 `computePricePerArea`처럼
  * `src/lib/domain`으로 옮길 이유가 없다 — 분석 워커는 이 비율을 쓰지 않는다
  * (`workers/lib/derived.ts`의 파생 지표는 면적당 가격·차수별 추이뿐이다).
  */
@@ -13,7 +13,7 @@ import type { AuctionItem } from "@/lib/domain";
 
 import { EMPTY } from "./format";
 
-/** `AuctionItem`에서 저감률 계산에 쓰는 부분집합. */
+/** `AuctionItem`에서 최저가율 계산에 쓰는 부분집합. */
 export type DiscountRatioFields = Pick<AuctionItem, "appraisalPrice" | "minBidPrice">;
 
 /**
@@ -39,17 +39,17 @@ export function computeDiscountRatio({
   return Number.isFinite(ratio) ? ratio : null;
 }
 
-/** 저감률을 `"80.0%"` 형태로 표시한다. 소수 첫째 자리까지. */
+/** 최저가율을 `"80.0%"` 형태로 표시한다. 소수 첫째 자리까지. */
 export function formatDiscountRatio(ratio: number | null): string {
   if (ratio === null) return EMPTY;
   return `${(ratio * 100).toFixed(1)}%`;
 }
 
 /**
- * 저감률 단계 (design.md D1, ux-overhaul-phase1 task 6.1로 재조정).
+ * 최저가율 단계 (design.md D1, ux-overhaul-phase1 task 6.1로 재조정).
  *
  * 국내 법원경매는 통상 유찰 1회당 감정가의 80%로 재산정한다(20% 저감) — 실데이터
- * 389건의 저감률(소수 2자리 반올림) 분포가 정확히 이것을 뒷받침한다:
+ * 389건의 최저가율(소수 2자리 반올림) 분포가 정확히 이것을 뒷받침한다:
  * 1.0=164건, 0.8=102건, 0.64=66건, 0.51(0.8³=0.512)=20건, 0.41(0.8⁴=0.4096)=20건,
  * 그 아래(0.8⁵ 이하, 유찰 5회 이상 추정)가 나머지 17건. 이전 버전은 4단계뿐이라
  * 0.03~0.63의 57건(0.51대+0.41대+나머지)이 "64% 미만" 한 칸에 뭉쳐 있었다 — 이번에
@@ -83,7 +83,7 @@ export const DISCOUNT_STAGE_LABELS: Record<DiscountStage, string> = {
 
 /**
  * 이론 경계값(0.8ⁿ)에서 뺄 허용 오차(task 6.3, 경계 테스트로 고정). 실측 389건을
- * 직접 대조한 결과, 저감률이 이론값(0.8ⁿ)보다 최대 약 6×10⁻⁶ 낮게 관측되는 사례가
+ * 직접 대조한 결과, 최저가율이 이론값(0.8ⁿ)보다 최대 약 6×10⁻⁶ 낮게 관측되는 사례가
  * 있다 — 원 단위로 반올림된 실제 낙찰 최저가를 감정가로 나누는 과정에서 생기는
  * 뜻대로 되지 않는 소수 오차다(예: 실측 id 3의 0.639999531426452, id 5의
  * 0.7999997995643531 — 둘 다 이론값보다 아주 조금 낮다). 이론값을 경계로 그대로 쓰면

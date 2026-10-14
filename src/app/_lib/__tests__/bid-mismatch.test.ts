@@ -19,7 +19,7 @@ describe("detectFailedBidRateMismatch", () => {
     expect(result?.diffPercentPoints).toBeGreaterThan(RATE_MISMATCH_THRESHOLD_PP);
   });
 
-  // 실측 사례 — 유찰 16회, 저감률 3% → 0.8^16 ≈ 2.81%로 정합.
+  // 실측 사례 — 유찰 16회, 최저가율 3% → 0.8^16 ≈ 2.81%로 정합.
   it("failed=16, rate=3 → 정합 (실측 사례)", () => {
     const result = detectFailedBidRateMismatch({
       failedBidCount: 16,
@@ -95,5 +95,12 @@ describe("formatMismatchDescription", () => {
     expect(text).toContain("8회");
     expect(text).toContain("80.0%");
     expect(text).not.toMatch(/NaN|Infinity|undefined/);
+    // 용어 회귀: 표시값은 최저가율(최저가÷감정가)이며 필터의 "저감률"과 방향이 반대다.
+    expect(text).toContain("최저가율");
+    expect(text).not.toContain("저감률");
+    // 출처 표기: 소스가 표기한 값(80.0%)과 유찰 기반 예상값(약 16.8%)을 구분해 부른다.
+    expect(text).toContain("소스가 표기한 1차 최저가율은 80.0%");
+    expect(text).toContain("최저가율이 약 16.8%일 것으로 예상");
+    expect(text).not.toContain("실제 최저가율");
   });
 });

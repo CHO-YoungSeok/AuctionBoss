@@ -189,4 +189,17 @@ describe("물건 상세 페이지 — 사진 표시 상태 (fix-photo-worker-and
     expect(html).not.toContain("<img");
     expect(backend.requests.map((r) => `${r.method} ${r.path}`)).not.toContain("GET /api/items/{id}/photos");
   });
+
+  it("가격 카드와 불일치 배지는 '최저가율'을 쓰고 '저감률'은 쓰지 않는다(용어 회귀)", async () => {
+    const item = backend.addItem(
+      makeItem({ appraisalPrice: 100, minBidPrice: 70, failedBidCount: 8, minBidPriceRateRound1: 80 }),
+    );
+    const html = await renderItemPage(String(item.id));
+    expect(html).toContain("최저가율(감정가 대비 최저가)");
+    expect(html).toContain("70.0%");
+    expect(html).toContain("유찰-최저가율 불일치");
+    expect(html).toContain("소스가 표기한 1차 최저가율은 80.0%");
+    expect(html).not.toContain("실제 최저가율");
+    expect(html).not.toContain("저감률");
+  });
 });

@@ -141,12 +141,12 @@ export default async function ItemDetailPage({
   const usageCodesText = formatUsageCodes(item);
   const structuredAddressText = formatStructuredAddress(item);
 
-  // 저감률(design.md D1, tasks.md 1.1) — 계산 불가(감정가 없음·0 등)면 discountStage도
+  // 최저가율(design.md D1, tasks.md 1.1) — 계산 불가(감정가 없음·0 등)면 discountStage도
   // 항상 null이다(classifyDiscountStage 계약).
   const discountRatio = computeDiscountRatio(item);
   const discountStage = classifyDiscountStage(discountRatio);
 
-  // 유찰-저감률 불일치(ux-overhaul-phase1 design.md D3, tasks.md 3.1~3.3) — 어느 쪽이
+  // 유찰-최저가율 불일치(ux-overhaul-phase1 design.md D3, tasks.md 3.1~3.3) — 어느 쪽이
   // 맞는지 판단하지 않고 모순 사실만 알린다.
   const mismatch = detectFailedBidRateMismatch(item);
 
@@ -230,18 +230,18 @@ export default async function ItemDetailPage({
         (비고, 있으면) → 가격 → 물건 개요 → AI 분석 → 변경 이력 → 원본 확인 → 부가 정보.
         재배치 전에 표시되던 27개 필드(물건 정보 12개 + 확장 정보 15개)는 하나도
         지우지 않았다 — 카드 소속만 바뀌었을 뿐이다(tasks.md 5.2 회귀 확인 대상).
-        저감률 1개만 이번에 새로 추가된 필드다(design.md D4의 가격 섹션 구성 그대로).
+        최저가율 1개만 이번에 새로 추가된 필드다(design.md D4의 가격 섹션 구성 그대로).
       */}
       <section className="card">
         <h2>가격</h2>
         <dl className="fields">
           <Field label="감정가" value={formatWon(item.appraisalPrice)} />
           <Field label="최저매각가격" value={formatWon(item.minBidPrice)} />
-          {/* 저감률(design.md D1) — 감정가 0·null이나 최저가 없음이면 discountRatio가
+          {/* 최저가율(design.md D1) — 감정가 0·null이나 최저가 없음이면 discountRatio가
               null이라 EMPTY("-")로 표시된다. 단계 라벨은 색이 아니라 텍스트로 구별된다
               (spec: "색에만 의존해서는 안 된다"). */}
           <Field
-            label="저감률"
+            label="최저가율(감정가 대비 최저가)"
             value={
               discountRatio === null || discountStage === null
                 ? EMPTY
@@ -253,11 +253,11 @@ export default async function ItemDetailPage({
           <Field label="면적당 가격" value={pricePerAreaText} />
           <Field label="차수별 최저가" value={roundPricesText} />
         </dl>
-        {/* 유찰-저감률 불일치(design.md D3, tasks.md 3.3) — 어느 쪽이 맞는지 우리가
+        {/* 유찰-최저가율 불일치(design.md D3, tasks.md 3.3) — 어느 쪽이 맞는지 우리가
             판단해 한쪽을 감추지 않는다. 두 값과 그 차이를 그대로 보여준다. */}
         {mismatch?.mismatched ? (
           <p className="muted">
-            <span className="badge-mismatch">유찰-저감률 불일치</span>{" "}
+            <span className="badge-mismatch">유찰-최저가율 불일치</span>{" "}
             {formatMismatchDescription(mismatch)}
           </p>
         ) : null}

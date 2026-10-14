@@ -64,7 +64,7 @@ describe("물건 목록 페이지 렌더링 (hardening-round1 task 3) [Spring �
       makeItem({
         minArea: 100,
         maxArea: 10, // 역전 — 실데이터에도 존재(open-questions 대상).
-        appraisalPrice: 0, // 저감률 계산이 나눗셈을 만나는 경계.
+        appraisalPrice: 0, // 최저가율 계산이 나눗셈을 만나는 경계.
         minBidPrice: null,
       }),
     );
