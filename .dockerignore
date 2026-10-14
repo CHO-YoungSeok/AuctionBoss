@@ -3,8 +3,19 @@
 node_modules
 data
 *.db*
+**/*.db*
 *.local
 dist
 out
 *.log
 .agents
+.claude
+# 비밀·원본 데이터·비공개 문서는 `COPY . .`로 빌더 레이어·캐시에 들어가면 안 된다.
+**/.env
+**/.env.*
+!**/.env.example
+backups
+docs/untracked
+# 백엔드는 별도 이미지(backend/Dockerfile)로 빌드한다.
+backend
+*.tsbuildinfo

@@ -472,3 +472,66 @@ describe("Next 이미지(Dockerfile)", () => {
     expect(runner).toMatch(/COPY\s+--from=builder\s+\S*tsconfig\.json/);
   });
 });
+
+describe("Docker 빌드 컨텍스트(.dockerignore)", () => {
+  // 회귀 방지: `COPY . .`가 .env(비밀번호)와 backups/*.db(원본 데이터 백업)를 빌더 레이어에 넣었다.
+  const rules = read(".dockerignore")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#"));
+  // 매처가 지원하지 않는 문법(`?`, `[...]`, 끝 `/`, 단독 `**`, 앞 `/`·`./`)은 조용히 틀린 결과를 내므로 실패시킨다.
+  const unsupported = (pat: string) =>
+    /[?[\]]/.test(pat) || /\/$/.test(pat) || /^\.?\//.test(pat) || /\*\*(?!\/)/.test(pat);
+  // Docker 규칙의 부분 구현: 마지막으로 맞는 규칙이 이긴다. `**/`는 0개 이상의 디렉터리, `*`는 `/`를 넘지 않는다.
+  const toRegex = (pat: string) =>
+    new RegExp(
+      "^" +
+        pat
+          .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+          .replace(/\*\*\//g, "\u0001")
+          .replace(/\*/g, "[^/]*")
+          .replace(/\u0001/g, "(?:.*/)?") +
+        "(?:/.*)?$",
+    );
+  const ignored = (path: string) => {
+    let result = false;
+    for (const r of rules) {
+      const neg = r.startsWith("!");
+      if (toRegex(neg ? r.slice(1) : r).test(path)) result = !neg;
+    }
+    return result;
+  };
+
+  it("매처가 지원하지 않는 패턴 문법을 .dockerignore가 쓰지 않는다", () => {
+    for (const r of rules) {
+      const pat = r.startsWith("!") ? r.slice(1) : r;
+      expect(unsupported(pat), `미지원 문법 "${r}": 이 테스트의 toRegex 매처를 확장한 뒤 가드를 갱신하라`).toBe(false);
+    }
+  });
+
+  it("어느 깊이의 .env와 .env.*도 제외하고 .env.example만 남긴다", () => {
+    expect(ignored(".env")).toBe(true);
+    expect(ignored(".env.production")).toBe(true);
+    expect(ignored("deploy/.env")).toBe(true);
+    expect(ignored("some/dir/.env.production")).toBe(true);
+    expect(ignored(".env.example")).toBe(false);
+    expect(ignored("x/.env.example")).toBe(false);
+  });
+
+  it("하위 디렉터리의 DB 백업과 backups 디렉터리를 제외한다", () => {
+    expect(ignored("backups/auctionboss-pre-cutover-20261009.db")).toBe(true);
+    expect(ignored("backups/anything.txt")).toBe(true);
+    expect(ignored("some/dir/data.db")).toBe(true);
+    expect(ignored("some/dir/data.db-wal")).toBe(true);
+  });
+
+  it("비공개 문서·에이전트 설정·백엔드·tsbuildinfo를 제외하고 빌드 입력은 제외하지 않는다", () => {
+    expect(ignored("docs/untracked/reports/x.md")).toBe(true);
+    expect(ignored(".claude/settings.json")).toBe(true);
+    expect(ignored("backend/build.gradle.kts")).toBe(true);
+    expect(ignored("tsconfig.tsbuildinfo")).toBe(true);
+    for (const keep of ["src/app/page.tsx", "workers/analyzer.ts", "config/collector.json", "package.json", "tsconfig.json", "next.config.ts", "public"]) {
+      expect(ignored(keep), keep).toBe(false);
+    }
+  });
+});
