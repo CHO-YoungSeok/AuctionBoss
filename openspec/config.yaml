@@ -30,3 +30,9 @@ schema: spec-driven
 #     archive:
 #       guidance:
 #         - Summarize the archive outcome before finishing
+
+context: |
+  기술 스택: 웹 TypeScript + Next.js(App Router) + zod (npm) / 백엔드 Spring Boot(Java 21) + MySQL (backend/, Gradle)
+  테스트 명령: npm test && (cd backend && ./gradlew check)   # gradlew check는 Docker 필요(Testcontainers)
+  빌드 명령: npx tsc --noEmit && npm run lint && npm run build
+  기본 브랜치: master (origin/HEAD 가 가리키는 브랜치)
