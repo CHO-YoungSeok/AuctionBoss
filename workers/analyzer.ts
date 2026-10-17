@@ -39,6 +39,7 @@ import { DEFAULT_CLAUDE_TIMEOUT_MS, runClaude as defaultRunClaude, type RunClaud
 import { classifyFailure } from "./lib/classify-failure";
 import { FailureCooldown } from "./lib/failure-cooldown";
 import { PROMPT_VERSION, loadPromptTemplate, renderItemPrompt } from "./lib/prompt";
+import { resolveRunner } from "./lib/runner";
 
 export interface Logger {
   info: (message: string) => void;
@@ -352,6 +353,11 @@ export interface AnalyzerSettings {
   intervalMs: number;
   model: string | null;
   timeoutMs: number;
+  /**
+   * `AUCTIONBOSS_ANALYZER_RUNNER`로 정해진 실행기. 생략하면 `runAnalysisOnce`의 기본 실행기
+   * (기존 `runClaude` 규칙)를 쓴다 — 설정을 손으로 만드는 기존 호출자(테스트)를 깨지 않는다.
+   */
+  runner?: RunClaude;
 }
 
 /**
@@ -361,6 +367,8 @@ export interface AnalyzerSettings {
 export function resolveAnalyzerSettings(): AnalyzerSettings {
   const config = loadCollectorConfig();
   return {
+    // 알 수 없는 실행기 값이면 여기서 throw한다 — 첫 회차(분석 요청) 전에 기동이 실패한다.
+    runner: resolveRunner(),
     baseUrl: process.env.AUCTIONBOSS_API_BASE ?? DEFAULT_API_BASE,
     maxItemsPerRun: readPositiveIntEnv("AUCTIONBOSS_ANALYZE_MAX") ?? config.analysis.maxItemsPerRun,
     maxReanalysisPerRun:
@@ -401,7 +409,7 @@ export function startAnalyzer(
         maxReanalysisPerRun: settings.maxReanalysisPerRun,
         model: settings.model,
         timeoutMs: settings.timeoutMs,
-        runClaude: deps?.runClaude,
+        runClaude: deps?.runClaude ?? settings.runner,
         fetchFn: deps?.fetchFn,
         logger,
         cooldown,
@@ -446,6 +454,7 @@ async function main(): Promise<void> {
       maxReanalysisPerRun: settings.maxReanalysisPerRun,
       model: settings.model,
       timeoutMs: settings.timeoutMs,
+      runClaude: settings.runner,
     });
     // 실패가 있으면 종료 코드로 알린다(성공처럼 보이지 않게).
     process.exitCode = summary.failed > 0 ? 1 : 0;

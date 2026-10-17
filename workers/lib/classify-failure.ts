@@ -31,9 +31,12 @@ function classifyStatus(status: number | undefined): FailureKind {
  * CLI가 낸 진단 문구(stderr, is_error 봉투의 result)와 Anthropic API 오류 message 중
  * 환경 문제를 가리키는 것. 숫자 상태는 "status 401"/"API Error: 529"처럼 문맥이 있을 때만
  * 본다("401호", "500만원" 같은 물건 내용 오인 방지). 모델 출력 텍스트에는 적용하지 않는다.
+ * `agy`의 로그인·할당량·모델 선택 오류도 여기서 잡는다(`invalid model selection`은 실측 문구,
+ * 나머지는 Google API 표준 오류 코드 이름). 거부된 도구 요청 진단("tool request denied")은
+ * 일부러 `permission denied`와 겹치지 않게 써서 물건 단위(item)로 남긴다.
  */
 const SYSTEMIC_DIAGNOSTIC =
-  /invalid api key|authentication_error|permission_error|rate_limit_error|overloaded_error|api_error|unauthorized|permission denied|credit balance|rate.?limit|overloaded|quota|usage limit|hit your limit|limit reached|not logged in|please run \/login|\b(?:status|http|code|api error)[:=\s]*(?:401|403|429|5\d\d)\b/i;
+  /invalid api key|authentication_error|permission_error|rate_limit_error|overloaded_error|api_error|unauthorized|permission denied|credit balance|rate.?limit|overloaded|quota|usage limit|hit your limit|limit reached|not logged in|please run \/login|invalid model selection|not recognized as a known model|unauthenticated|resource_exhausted|permission_denied|please (?:re-?)?login|sign in|oauth token|\b(?:status|http|code|api error)[:=\s]*(?:401|403|429|5\d\d)\b/i;
 
 /** 400으로 오는 결제·크레딧 소진 문구. */
 const BILLING_MESSAGE = /credit balance|billing|purchase credits|plans\s*&\s*billing/i;
