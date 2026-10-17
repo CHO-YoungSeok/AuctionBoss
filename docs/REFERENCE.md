@@ -79,11 +79,13 @@ AuctionBoss의 실행 구성, 설정, API, 데이터 모델, 운영 절차를 �
 | --- | --- | --- |
 | `AUCTIONBOSS_API_BASE` | `http://localhost:3000` | 서버 주소. 이제 데이터 API는 백엔드에 있으므로 백엔드 주소(compose는 `http://backend:8080`)로 지정해야 합니다 |
 | `AUCTIONBOSS_CONFIG` | `config/collector.json` | 설정 파일 경로 |
-| `ANTHROPIC_API_KEY` | 없음 | 있으면 Claude Messages API를 호출하고, 없으면 Claude Code CLI를 실행합니다 |
-| `AUCTIONBOSS_ANALYZE_MODEL` | 없음 | 사용할 모델. 없으면 기본 모델을 씁니다 |
+| `AUCTIONBOSS_ANALYZER_RUNNER` | 없음 | 분석 실행기. `agy`면 Antigravity CLI(`ANTHROPIC_API_KEY` 유무와 무관), 없거나 `claude`면 아래 `ANTHROPIC_API_KEY` 규칙입니다. 그 밖의 값이면 워커가 기동 시 바로 실패합니다 |
+| `ANTHROPIC_API_KEY` | 없음 | 있으면 Claude Messages API를 호출하고, 없으면 Claude Code CLI를 실행합니다(`AUCTIONBOSS_ANALYZER_RUNNER=agy`이면 무시) |
+| `AUCTIONBOSS_ANALYZE_MODEL` | 없음 | 사용할 모델. 없으면 실행기의 기본 모델을 씁니다(`agy`는 `gemini-3.8-flash-medium`) |
 | `AUCTIONBOSS_ANALYZE_TIMEOUT_MS` | 120000 | 물건 1건 분석 제한 시간 |
 | `AUCTIONBOSS_ANALYZE_PROMPT` | `workers/prompts/analyze-item.md` | 프롬프트 파일 경로 |
 | `AUCTIONBOSS_CLAUDE_BIN` | `claude` | CLI 모드에서 실행할 파일 |
+| `AUCTIONBOSS_AGY_BIN` | `agy` | `agy` 실행기에서 실행할 파일 |
 
 **백엔드와 MySQL (compose가 `.env`에서 주입, 값은 `.env.example` 참고)**
 
@@ -209,6 +211,16 @@ MySQL 테이블 8개로 구성됩니다. 스키마는 Flyway 마이그레이션(
 - API 모드 기본 모델은 `claude-opus-5-5`입니다. 비용을 낮추려면 `AUCTIONBOSS_ANALYZE_MODEL=claude-sonnet-5-5`로 바꿉니다(단가 절반).
 - 컨테이너로 띄우는 analyzer에는 Claude Code CLI가 없으므로 `ANTHROPIC_API_KEY`가 반드시 필요합니다.
 - API 모드는 서버 측 대체가 켜져 있어, 안전 분류기가 거절하면 같은 호출 안에서 다른 모델이 이어받습니다. 실제로 답한 모델이 `analyses.model`에 저장됩니다. 출력이 잘렸거나 끝내 거절되면 분석을 저장하지 않고 실패로 기록합니다.
+
+**Antigravity CLI(`agy`) 실행기**
+
+- `AUCTIONBOSS_ANALYZER_RUNNER=agy`로 켭니다. 기본 모델은 `gemini-3.8-flash-medium`이고 `AUCTIONBOSS_ANALYZE_MODEL`로 바꿉니다. 저장되는 분석의 `model`은 `agy:<모델 id>`(예: `agy:gemini-3.8-flash-medium`)입니다.
+- `agy -p=<프롬프트> --output-format json --model <id> --sandbox`를 빈 임시 디렉터리에서 실행하고 끝나면 지웁니다. 권한 자동 승인(`--dangerously-skip-permissions`)은 쓰지 않습니다. 응답 상태가 `SUCCESS`가 아니거나, 응답이 비었거나, 거부된 도구 요청(`denied_actions`)이 있으면 그 물건만 실패로 처리합니다.
+- 프롬프트는 명령줄 인자로 넘어가므로 100 KiB를 넘으면 실행하지 않고 그 물건만 실패시킵니다. 같은 장비의 다른 사용자가 `ps`로 볼 수 있지만, 물건 데이터는 공개된 경매 정보입니다.
+- 제한 시간은 워커가 프로세스를 종료해 지킵니다(`AUCTIONBOSS_ANALYZE_TIMEOUT_MS`). `agy --print-timeout`은 초과해도 성공+빈 응답을 돌려주므로 쓰지 않습니다.
+- 로그인 만료·할당량 초과·잘못된 모델 선택은 장애성 오류로 보고 그 회차를 중단합니다(쿨다운 없음).
+- `agy`는 대화 기록을 `~/.gemini/antigravity-cli/conversations`에 남기고 끌 수 없습니다. 그리고 `~/.gemini`의 설정(MCP 서버 등)을 물려받으므로, 분석 전용 장비 계정의 설정은 비워 두세요.
+- 컨테이너 이미지에는 `agy`가 없습니다. 호스트에서 systemd로 돌립니다: compose의 analyzer 서비스는 해당 장비에서 끄고(override로 비활성), 호스트 `auctionboss-analyzer.service`에 `Environment=AUCTIONBOSS_ANALYZER_RUNNER=agy`, `AUCTIONBOSS_API_BASE=<백엔드 주소>`, `PATH`에 `agy`가 있는 디렉터리(예: `~/.local/bin`)를 넣고 `npm run analyzer`를 실행하게 합니다. 서비스 계정으로 먼저 `agy`에 로그인해 두어야 합니다.
 
 ## 7. 배포
 

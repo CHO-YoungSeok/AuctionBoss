@@ -7,6 +7,7 @@ import type { AuctionItem } from "@/lib/domain";
 import { runAnalysisOnce, type Logger } from "../analyzer";
 import { AnalyzerApiError, type FetchFn } from "../lib/api";
 import { classifyFailure } from "../lib/classify-failure";
+import { parseAgyEnvelope } from "../lib/agy";
 import { ClaudeInvocationError } from "../lib/claude";
 import { FailureCooldown } from "../lib/failure-cooldown";
 import { ITEM_JSON_TOKEN } from "../lib/prompt";
@@ -16,6 +17,19 @@ const TEMPLATE = `분석하라.\n${ITEM_JSON_TOKEN}\n`;
 
 const apiError = (status: number) => Anthropic.APIError.generate(status, { error: { message: "x" } }, "x", new Headers());
 const wrapped = (cause: unknown) => new ClaudeInvocationError("Anthropic API 오류", { cause });
+
+const AGY_BAD_MODEL_ERROR =
+  'invalid model selection (--model "no-such-model" --effort ""): model no-such-model is not recognized as a known model or custom model in settings\nAvailable models:\n  gemini-3.8-flash-medium';
+
+/** 실제 agy 봉투를 parseAgyEnvelope에 통과시켜 나오는 오류(문자열 하드코딩 대신 진짜 경로). */
+function agyFailure(envelope: Record<string, unknown>): ClaudeInvocationError {
+  try {
+    parseAgyEnvelope(JSON.stringify({ conversation_id: "", duration_seconds: 0, num_turns: 0, ...envelope }), "");
+  } catch (error) {
+    return error as ClaudeInvocationError;
+  }
+  throw new Error("agy 봉투가 실패로 판정되지 않았습니다");
+}
 
 describe("classifyFailure", () => {
   it.each([
@@ -76,6 +90,13 @@ describe("classifyFailure", () => {
     ["M2 일반 400", wrapped(Anthropic.APIError.generate(400, { error: { message: "bad field" } }, "bad field", new Headers())), "item"],
     ["알 수 없는 오류", new Error("boom"), "item"],
     ["Error 아님", "문자열", "item"],
+    // agy 실행기. 봉투는 2026-10-18 실측 출력을 줄여 쓴 것이다.
+    ["agy 잘못된 모델(실측 봉투)", agyFailure({ status: "ERROR", response: "", error: AGY_BAD_MODEL_ERROR }), "systemic"],
+    ["agy RESOURCE_EXHAUSTED", agyFailure({ status: "ERROR", response: "", error: "rpc error: code = RESOURCE_EXHAUSTED desc = out of capacity" }), "systemic"],
+    ["agy UNAUTHENTICATED", agyFailure({ status: "ERROR", response: "", error: "rpc error: code = UNAUTHENTICATED desc = token expired" }), "systemic"],
+    ["agy 도구 요청 거부", agyFailure({ status: "SUCCESS", response: "", denied_actions: [{ action: "command", display_name: "RunCommand" }] }), "item"],
+    ["agy 빈 응답", agyFailure({ status: "SUCCESS", response: "\n" }), "item"],
+    ["agy 오류 상태 + 일반 문구", agyFailure({ status: "ERROR", response: "", error: "response was cut off" }), "item"],
   ] as const)("%s → %s", (_name, error, expected) => {
     expect(classifyFailure(error)).toBe(expected);
   });
