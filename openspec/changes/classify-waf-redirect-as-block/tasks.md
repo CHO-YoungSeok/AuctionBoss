@@ -19,6 +19,6 @@
 
 ## 4. 마무리
 
-- [ ] 4.1 게이트 전부 통과, 테스트 수 증가 확인. `regression-verifier`로 회귀 검증 — 게이트 5종 통과(백엔드 810건, vitest 754건). 회귀 검증(regression-verifier)은 오케스트레이터 몫이라 체크 보류
+- [x] 4.1 게이트 전부 통과, 테스트 수 증가 확인. `regression-verifier`로 회귀 검증 — 게이트 5종 통과(백엔드 810건, vitest 754건). 회귀 검증(regression-verifier)은 오케스트레이터 몫이라 체크 보류
 - [x] 4.2 `docs/REFERENCE.md`의 차단 감지 설명(본문·ipcheck)에 리다이렉트 감지를 한 줄 더한다
 - [ ] 4.3 우분투 장비에 배포(design Migration Plan). 스케줄러 재개는 차단 해제 확인 뒤

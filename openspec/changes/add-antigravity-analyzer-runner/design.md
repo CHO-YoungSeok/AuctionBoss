@@ -27,7 +27,7 @@
 - `execFile`, `timeout: timeoutMs`, `killSignal: SIGKILL`, `maxBuffer: 16 MiB`. 시간 초과는 `ClaudeInvocationError`(status 없음 → 물건 단위 실패, 기존 Claude CLI와 같음).
 - 프롬프트 바이트 길이(UTF-8)가 `MAX_AGY_PROMPT_BYTES = 100 * 1024`를 넘으면 실행 전에 `ClaudeInvocationError`(물건 단위). Linux 단일 인자 상한(128 KiB) 아래로 여유를 둔다.
 - 봉투 zod 스키마(느슨하게, 알 수 없는 필드 허용): `status: string`, `response: string`, `error?: string`, `denied_actions?: array`.
-- 판정 순서: stdout 파싱 실패 → 오류(diagnostic=stderr). `status !== "SUCCESS"` → 오류(diagnostic=`error ?? stderr`). `denied_actions` 길이 > 0 → 오류(diagnostic="tool permission denied: ..."). `response.trim() === ""` → 오류(diagnostic=stderr). 종료 코드 ≠ 0이어도 stdout 봉투가 있으면 봉투로 판정한다.
+- 판정 순서: stdout 파싱 실패 → 오류(diagnostic=stderr). `status !== "SUCCESS"` → 오류(diagnostic=`error ?? stderr`). `denied_actions` 길이 > 0 → 오류(diagnostic="tool request denied by headless mode: ..." — 기존 장애성 패턴 `permission denied`와 겹치지 않게). `response.trim() === ""` → 오류(diagnostic=stderr). 종료 코드 ≠ 0이어도 stdout 봉투가 있으면 봉투로 판정한다.
 - 오류 타입은 기존 `ClaudeInvocationError`를 그대로 쓴다 — 분류기가 이미 인식한다. 메시지 접두어만 `agy CLI ...`로 구별.
 - 반환: `{ text: response, model: "agy:" + model }`.
 

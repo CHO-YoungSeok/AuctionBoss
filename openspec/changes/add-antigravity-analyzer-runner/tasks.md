@@ -21,5 +21,5 @@
 ## 4. 문서·운영 (D5)
 
 - [x] 4.1 `docs/REFERENCE.md` 분석 워커 절에 `AUCTIONBOSS_ANALYZER_RUNNER`, `AUCTIONBOSS_AGY_BIN`, 기본 모델, 호스트 systemd 실행법, 대화 기록이 남는다는 점을 적는다. `.env.example`에 주석으로 변수 추가
-- [ ] 4.2 게이트 전부 통과, 테스트 수 증가 확인. `regression-verifier`로 회귀 검증
+- [x] 4.2 게이트 전부 통과, 테스트 수 증가 확인. `regression-verifier`로 회귀 검증
 - [ ] 4.3 우분투 배포: `git pull`, `npm ci`, 서비스에 `AUCTIONBOSS_ANALYZER_RUNNER=agy` 추가 후 `systemctl enable --now auctionboss-analyzer`. 시드 없는 빈 DB라 수집 재개 후 첫 분석 저장을 확인한다(모델 값 `agy:gemini-3.8-flash-medium`)

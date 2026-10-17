@@ -216,4 +216,22 @@ class CourtAuctionAdapterTest {
 		}
 	}
 
+	@Test
+	void nonWafFailuresOnSearchAndDetailKeepTheirOriginalMessages() throws Exception {
+		Reply other = Reply.redirect(302, "/pgj/index.on", "");
+		Reply serverError = new Reply(500, List.of(), "err", false);
+		for (Reply reply : List.of(other, serverError)) {
+			try (ReplayServer server = new ReplayServer(List.of(session(), reply))) {
+				assertThatThrownBy(() -> adapter(server, new RecordingSleeper(() -> 0)).fetchActiveItems(SCOPE))
+					.isExactlyInstanceOf(SourceRequestException.class)
+					.hasMessage("물건 검색 요청이 실패했습니다 (HTTP " + reply.status() + ")");
+			}
+			try (ReplayServer server = new ReplayServer(List.of(session(), reply))) {
+				assertThatThrownBy(() -> adapter(server, new RecordingSleeper(() -> 0)).fetchItemPhotos(REF))
+					.isExactlyInstanceOf(SourceRequestException.class)
+					.hasMessage("물건 상세 요청이 실패했습니다 (HTTP " + reply.status() + ")");
+			}
+		}
+	}
+
 }
