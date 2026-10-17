@@ -1,0 +1,71 @@
+{
+  "description": "세션 초기화가 302→/error.html이면 WafBlockedError(차단). 리다이렉트는 따라가지 않아 요청은 1건",
+  "now": "2026-10-08T12:00:00.000Z",
+  "options": {},
+  "call": {
+    "kind": "activeItems",
+    "scope": {
+      "courts": [
+        {
+          "name": "서울중앙지방법원",
+          "courtCode": "B000210"
+        }
+      ]
+    }
+  },
+  "repeat": 1,
+  "responses": [
+    {
+      "status": 302,
+      "location": "/error.html",
+      "body": "<html><body>\nThe request / response that are contrary to the Web firewall security policies have been blocked.\n</body></html>"
+    }
+  ],
+  "expected": [
+    {
+      "error": {
+        "kind": "WafBlockedError",
+        "requestsMade": 0,
+        "messageHead": "WAF 차단 페이지로 리다이렉트됐습니다 (세션 초기화 요청이 실패했습니다, HTTP 302, Location: /error.html)"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/pgj/index.on",
+      "headers": [
+        [
+          "host",
+          "{host}"
+        ],
+        [
+          "connection",
+          "keep-alive"
+        ],
+        [
+          "User-Agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ],
+        [
+          "Accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        ],
+        [
+          "accept-language",
+          "*"
+        ],
+        [
+          "sec-fetch-mode",
+          "cors"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate"
+        ]
+      ],
+      "body": ""
+    }
+  ],
+  "sleeps": []
+}

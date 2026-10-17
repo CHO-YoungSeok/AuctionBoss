@@ -21,10 +21,19 @@ import okio.Buffer;
 public final class ReplayServer implements AutoCloseable {
 
 	/** 재생할 응답 하나. */
-	public record Reply(int status, List<String> setCookies, String body, boolean closeSocket) {
+	public record Reply(int status, List<String> setCookies, String body, boolean closeSocket, String location) {
+
+		public Reply(int status, List<String> setCookies, String body, boolean closeSocket) {
+			this(status, setCookies, body, closeSocket, null);
+		}
 
 		public static Reply ok(String body) {
 			return new Reply(200, List.of(), body, false);
+		}
+
+		/** {@code Location} 헤더가 붙은 리다이렉트 응답. {@code location}이 null이면 헤더 없이 상태만 보낸다. */
+		public static Reply redirect(int status, String location, String body) {
+			return new Reply(status, List.of(), body, false, location);
 		}
 
 	}
@@ -68,6 +77,9 @@ public final class ReplayServer implements AutoCloseable {
 						.addHeader("Content-Type", "application/json;charset=UTF-8")
 						.setBody(new Buffer().writeUtf8(reply.body()));
 					reply.setCookies().forEach(c -> response.addHeader("Set-Cookie", c));
+					if (reply.location() != null) {
+						response.addHeader("Location", reply.location());
+					}
 					return response;
 				}
 				finally {

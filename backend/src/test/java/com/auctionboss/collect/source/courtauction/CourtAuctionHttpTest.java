@@ -107,6 +107,22 @@ class CourtAuctionHttpTest {
 	}
 
 	@Test
+	void locationHeaderIsExposedOnRedirectsAndNullOtherwise() throws Exception {
+		try (MockWebServer server = new MockWebServer()) {
+			server.enqueue(new MockResponse().setResponseCode(302).addHeader("Location", "/error.html"));
+			server.enqueue(new MockResponse().setResponseCode(302));
+			server.enqueue(new MockResponse().setBody("ok"));
+			server.start(java.net.InetAddress.getLoopbackAddress(), 0);
+			CourtAuctionHttp http = new CourtAuctionHttp(false);
+			String url = server.url("/x").toString();
+
+			assertThat(http.get(url, Map.of("User-Agent", UA)).location()).isEqualTo("/error.html");
+			assertThat(http.get(url, Map.of("User-Agent", UA)).location()).isNull();
+			assertThat(http.get(url, Map.of("User-Agent", UA)).location()).isNull();
+		}
+	}
+
+	@Test
 	void gzipDeflateAndRawDeflateBodiesAreDecompressedAndTheBomIsDropped() throws Exception {
 		try (MockWebServer server = new MockWebServer()) {
 			server.enqueue(new MockResponse().addHeader("Content-Encoding", "gzip").setBody(new Buffer().write(gzip("{\"가\":1}"))));

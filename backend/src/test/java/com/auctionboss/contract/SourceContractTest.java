@@ -61,7 +61,7 @@ class SourceContractTest {
 	@TestFactory
 	Stream<DynamicTest> 골든과_같은_결과_요청_대기를_낸다() throws IOException {
 		Resource[] files = new PathMatchingResourcePatternResolver().getResources("classpath:contracts/source/*.json");
-		assertThat(files).as("어댑터 골든 사례").hasSize(34);
+		assertThat(files).as("어댑터 골든 사례").hasSize(37);
 		return Arrays.stream(files)
 			.sorted(Comparator.comparing(Resource::getFilename))
 			.map(file -> DynamicTest.dynamicTest(file.getFilename().replace(".json", ""), () -> verify(file)));
@@ -77,7 +77,7 @@ class SourceContractTest {
 			List<String> cookies = new ArrayList<>();
 			r.path("setCookie").forEach(c -> cookies.add(c.asString()));
 			replies.add(new ReplayServer.Reply(r.get("status").asInt(), cookies, r.get("body").asString(),
-					r.path("closeSocket").asBoolean(false)));
+					r.path("closeSocket").asBoolean(false), r.has("location") ? r.get("location").asString() : null));
 		}
 
 		try (ReplayServer server = new ReplayServer(replies)) {

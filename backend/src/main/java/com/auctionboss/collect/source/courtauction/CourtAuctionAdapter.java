@@ -11,6 +11,9 @@ import com.auctionboss.collect.source.SourceException;
 import com.auctionboss.collect.source.SourceItem;
 import com.auctionboss.collect.source.SourcePhoto;
 import com.auctionboss.collect.source.SourceRequestException;
+import com.auctionboss.collect.source.WafBlockedException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -181,6 +184,41 @@ public final class CourtAuctionAdapter implements AuctionSource {
 		return headers;
 	}
 
+	/** WAF 차단 페이지의 경로. 소스 고유 값이라 이 클래스 밖으로 내보내지 않는다. */
+	private static final String WAF_BLOCK_PATH = "/error.html";
+
+	/**
+	 * 2xx면 통과. 3xx이고 {@code Location} 경로가 WAF 차단 페이지면 {@link WafBlockedException}(차단), 그 밖의 비정상 상태는
+	 * {@link SourceRequestException}(일반 실패). 리다이렉트는 따라가지 않는다 — 차단 상태에서 요청을 늘리지 않기 위해서다.
+	 */
+	private static void requireOk(CourtAuctionHttp.Response response, String url, String failureMessage) {
+		if (response.ok()) {
+			return;
+		}
+		if (response.status() >= 300 && response.status() < 400 && isWafBlockLocation(response.location())) {
+			throw new WafBlockedException("WAF 차단 페이지로 리다이렉트됐습니다 (" + failureMessage + ", HTTP "
+					+ response.status() + ", Location: " + response.location() + ")", preview(response.body()));
+		}
+		throw new SourceRequestException(failureMessage + " (HTTP " + response.status() + ")", url, response.status(), null);
+	}
+
+	/** 절대 URL·상대 경로 모두 경로만 비교한다. 쿼리·프래그먼트는 무시하고 대소문자는 구분한다. */
+	private static boolean isWafBlockLocation(String location) {
+		if (location == null) {
+			return false;
+		}
+		try {
+			return WAF_BLOCK_PATH.equals(new URI(location.trim()).getPath());
+		}
+		catch (URISyntaxException e) {
+			return false;
+		}
+	}
+
+	private static String preview(String body) {
+		return body == null || body.length() <= 200 ? body : body.substring(0, 200);
+	}
+
 	/** {@code GET /pgj/index.on}로 세션 쿠키를 받는다. 쿠키를 못 받아도(빈 문자열) 경고만 남기고 계속한다. */
 	private String bootstrapSession() {
 		String url = baseUrl + SESSION_BOOTSTRAP_PATH;
@@ -188,10 +226,7 @@ public final class CourtAuctionAdapter implements AuctionSource {
 		headers.put("User-Agent", USER_AGENT);
 		headers.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
 		CourtAuctionHttp.Response response = http.get(url, headers);
-		if (!response.ok()) {
-			throw new SourceRequestException("세션 초기화 요청이 실패했습니다 (HTTP " + response.status() + ")", url,
-					response.status(), null);
-		}
+		requireOk(response, url, "세션 초기화 요청이 실패했습니다");
 		String cookie = CourtAuctionHttp.readCookieHeader(response.setCookies());
 		if (cookie.isEmpty()) {
 			log.warn("[courtauction] 세션 쿠키를 받지 못했습니다 — 쿠키 없이 계속합니다");
@@ -210,10 +245,7 @@ public final class CourtAuctionAdapter implements AuctionSource {
 		body.set("dma_srchGdsDtlSrch", info);
 
 		CourtAuctionHttp.Response response = http.post(url, postHeaders(cookie), body.toString());
-		if (!response.ok()) {
-			throw new SourceRequestException("물건 상세 요청이 실패했습니다 (HTTP " + response.status() + ")", url,
-					response.status(), null);
-		}
+		requireOk(response, url, "물건 상세 요청이 실패했습니다");
 		return response.body();
 	}
 
@@ -221,10 +253,7 @@ public final class CourtAuctionAdapter implements AuctionSource {
 	private SearchPage search(ObjectNode body, String cookie) {
 		String url = baseUrl + SEARCH_PATH;
 		CourtAuctionHttp.Response response = http.post(url, postHeaders(cookie), body.toString());
-		if (!response.ok()) {
-			throw new SourceRequestException("물건 검색 요청이 실패했습니다 (HTTP " + response.status() + ")", url,
-					response.status(), null);
-		}
+		requireOk(response, url, "물건 검색 요청이 실패했습니다");
 		return SearchResponseParser.parse(response.body());
 	}
 

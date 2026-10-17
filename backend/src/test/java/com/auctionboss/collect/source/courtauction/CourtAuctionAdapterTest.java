@@ -10,7 +10,10 @@ import com.auctionboss.collect.source.PhotoLookupRef;
 import com.auctionboss.collect.source.RecordingSleeper;
 import com.auctionboss.collect.source.ReplayServer;
 import com.auctionboss.collect.source.ReplayServer.Reply;
+import com.auctionboss.collect.source.SourceBlockedException;
 import com.auctionboss.collect.source.SourceException;
+import com.auctionboss.collect.source.SourceRequestException;
+import com.auctionboss.collect.source.WafBlockedException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -151,6 +154,66 @@ class CourtAuctionAdapterTest {
 		});
 		assertThatThrownBy(() -> adapter.fetchItemPhotos(REF)).isInstanceOfSatisfying(SourceException.class,
 				e -> assertThat(e.getMessage()).startsWith("외부 요청이 허용되지 않았습니다"));
+	}
+
+	private static Reply wafRedirect() {
+		return Reply.redirect(302, "/error.html", "contrary to the Web firewall security policies have been blocked");
+	}
+
+	@Test
+	void aWafRedirectOnSessionBootstrapIsABlockAndCountsTheRequest() throws Exception {
+		try (ReplayServer server = new ReplayServer(List.of(wafRedirect(), wafRedirect()))) {
+			CourtAuctionAdapter adapter = adapter(server, new RecordingSleeper(() -> 0));
+
+			assertThatThrownBy(() -> adapter.fetchItemPhotos(REF)).isInstanceOfSatisfying(WafBlockedException.class, e -> {
+				assertThat(e.kind()).isEqualTo("WafBlockedError");
+				assertThat(e.requestsMade()).isEqualTo(1);
+				assertThat(e.getMessage()).contains("302", "/error.html");
+				assertThat(e.bodyPreview()).contains("firewall");
+			});
+			assertThatThrownBy(() -> adapter(server, new RecordingSleeper(() -> 0)).fetchActiveItems(SCOPE))
+				.isInstanceOf(SourceBlockedException.class);
+			assertThat(server.requests()).hasSize(2);
+		}
+	}
+
+	@Test
+	void aWafRedirectOnSearchIsABlockAndNoFurtherRequestIsSent() throws Exception {
+		try (ReplayServer server = new ReplayServer(List.of(session(), wafRedirect(), emptySearch()))) {
+			assertThatThrownBy(() -> adapter(server, new RecordingSleeper(() -> 0)).fetchActiveItems(SCOPE))
+				.isInstanceOfSatisfying(WafBlockedException.class, e -> assertThat(e.requestsMade()).isEqualTo(1));
+			assertThat(server.requests()).hasSize(2);
+		}
+	}
+
+	@Test
+	void aWafRedirectOnPhotoDetailIsABlockWithBothRequestsCounted() throws Exception {
+		try (ReplayServer server = new ReplayServer(List.of(session(), wafRedirect()))) {
+			assertThatThrownBy(() -> adapter(server, new RecordingSleeper(() -> 0)).fetchItemPhotos(REF))
+				.isInstanceOfSatisfying(WafBlockedException.class, e -> assertThat(e.requestsMade()).isEqualTo(2));
+		}
+	}
+
+	@Test
+	void anAbsoluteErrorPageLocationWithAQueryIsAlsoABlock() throws Exception {
+		Reply absolute = Reply.redirect(301, "https://www.courtauction.go.kr/error.html?x=1#top", "");
+		try (ReplayServer server = new ReplayServer(List.of(session(), absolute))) {
+			assertThatThrownBy(() -> adapter(server, new RecordingSleeper(() -> 0)).fetchItemPhotos(REF))
+				.isInstanceOf(WafBlockedException.class);
+		}
+	}
+
+	@Test
+	void aRedirectElsewhereOrWithoutLocationOrAServerErrorIsAPlainRequestFailure() throws Exception {
+		for (Reply reply : List.of(Reply.redirect(302, "/pgj/index.on", ""), Reply.redirect(302, null, ""),
+				Reply.redirect(302, "/Error.html", ""), Reply.redirect(302, "/other/error.html", ""),
+				new Reply(500, List.of(), "err", false))) {
+			try (ReplayServer server = new ReplayServer(List.of(reply))) {
+				assertThatThrownBy(() -> adapter(server, new RecordingSleeper(() -> 0)).fetchActiveItems(SCOPE))
+					.isExactlyInstanceOf(SourceRequestException.class)
+					.hasMessageContaining("세션 초기화 요청이 실패했습니다 (HTTP " + reply.status() + ")");
+			}
+		}
 	}
 
 }

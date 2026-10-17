@@ -40,8 +40,11 @@ import java.util.zip.InflaterInputStream;
  */
 final class CourtAuctionHttp {
 
-	/** 응답. {@code setCookies}는 {@code Set-Cookie} 헤더 값 전부(헤더마다 하나). */
-	record Response(int status, String body, List<String> setCookies) {
+	/**
+	 * 응답. {@code setCookies}는 {@code Set-Cookie} 헤더 값 전부(헤더마다 하나). {@code location}은 {@code Location} 헤더의 첫 값,
+	 * 없으면 {@code null}(리다이렉트는 따라가지 않으므로 어댑터가 대상을 판정할 수 있게 노출한다).
+	 */
+	record Response(int status, String body, List<String> setCookies, String location) {
 
 		boolean ok() {
 			return status >= 200 && status < 300;
@@ -120,7 +123,8 @@ final class CourtAuctionHttp {
 				throw cause instanceof IOException io ? io : new IOException(cause);
 			}
 			String text = decode(response.body(), response.headers().firstValue("content-encoding").orElse(""));
-			return new Response(response.statusCode(), text, response.headers().allValues("set-cookie"));
+			return new Response(response.statusCode(), text, response.headers().allValues("set-cookie"),
+					response.headers().firstValue("location").orElse(null));
 		}
 		catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
